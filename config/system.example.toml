@@ -1,0 +1,52 @@
+[paths]
+output_root = "/mnt/hd"
+cache_root = "/mnt/hd/vstim_cache"
+asset_root = "/home/pi/stimulus_assets"
+reward_state_root = "/mnt/hd/vstim_reward_assignments"
+
+[display]
+backend = "kms"
+connector = "HDMI-A-1"
+width_px = 1280
+height_px = 720
+refresh_hz = 60.0
+pixel_format = "RGB565"
+calibration_id = ""
+physical_width_cm = 15.50
+physical_height_cm = 8.72
+eye_distance_cm = 16.0
+
+[photodiode]
+enabled = true
+corner = "bottom_right"
+size_px = 50
+on_value = 255
+off_value = 0
+
+[gpio]
+backend = "lgpio"
+chip = 0
+reward_pin_bcm = 19
+suction_pin_bcm = 25
+lick_pin_bcm = 26
+
+[camera]
+enabled_by_default = false
+host = ""
+user = "pi"
+remote_root = ""
+
+[telemetry]
+enabled = false
+required = false
+host = ""
+port = 5055
+
+[session]
+require_interactive_gate = true
+experimental = false
+simulation = true
+
+[protocol]
+name = "natural-images"
+version = "placeholder"

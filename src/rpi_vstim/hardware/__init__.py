@@ -1,0 +1,2 @@
+"""Import-safe hardware boundaries."""
+

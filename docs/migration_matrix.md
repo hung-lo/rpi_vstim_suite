@@ -1,0 +1,27 @@
+# Migration matrix
+
+Phase 00 assigns ownership without copying protocol implementations.
+
+| source_repo | source_path | source_commit | destination_path | action | behavior_to_preserve | tests_required | status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/config.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/core/config.py` | refactor | config loading and safety validation | config unit tests | skeleton |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/session.py`, `session_outputs.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/core/session.py` | refactor | session identity and established output roots | session/output tests | skeleton |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/timestamps.py`, `duration.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/core/timestamps.py`, `duration.py` | port | monotonic timing and frame conversion | timing tests | skeleton |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/event_logging.py`, `metadata.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/core/event_log.py`, `manifests.py` | refactor | event/provenance output fields | output contract tests | skeleton |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/camera.py`, `remote_camera_control.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/core/camera.py` | refactor | conservative camera cleanup and archival | camera contract tests | placeholder |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/rpg_display.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/display/kms.py`, `rpg_legacy.py` | replace_pi5_backend | physical display ground truth and legacy rollback | display hardware tests | placeholder |
+| rpi_visual_stimuli | `rpi_visual_stimuli/core/gpio.py` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/hardware/` | replace_pi5_backend | safe outputs, lick, TTL boundaries | GPIO safety tests | placeholder |
+| rpi_visual_stimuli | `protocols/drifting_gratings/*` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/protocols/drifting_gratings/` | port | sequence, geometry, cache, events | golden plan tests | placeholder |
+| rpi_visual_stimuli | `protocols/retinotopy/*` | `6e1b2776e59c89127f9a6b56854096eb726990da` | `src/rpi_vstim/protocols/retinotopy/` | port | sweeps, geometry, cache, events | golden plan tests | placeholder |
+| vstim_natural | `run_stringer_vstim.py` | `8a5f368c20344e25500cdfa6b272eccb673cad4a` | `src/rpi_vstim/protocols/natural_images/` | refactor | image selection, timing, gray periods | natural-image golden tests | placeholder |
+| vstim_natural | `run_stringer_vstim_cam.py` | `8a5f368c20344e25500cdfa6b272eccb673cad4a` | `run_stringer_vstim_cam.py` | compatibility_wrapper | camera profile and final transition behavior | wrapper/plan tests | stub |
+| vstim_natural | `convert_stringer_mat_to_png.py`, `convert_crop_middle_stringer_mat_to_png.py` | `8a5f368c20344e25500cdfa6b272eccb673cad4a` | `src/rpi_vstim/tools/convert_stringer.py` | refactor | conversion and crop modes | asset tests | placeholder |
+| vstim_natural | `remote_camera_control.py` | `8a5f368c20344e25500cdfa6b272eccb673cad4a` | `src/rpi_vstim/core/camera.py` | refactor | SSH camera lifecycle and verification | camera contract tests | placeholder |
+| vstim_natural_img_reward | `reward_conditioning_protocol.py` | `f64b56d0562b5c35aa64ffba34c29b1d7416bec1` | `src/rpi_vstim/protocols/reward_conditioning/` | refactor | assignments, phases, block ratios, outputs | reward golden tests | placeholder |
+| vstim_natural_img_reward | `reward_conditioning_gpio.py` | `f64b56d0562b5c35aa64ffba34c29b1d7416bec1` | `src/rpi_vstim/hardware/` | replace_pi5_backend | reward, suction, lick safety | GPIO/water tests | placeholder |
+| vstim_natural_img_reward | `run_spout_training.py` | `f64b56d0562b5c35aa64ffba34c29b1d7416bec1` | `src/rpi_vstim/protocols/spout_training/` | refactor | open-loop training, criterion, water cap | training tests | placeholder |
+| vstim_natural_img_reward | `rig_telemetry.py` | `f64b56d0562b5c35aa64ffba34c29b1d7416bec1` | `src/rpi_vstim/telemetry/` | refactor | nonblocking outer packet compatibility | telemetry contract tests | placeholder |
+| vstim_natural_img_reward | `reward_conditioning_config.example.json`, `spout_training_config.example.json` | `f64b56d0562b5c35aa64ffba34c29b1d7416bec1` | `config/protocols/`, `src/rpi_vstim/tools/migrate_config.py` | refactor | legacy config values and read-only import | migration tests | placeholder |
+| rpi_rig_monitor | `monitor/receiver.py`, `state.py`, `web.py` | `70b80f25c12ac64d087ebeb78a22a091a0d03511` | separate repository | reference_only | UDP schema consumer and read-only dashboard | monitor contract tests | unchanged |
+| rpi_rig_monitor | `requirements.txt`, `run_monitor.py` | `70b80f25c12ac64d087ebeb78a22a091a0d03511` | separate repository | reference_only | separate deployment and ports | monitor Python 3.13 tests | unchanged |
+
