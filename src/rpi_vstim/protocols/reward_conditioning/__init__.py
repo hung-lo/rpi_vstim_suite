@@ -86,16 +86,23 @@ class AssignmentStore:
         path = self.path_for(mouse_id)
         if not path.is_file():
             return None
-        return MouseAssignment.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        assignment = MouseAssignment.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        if assignment.mouse_id != mouse_id:
+            raise ValueError("stored assignment mouse_id does not match requested mouse_id")
+        return assignment
 
     def save(self, assignment: MouseAssignment) -> None:
         atomic_write_json(self.path_for(assignment.mouse_id), assignment.as_dict())
 
     def load_or_create(self, mouse_id: str, image_pool: Iterable[str], *, seed: int) -> MouseAssignment:
+        available_images = tuple(image_pool)
         existing = self.load(mouse_id)
         if existing is not None:
+            missing = set(existing.all_images) - set(available_images)
+            if missing:
+                raise ValueError("stored assignment references images missing from current image pool")
             return existing
-        assignment = MouseAssignment.create(mouse_id, image_pool, seed=seed)
+        assignment = MouseAssignment.create(mouse_id, available_images, seed=seed)
         self.save(assignment)
         return assignment
 
@@ -121,7 +128,10 @@ class PhaseStateStore:
         value = json.loads(path.read_text(encoding="utf-8"))
         if value.get("schema_version") != 1 or value.get("protocol_version") != PROTOCOL_VERSION:
             raise ValueError("unsupported reward phase state")
-        return PhaseState.from_dict(value)
+        state = PhaseState.from_dict(value)
+        if state.mouse_id != mouse_id:
+            raise ValueError("stored phase state mouse_id does not match requested mouse_id")
+        return state
 
     def save(self, state: "PhaseState") -> None:
         atomic_write_json(self.path_for(state.mouse_id), state.as_dict())

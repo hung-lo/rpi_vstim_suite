@@ -63,6 +63,50 @@ def test_telemetry_matches_monitor_outer_envelope():
     assert TelemetryMessage.from_json(message.to_json()) == message
 
 
+def test_lifecycle_telemetry_round_trips_as_state_without_changing_internal_semantics():
+    message = TelemetryMessage("lifecycle", "session-1", "natural-images", "PRE")
+    payload = json.loads(message.to_json())
+    restored = TelemetryMessage.from_json(message.to_json())
+    assert payload["type"] == "state"
+    assert restored.message_type == "lifecycle"
+    assert restored == message
+
+
+def test_telemetry_counters_cannot_overwrite_envelope():
+    message = TelemetryMessage(
+        "trial", "session-1", "natural-images", "TASK", counters={"schema_version": 99}
+    )
+    with pytest.raises(ValueError, match="reserved field"):
+        message.as_dict()
+
+
+def test_dual_camera_legacy_summary_is_conservative():
+    healthy = TelemetryMessage(
+        "lifecycle", "session-1", "natural-images", "TASK",
+        cameras=[
+            {"camera_id": "face", "state": "RECORDING", "required": True},
+            {"camera_id": "behavior", "state": "RECORDING", "required": False},
+        ],
+    )
+    degraded = TelemetryMessage(
+        "lifecycle", "session-1", "natural-images", "TASK",
+        cameras=[
+            {"camera_id": "face", "state": "RECORDING", "required": True},
+            {"camera_id": "behavior", "state": "DEGRADED", "required": False},
+        ],
+    )
+    failed = TelemetryMessage(
+        "lifecycle", "session-1", "natural-images", "TASK",
+        cameras=[
+            {"camera_id": "face", "state": "FAILED", "required": True},
+            {"camera_id": "behavior", "state": "RECORDING", "required": False},
+        ],
+    )
+    assert json.loads(healthy.to_json())["camera_state"] == "RECORDING"
+    assert json.loads(degraded.to_json())["camera_state"] == "DEGRADED"
+    assert json.loads(failed.to_json())["camera_state"] == "FAILED"
+
+
 def test_event_telemetry_failure_is_degraded_or_required(tmp_path):
     optional = config_from_mapping({"paths": {"output_root": tmp_path}})
     required = config_from_mapping({

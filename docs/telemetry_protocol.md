@@ -9,6 +9,12 @@ uses `type = state` for lifecycle packets and `type = trial_complete` for
 trial packets; the payload also retains compatibility aliases such as `image`,
 `trial`, and `camera_states`.
 
+`camera_states` and the full `cameras` list are authoritative. The legacy
+singular `camera_state` is an aggregate: any required `FAILED` camera yields
+`FAILED`; optional `FAILED` or any `DEGRADED` camera yields `DEGRADED`; two
+healthy `RECORDING` cameras yield `RECORDING`. It is never selected from a
+fixed camera index.
+
 Phase 00 and overnight simulation use null or bounded in-memory publishers:
 they open no socket and send no packets. Monitor loss remains non-fatal unless
 configuration explicitly marks telemetry as required.

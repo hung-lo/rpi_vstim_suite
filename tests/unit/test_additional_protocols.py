@@ -60,6 +60,16 @@ def test_natural_counts_profiles_and_golden_schedule():
         build_natural_plan(NaturalImageSettings(images=("a",), image_count=2))
 
 
+def test_golden_fixture_provenance_is_explicit():
+    for fixture in GOLDEN.values():
+        provenance = fixture["provenance"]
+        assert provenance["reference_repo"]
+        assert len(provenance["frozen_commit"]) == 40
+        assert provenance["source_file"]
+        assert provenance["source_function"]
+        assert provenance["derivation"] in {"legacy execution", "direct source derivation", "new-suite regression"}
+
+
 def test_gratings_are_seeded_frame_plans_with_photodiode_intent():
     settings = DriftingGratingSettings(
         trials_per_orientation=2,

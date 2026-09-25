@@ -266,7 +266,7 @@ def run_simulated_session(
             )
             sequence_number += 1
             publish(TelemetryMessage(
-                message_type="trial" if event.trial_id else "state",
+                message_type="trial" if event.trial_id else "lifecycle",
                 session_id=session.context.session_id,
                 protocol=session.context.protocol_name,
                 lifecycle=target_lifecycle.value,
@@ -333,5 +333,21 @@ def run_simulated_session(
                 )
             except Exception:
                 pass
-        session.close()
+        try:
+            session.close()
+        except Exception as close_error:
+            cleanup_errors.append(f"session.close: {close_error}")
+            lifecycle.state = LifecycleState.CLEANUP_FAILED
+            if error is None:
+                error = "cleanup failed"
+            try:
+                session.update_status(
+                    lifecycle.state.value,
+                    lifecycle=lifecycle.state.value,
+                    error=error,
+                    degraded=degraded,
+                    cleanup_errors=cleanup_errors,
+                )
+            except Exception:
+                pass
     return SimulationResult(session, services, lifecycle.state, degraded, error)

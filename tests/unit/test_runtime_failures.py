@@ -96,3 +96,17 @@ def test_manifest_failure_becomes_terminal_without_orphan_created(tmp_path, monk
     manifest = json.loads((tmp_path / "manifest" / "session_manifest.json").read_text())
     assert result.final_state == LifecycleState.FAILED
     assert manifest["status"] == "FAILED"
+
+
+def test_session_close_failure_is_recorded_without_erasing_primary_error(tmp_path, monkeypatch):
+    def fail_close(self):
+        raise OSError("event log close failed")
+
+    monkeypatch.setattr(SessionOutput, "close", fail_close)
+    result = run_simulated_session(
+        make_config(tmp_path), plan=small_plan(), session_id="close", protocol_failure=True
+    )
+    manifest = json.loads((tmp_path / "close" / "session_manifest.json").read_text())
+    assert result.final_state == LifecycleState.CLEANUP_FAILED
+    assert result.error == "simulated protocol failure"
+    assert "session.close: event log close failed" in manifest["cleanup_errors"]

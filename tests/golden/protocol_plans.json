@@ -1,5 +1,12 @@
 {
   "natural_images": {
+    "provenance": {
+      "reference_repo": "vstim_natural",
+      "frozen_commit": "8a5f368c20344e25500cdfa6b272eccb673cad4a",
+      "source_file": "run_stringer_vstim.py",
+      "source_function": "make_trial_sequence",
+      "derivation": "new-suite regression"
+    },
     "seed": 7,
     "selected_images": ["c", "b", "d", "b", "c", "d"],
     "event_kinds": [
@@ -9,17 +16,38 @@
     "frame_counts": [1, 1, 2, 1, 4, 1, 4, 1, 2, 1, 2, 1, 2, 1]
   },
   "drifting_gratings": {
+    "provenance": {
+      "reference_repo": "rpi_visual_stimuli",
+      "frozen_commit": "6e1b2776e59c89127f9a6b56854096eb726990da",
+      "source_file": "rpi_visual_stimuli/protocols/drifting_gratings/sequence.py",
+      "source_function": "build_trial_sequence",
+      "derivation": "new-suite regression"
+    },
     "seed": 7,
     "trial_count": 16,
     "first_orientation_ids": [2, 8, 4, 5, 7, 6, 3, 3]
   },
   "retinotopy": {
+    "provenance": {
+      "reference_repo": "rpi_visual_stimuli",
+      "frozen_commit": "6e1b2776e59c89127f9a6b56854096eb726990da",
+      "source_file": "rpi_visual_stimuli/protocols/retinotopy/sequence.py",
+      "source_function": "build_trial_sequence",
+      "derivation": "new-suite regression"
+    },
     "seed": 7,
     "sweep_directions": [
       "left_to_right", "top_to_bottom", "top_to_bottom", "left_to_right"
     ]
   },
   "reward_conditioning": {
+    "provenance": {
+      "reference_repo": "vstim_natural_img_reward",
+      "frozen_commit": "f64b56d0562b5c35aa64ffba34c29b1d7416bec1",
+      "source_file": "reward_conditioning_protocol.py",
+      "source_function": "make_trial_plan",
+      "derivation": "new-suite regression"
+    },
     "blocks": 10,
     "event_count": 500,
     "eligible_count": 220,

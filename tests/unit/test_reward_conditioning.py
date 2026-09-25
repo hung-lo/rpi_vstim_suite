@@ -6,6 +6,7 @@ from rpi_vstim.protocols.reward_conditioning import (
     AssignmentStore,
     MouseAssignment,
     PhaseState,
+    PhaseStateStore,
     RewardConditioningSettings,
     RewardPhase,
     WaterBudget,
@@ -26,6 +27,29 @@ def test_assignment_is_permanent_and_uses_temporary_state(tmp_path):
 
     assert first == second
     assert json.loads(store.path_for("mouse-1").read_text())["mouse_id"] == "mouse-1"
+
+
+def test_persistent_assignment_and_phase_state_reject_mismatched_identity(tmp_path):
+    assignment_store = AssignmentStore(tmp_path)
+    payload = MouseAssignment.create("mouse-1", image_pool(), seed=4).as_dict()
+    payload["mouse_id"] = "mouse-2"
+    assignment_store.path_for("mouse-1").parent.mkdir(parents=True, exist_ok=True)
+    assignment_store.path_for("mouse-1").write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="assignment mouse_id"):
+        assignment_store.load("mouse-1")
+
+    phase_store = PhaseStateStore(tmp_path)
+    state_payload = PhaseState(mouse_id="mouse-2").as_dict()
+    phase_store.path_for("mouse-1").write_text(json.dumps(state_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="phase state mouse_id"):
+        phase_store.load("mouse-1")
+
+
+def test_existing_assignment_rejects_missing_current_image(tmp_path):
+    store = AssignmentStore(tmp_path)
+    store.load_or_create("mouse-1", image_pool(), seed=4)
+    with pytest.raises(ValueError, match="missing from current image pool"):
+        store.load_or_create("mouse-1", image_pool()[:-1], seed=99)
 
 
 def test_exposure_block_has_exact_8_3_1_counts():
