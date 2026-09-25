@@ -92,8 +92,16 @@ storage remain later acceptance work.
 - [x] Add configurable photodiode patch geometry/value plumbing and tests.
 - [x] Validate native read-only connector/CRTC/primary-plane discovery on both
   real Pi HDMI outputs.
+- [x] Characterize the live LightDM/labwc DRM-master topology and verify the
+  Wayland DRM-lease global plus both HDMI connector offers without requesting a
+  lease.
+- [x] Separate native access/resource compatibility diagnostics from
+  modesetting ownership and page-flip status; add compositor-ownership error
+  classification and synthetic dropped-frame statistics.
 - [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
   restoration; blocked by the active `labwc` DRM owner.
+- [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
+  HDMI-A-2 preview continuity, revocation, and recovery.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
 Provisional user-authorized mapping: `HDMI-A-1` is the stimulus display and
@@ -103,14 +111,18 @@ presented as physically re-verified.
 The native probe compiled on the Pi with Debian Trixie `libdrm-dev`. Its
 read-only mode returned HDMI-A-1/CRTC 92/primary plane 81 and
 HDMI-A-2/CRTC 104/primary plane 93; both primary planes advertise `RG16`
-(DRM RGB565). A 60-frame HDMI-A-1 modeset attempt failed before modesetting
-with `Permission denied` because `labwc` owns `/dev/dri/card1`. No
-compositor or session configuration was changed.
+(DRM RGB565). A one-frame HDMI-A-1 modeset attempt failed before modesetting
+with an explicit DRM-master ownership diagnostic because `labwc` owns
+`/dev/dri/card1`. The active Wayland registry exposes `wp_drm_lease_device_v1`
+and offers both HDMI connectors, but no lease was requested. No compositor or
+session configuration was changed. See
+`docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
 
-**Canonical Gate 3: not satisfied.** The software implementation and native
-read-only resource proof are complete, but ownership-permitted page-flip
-timing, physical photodiode validation, CRTC restoration under modeset, and
-production frame-cache rendering remain unverified or deferred.
+**Canonical Gate 3: not satisfied.** The software implementation, native
+read-only resource proof, and live lease capability discovery are complete,
+but ownership-permitted page-flip timing, lease object-set behavior, physical
+photodiode validation, CRTC restoration under modeset, and production
+frame-cache rendering remain unverified or deferred.
 
 ## Historical hardware evidence
 

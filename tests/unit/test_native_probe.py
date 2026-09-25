@@ -1,10 +1,12 @@
 import json
+import subprocess
 
 import pytest
 
 from rpi_vstim.core.config import DisplayConfig
 from rpi_vstim.display.native_probe import (
     NativeKmsError,
+    NativeKmsOwnershipError,
     display_result_from_probe,
     run_native_probe,
 )
@@ -94,3 +96,94 @@ def test_native_probe_surfaces_process_failure(monkeypatch, tmp_path):
     )
     with pytest.raises(NativeKmsError, match="permission denied"):
         run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+
+def test_native_probe_classifies_compositor_ownership(monkeypatch, tmp_path):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = (
+            "DRM device is accessible but another session/compositor currently owns "
+            "modesetting authority (DRM master)"
+        )
+
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.run",
+        lambda command, **kwargs: Failed(),
+    )
+    with pytest.raises(NativeKmsOwnershipError, match="modesetting authority"):
+        run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+
+@pytest.mark.parametrize(
+    "detail",
+    (
+        "no usable CRTC for configured connector",
+        "no usable primary plane supports RGB565",
+        "unsupported pixel format RGB565",
+        "timed out waiting for page-flip event",
+        "page-flip run interrupted",
+        "failed to restore original CRTC state",
+    ),
+)
+def test_native_probe_preserves_injected_failure_diagnostics(monkeypatch, tmp_path, detail):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = detail
+
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.run",
+        lambda command, **kwargs: Failed(),
+    )
+    with pytest.raises(NativeKmsError, match=detail):
+        run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+
+def test_native_probe_reports_timeout_and_missing_binary(monkeypatch, tmp_path):
+    def timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.run",
+        timeout,
+    )
+    with pytest.raises(NativeKmsError, match="timed out"):
+        run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.run",
+        missing,
+    )
+    with pytest.raises(NativeKmsError, match="unavailable"):
+        run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+
+def test_native_result_preserves_timing_and_patch_diagnostics():
+    payload = {
+        "connector": "HDMI-A-1",
+        "selected_mode": "1024x600@59.8214",
+        "pixel_format": "RGB565",
+        "requested_frame_count": 3,
+        "completed_frame_count": 3,
+        "first_page_flip_monotonic_ns": 1,
+        "last_page_flip_monotonic_ns": 2,
+        "first_page_flip_realtime_ns": 3,
+        "mean_vblank_interval_us": 16_683.0,
+        "std_vblank_interval_us": 1.0,
+        "maximum_vblank_interval_us": 16_684.0,
+        "p95_vblank_interval_us": 16_684.0,
+        "p99_vblank_interval_us": 16_684.0,
+        "intervals_outside_tolerance": 1,
+        "estimated_dropped_frame_count": 1,
+        "photodiode": {"frame_state": "even=on,odd=off"},
+        "missed_vblank_count": 0,
+        "aborted": False,
+    }
+    result = display_result_from_probe(payload, DisplayConfig(), sequence_id="test")
+    assert result.intervals_outside_tolerance == 1
+    assert result.estimated_dropped_frame_count == 1
+    assert result.photodiode_state == "even=on,odd=off"

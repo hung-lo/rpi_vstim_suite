@@ -28,6 +28,22 @@ def test_timestamps_and_invalid_intervals():
         summarize_intervals((0.0,), nominal_refresh_hz=60.0)
 
 
+def test_timing_summary_exposes_long_and_short_intervals():
+    expected = 1_000_000.0 / 60.0
+    summary = summarize_intervals(
+        (expected, expected * 2, expected * 3, expected / 2),
+        nominal_refresh_hz=60.0,
+    )
+    assert summary.long_interval_count == 2
+    assert summary.short_interval_count == 1
+    assert summary.estimated_dropped_frame_count == 3
+
+
+def test_timestamps_reject_discontinuities():
+    with pytest.raises(ValueError, match="positive"):
+        summarize_timestamps_ns((100, 90), nominal_refresh_hz=60.0)
+
+
 def test_photodiode_patch_is_configurable_and_deterministic():
     patch = PhotodiodePatch("top_left", 20, 200, 10)
     assert patch_bounds(100, 80, patch) == (0, 0, 20, 20)

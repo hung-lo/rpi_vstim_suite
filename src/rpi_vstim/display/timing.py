@@ -19,6 +19,9 @@ class TimingSummary:
     mean_us: float | None
     estimated_refresh_hz: float | None
     outside_tolerance_count: int
+    long_interval_count: int = 0
+    short_interval_count: int = 0
+    estimated_dropped_frame_count: int = 0
 
 
 def summarize_intervals(
@@ -38,6 +41,17 @@ def summarize_intervals(
     outside = sum(
         abs(value - expected_us) > expected_us * tolerance_fraction for value in values
     )
+    long_intervals = sum(
+        value > expected_us * (1.0 + tolerance_fraction) for value in values
+    )
+    short_intervals = sum(
+        value < expected_us * (1.0 - tolerance_fraction) for value in values
+    )
+    estimated_dropped = sum(
+        max(0, round(value / expected_us) - 1)
+        for value in values
+        if value > expected_us * (1.0 + tolerance_fraction)
+    )
     if len(values) == 1:
         p95 = p99 = values[0]
     else:
@@ -54,6 +68,9 @@ def summarize_intervals(
         mean_us,
         1_000_000.0 / mean_us,
         outside,
+        long_intervals,
+        short_intervals,
+        estimated_dropped,
     )
 
 

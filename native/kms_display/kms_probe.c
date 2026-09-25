@@ -65,14 +65,21 @@ typedef struct {
 typedef struct {
     int fd;
     char device[PATH_MAX];
+    bool device_exists;
+    bool device_readable;
     drmModeRes *resources;
+    bool resources_enumerated;
     drmModeConnector *connector;
+    bool connector_resolved;
     drmModeCrtc *original_crtc;
     drmModePlaneRes *planes;
     uint32_t crtc_id;
+    bool mode_compatible;
+    bool crtc_resolved;
     uint32_t primary_plane_id;
     uint32_t primary_format_count;
     uint32_t primary_formats[64];
+    bool primary_plane_compatible;
     drmModeModeInfo mode;
     bool mode_selected;
     bool modeset_active;
@@ -256,17 +263,25 @@ static int select_mode(const Options *options, KmsState *state) {
 }
 
 static int discover_state(const Options *options, KmsState *state, const char *device) {
+    state->device_exists = access(device, F_OK) == 0;
+    state->device_readable = access(device, R_OK) == 0;
     state->fd = open(device, O_RDWR | O_CLOEXEC);
     if (state->fd < 0) {
+        fprintf(stderr, "cannot open DRM device %s (exists=%s readable=%s): %s\n",
+                device, state->device_exists ? "true" : "false",
+                state->device_readable ? "true" : "false", strerror(errno));
         return -1;
     }
     snprintf(state->device, sizeof(state->device), "%s", device);
     state->resources = drmModeGetResources(state->fd);
     if (state->resources == NULL) {
+        fprintf(stderr, "cannot enumerate DRM resources on %s: %s\n",
+                device, strerror(errno));
         close(state->fd);
         state->fd = -1;
         return -1;
     }
+    state->resources_enumerated = true;
     if (drmSetClientCap(state->fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0) {
         fprintf(stderr, "cannot enable universal DRM planes: %s\n", strerror(errno));
         return -1;
@@ -285,6 +300,7 @@ static int discover_state(const Options *options, KmsState *state, const char *d
         }
         if (same_connector(connector, options->connector)) {
             state->connector = connector;
+            state->connector_resolved = true;
             break;
         }
         drmModeFreeConnector(connector);
@@ -297,11 +313,15 @@ static int discover_state(const Options *options, KmsState *state, const char *d
         fprintf(stderr, "configured connector is not connected: %s\n", options->connector);
         return -1;
     }
-    if (select_mode(options, state) != 0 ||
-        find_crtc_for_connector(state->fd, state->resources, state->connector, &state->crtc_id) != 0) {
+    if (select_mode(options, state) != 0) {
+        return -1;
+    }
+    state->mode_compatible = true;
+    if (find_crtc_for_connector(state->fd, state->resources, state->connector, &state->crtc_id) != 0) {
         fprintf(stderr, "no usable CRTC for configured connector: %s\n", options->connector);
         return -1;
     }
+    state->crtc_resolved = true;
     state->original_crtc = drmModeGetCrtc(state->fd, state->crtc_id);
     if (state->original_crtc == NULL) {
         fprintf(stderr, "cannot read original CRTC state %u: %s\n",
@@ -343,6 +363,7 @@ static int discover_state(const Options *options, KmsState *state, const char *d
                 options->format_name, state->crtc_id);
         return -1;
     }
+    state->primary_plane_compatible = true;
     return 0;
 }
 
@@ -640,7 +661,25 @@ static void print_probe_only(const Options *options, const KmsState *state) {
             fourcc_string(state->primary_formats[index], format, sizeof(format));
             json_string(format);
         }
-        printf("],\n  \"modeset\": false,\n  \"page_flip\": false\n}\n");
+        printf("],\n  \"access\": {\n"
+               "    \"device_exists\": %s,\n"
+               "    \"device_readable\": %s,\n"
+               "    \"device_opened\": true,\n"
+               "    \"resources_enumerated\": %s,\n"
+               "    \"connector_resolved\": %s,\n"
+               "    \"mode_compatible\": %s,\n"
+               "    \"crtc_resolved\": %s,\n"
+               "    \"primary_plane_compatible\": %s,\n"
+               "    \"modeset_authority\": \"not-tested\",\n"
+               "    \"page_flips\": \"not-tested\"\n"
+               "  },\n  \"modeset\": false,\n  \"page_flip\": false\n}\n",
+               state->device_exists ? "true" : "false",
+               state->device_readable ? "true" : "false",
+               state->resources_enumerated ? "true" : "false",
+               state->connector_resolved ? "true" : "false",
+               state->mode_compatible ? "true" : "false",
+               state->crtc_resolved ? "true" : "false",
+               state->primary_plane_compatible ? "true" : "false");
     } else {
         printf("device=%s connector=%s crtc=%u mode=%s@%.6g primary_plane=%u\n",
                state->device, options->connector, state->crtc_id,
@@ -654,8 +693,33 @@ static void print_probe_only(const Options *options, const KmsState *state) {
             fourcc_string(state->primary_formats[index], format, sizeof(format));
             fputs(format, stdout);
         }
-        printf(" modeset=false page_flip=false\n");
+        printf(" access=device_exists:%s,readable:%s,opened:true,resources:%s,connector:%s,"
+               "mode:%s,crtc:%s,primary_plane:%s,modeset_authority:not-tested,page_flips:not-tested"
+               " modeset=false page_flip=false\n",
+               state->device_exists ? "true" : "false",
+               state->device_readable ? "true" : "false",
+               state->resources_enumerated ? "true" : "false",
+               state->connector_resolved ? "resolved" : "missing",
+               state->mode_compatible ? "compatible" : "incompatible",
+               state->crtc_resolved ? "resolved" : "missing",
+               state->primary_plane_compatible ? "compatible" : "missing");
     }
+}
+
+static void print_access_state(const KmsState *state, const char *modeset_authority,
+                               const char *page_flips) {
+    fprintf(stderr,
+            "DRM access state: device_exists=%s readable=%s opened=%s resources=%s "
+            "connector=%s mode=%s crtc=%s primary_plane=%s modeset_authority=%s page_flips=%s\n",
+            state->device_exists ? "true" : "false",
+            state->device_readable ? "true" : "false",
+            state->fd >= 0 ? "true" : "false",
+            state->resources_enumerated ? "enumerated" : "unavailable",
+            state->connector_resolved ? "resolved" : "unresolved",
+            state->mode_compatible ? "compatible" : "incompatible",
+            state->crtc_resolved ? "resolved" : "unresolved",
+            state->primary_plane_compatible ? "compatible" : "unavailable",
+            modeset_authority, page_flips);
 }
 
 static void print_result(
@@ -672,6 +736,10 @@ static void print_result(
     double maximum = 0.0;
     double minimum = HUGE_VAL;
     unsigned int outside = 0;
+    unsigned int long_intervals = 0;
+    unsigned int short_intervals = 0;
+    unsigned int estimated_dropped = 0;
+    const double interval_tolerance = 0.05;
     for (size_t index = 0; index < interval_count; ++index) {
         double interval = (double)(flips->events[index + 1].monotonic_ns -
                                    flips->events[index].monotonic_ns) / 1000.0;
@@ -684,8 +752,17 @@ static void print_result(
             minimum = interval;
         }
         double expected = 1000000.0 / mode_refresh(&state->mode);
-        if (fabs(interval - expected) > expected * 0.05) {
+        if (fabs(interval - expected) > expected * interval_tolerance) {
             outside++;
+        }
+        if (interval > expected * (1.0 + interval_tolerance)) {
+            long_intervals++;
+            double frame_count = floor(interval / expected + 0.5);
+            if (frame_count > 1.0) {
+                estimated_dropped += (unsigned int)frame_count - 1U;
+            }
+        } else if (interval < expected * (1.0 - interval_tolerance)) {
+            short_intervals++;
         }
     }
     double mean = interval_count == 0 ? 0.0 : sum / (double)interval_count;
@@ -707,6 +784,10 @@ static void print_result(
                options->width, options->height, options->refresh);
         printf("  \"selected_mode\": \"%s@%.6g\",\n",
                state->mode.name, mode_refresh(&state->mode));
+        printf("  \"access\": {\"device_opened\": true, \"resources_enumerated\": true, "
+               "\"connector_resolved\": true, \"mode_compatible\": true, "
+               "\"crtc_resolved\": true, \"primary_plane_compatible\": true, "
+               "\"modeset_authority\": \"acquired\", \"page_flips\": \"completed\"},\n");
         printf("  \"nominal_refresh_hz\": %.9g,\n  \"pixel_format\": ",
                mode_refresh(&state->mode));
         json_string(options->format_name);
@@ -725,8 +806,19 @@ static void print_result(
         printf("  \"p95_vblank_interval_us\": %.6f,\n  \"p99_vblank_interval_us\": %.6f,\n",
                percentile(intervals, interval_count, 0.95),
                percentile(intervals, interval_count, 0.99));
-        printf("  \"estimated_refresh_hz\": %.9g,\n  \"intervals_outside_5_percent\": %u,\n",
-               estimated_refresh, outside);
+        printf("  \"estimated_refresh_hz\": %.9g,\n"
+               "  \"interval_tolerance_fraction\": %.6g,\n"
+               "  \"intervals_outside_tolerance\": %u,\n"
+               "  \"long_interval_count\": %u,\n"
+               "  \"short_interval_count\": %u,\n"
+               "  \"estimated_dropped_frame_count\": %u,\n",
+               estimated_refresh, interval_tolerance, outside, long_intervals,
+               short_intervals, estimated_dropped);
+        printf("  \"photodiode\": {\"corner\": ");
+        json_string(options->patch_corner);
+        printf(", \"size_px\": %u, \"on_value\": %u, \"off_value\": %u, "
+               "\"frame_state\": \"even=on,odd=off\"},\n",
+               options->patch_size, options->patch_on, options->patch_off);
         printf("  \"missed_vblank_count\": %u,\n  \"aborted\": %s,\n  \"restored\": %s,\n",
                flips->missed, aborted ? "true" : "false", restored ? "true" : "false");
         printf("  \"flip_events\": [");
@@ -746,12 +838,14 @@ static void print_result(
                state->device, options->connector, state->crtc_id,
                state->mode.name, mode_refresh(&state->mode), options->format_name);
         printf("frames=%u/%u mean_us=%.3f p95_us=%.3f p99_us=%.3f min_us=%.3f max_us=%.3f "
-               "estimated_hz=%.6f outside_5_percent=%u missed=%u restored=%s aborted=%s\n",
+               "estimated_hz=%.6f outside_tolerance=%u long_intervals=%u short_intervals=%u "
+               "estimated_dropped=%u missed=%u restored=%s aborted=%s\n",
                completed, options->frames, mean,
                percentile(intervals, interval_count, 0.95),
                percentile(intervals, interval_count, 0.99),
                interval_count ? minimum : 0.0, maximum, estimated_refresh,
-               outside, flips->missed, restored ? "true" : "false", aborted ? "true" : "false");
+               outside, long_intervals, short_intervals, estimated_dropped,
+               flips->missed, restored ? "true" : "false", aborted ? "true" : "false");
     }
     free(intervals);
 }
@@ -900,7 +994,17 @@ int main(int argc, char **argv) {
     fill_buffer(&options, &buffers[1], 1);
     if (drmModeSetCrtc(state.fd, state.crtc_id, buffers[0].framebuffer, 0, 0,
                        &state.connector->connector_id, 1, &state.mode) != 0) {
-        fprintf(stderr, "initial drmModeSetCrtc failed: %s\n", strerror(errno));
+        int set_errno = errno;
+        if (set_errno == EACCES || set_errno == EPERM) {
+            fprintf(stderr,
+                    "DRM device is accessible but another session/compositor currently owns "
+                    "modesetting authority (DRM master); run outside that compositor or use "
+                    "a DRM lease\n");
+            print_access_state(&state, "denied", "not-tested");
+        } else {
+            fprintf(stderr, "initial drmModeSetCrtc failed: %s\n", strerror(set_errno));
+            print_access_state(&state, "failed", "not-tested");
+        }
         goto cleanup;
     }
     state.modeset_active = true;
@@ -910,8 +1014,17 @@ int main(int argc, char **argv) {
         if (drmModePageFlip(state.fd, state.crtc_id, buffers[next_buffer].framebuffer,
                             DRM_MODE_PAGE_FLIP_EVENT, &flips) != 0) {
             flips.missed++;
-            fprintf(stderr, "drmModePageFlip failed at frame %u: %s\n",
-                    frame, strerror(errno));
+            int flip_errno = errno;
+            if (flip_errno == EACCES || flip_errno == EPERM) {
+                fprintf(stderr,
+                        "DRM page flip rejected because modesetting authority was lost "
+                        "to another session/compositor\n");
+                print_access_state(&state, "lost", "denied");
+            } else {
+                fprintf(stderr, "drmModePageFlip failed at frame %u: %s\n",
+                        frame, strerror(flip_errno));
+                print_access_state(&state, "acquired", "failed");
+            }
             flips.pending = false;
             goto cleanup;
         }

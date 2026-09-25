@@ -64,6 +64,15 @@ intentionally presents deterministic native test patterns; frame-cache loading
 and protocol rendering remain later work.
 
 Python timing helpers report median, p95, p99, min/max, estimated refresh, and
-intervals outside tolerance. Software timestamps are not physical photodiode
-onsets. No full display timing acceptance or 10,000-frame stress result is
-claimed.
+intervals outside tolerance, long/short intervals, and estimated dropped
+frames. Software timestamps are not physical photodiode onsets. Native KMS
+errors distinguish readable/enumerable resources from modesetting ownership;
+when labwc owns the DRM master, the result is an ownership block rather than a
+generic display failure. No full display timing acceptance or 10,000-frame
+stress result is claimed.
+
+On the current Pi, labwc 0.9.2 with wlroots 0.19 exposes
+`wp_drm_lease_device_v1` and offers both HDMI outputs. A lease has not yet
+been requested. The ownership investigation and supervised next test are
+documented in
+`docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.

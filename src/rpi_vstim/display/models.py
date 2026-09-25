@@ -29,4 +29,8 @@ class DisplayResult:
     missed_vblank_count: int = 0
     aborted: bool = False
     error: str | None = None
-
+    p95_vblank_interval_us: float | None = None
+    p99_vblank_interval_us: float | None = None
+    intervals_outside_tolerance: int = 0
+    estimated_dropped_frame_count: int = 0
+    photodiode_state: str | None = None

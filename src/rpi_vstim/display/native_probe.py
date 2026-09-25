@@ -17,6 +17,10 @@ class NativeKmsError(RuntimeError):
     """Raised when the native probe cannot complete safely."""
 
 
+class NativeKmsOwnershipError(NativeKmsError):
+    """Raised when another compositor/session owns DRM modesetting authority."""
+
+
 def default_binary() -> Path:
     override = os.environ.get("RPI_VSTIM_KMS_PROBE")
     if override:
@@ -89,7 +93,11 @@ def run_native_probe(
         raise NativeKmsError(f"native KMS probe timed out after {timeout:.1f}s") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
-        raise NativeKmsError(f"native KMS probe failed ({result.returncode}): {detail}")
+        message = f"native KMS probe failed ({result.returncode}): {detail}"
+        lowered = detail.lower()
+        if "modesetting authority" in lowered or "drm master" in lowered:
+            raise NativeKmsOwnershipError(message)
+        raise NativeKmsError(message)
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -136,4 +144,21 @@ def display_result_from_probe(
         missed_vblank_count=int(payload["missed_vblank_count"]),
         aborted=bool(payload["aborted"]),
         error=None,
+        p95_vblank_interval_us=_optional_float(payload, "p95_vblank_interval_us"),
+        p99_vblank_interval_us=_optional_float(payload, "p99_vblank_interval_us"),
+        intervals_outside_tolerance=int(payload.get("intervals_outside_tolerance", 0)),
+        estimated_dropped_frame_count=int(payload.get("estimated_dropped_frame_count", 0)),
+        photodiode_state=_photodiode_state(payload),
     )
+
+
+def _optional_float(payload: dict[str, Any], name: str) -> float | None:
+    value = payload.get(name)
+    return None if value is None else float(value)
+
+
+def _photodiode_state(payload: dict[str, Any]) -> str | None:
+    value = payload.get("photodiode")
+    if not isinstance(value, dict):
+        return None
+    return str(value.get("frame_state")) if value.get("frame_state") is not None else None

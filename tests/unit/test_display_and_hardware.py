@@ -79,3 +79,27 @@ def test_kms_open_failure_does_not_leave_partial_state(monkeypatch):
         display.open(DisplayConfig())
     assert display.config is None
     assert display.info is None
+
+
+def test_kms_present_failure_closes_backend(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {
+                "connector": "HDMI-A-1",
+                "mode": "1024x600",
+                "refresh_hz": 59.82,
+            },
+            "preview": None,
+        },
+    )
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.run_native_probe",
+        lambda config, **kwargs: (_ for _ in ()).throw(RuntimeError("page-flip timeout")),
+    )
+    display = KmsDisplayBackend()
+    display.open(DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82))
+    with pytest.raises(RuntimeError, match="page-flip"):
+        display.present_color((0, 0, 0), frames=1)
+    assert display.config is None
+    assert display.info is None
