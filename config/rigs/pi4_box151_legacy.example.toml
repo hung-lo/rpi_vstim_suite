@@ -1,0 +1,8 @@
+[display]
+backend = "rpg_legacy"
+connector = "legacy"
+width_px = 1024
+height_px = 600
+refresh_hz = 60.0
+pixel_format = "RGB565"
+calibration_id = "box151_photodiode_20ksps_50trial_60hz_v1"

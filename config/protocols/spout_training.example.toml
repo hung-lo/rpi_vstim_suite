@@ -1,0 +1,5 @@
+[protocol]
+name = "spout-training"
+version = "placeholder"
+mode = "simulation-only"
+

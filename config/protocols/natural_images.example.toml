@@ -1,0 +1,5 @@
+[protocol]
+name = "natural-images"
+version = "placeholder"
+compatibility_profile = "natural_legacy_plain"
+

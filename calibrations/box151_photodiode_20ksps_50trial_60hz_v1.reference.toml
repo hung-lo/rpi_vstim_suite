@@ -1,0 +1,7 @@
+calibration_id = "box151_photodiode_20ksps_50trial_60hz_v1"
+legacy_backend = "rpg"
+status = "legacy-reference-only"
+segment_1_refreshes = 64
+segment_2_refreshes = 24
+stimulus_onset_compensation_sec = 0.095
+

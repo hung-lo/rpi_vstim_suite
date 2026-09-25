@@ -1,0 +1,74 @@
+{
+  "generated_utc": "2026-09-24T20:34:14Z",
+  "inventory_method": {
+    "source": "shallow read-only clones from each public GitHub remote",
+    "reference_directory": "/tmp/rpi_vstim_reference",
+    "tests": "python3 -m pytest -q was attempted for each checkout; all exited 1 because pytest is not installed in the inventory environment"
+  },
+  "repositories": [
+    {
+      "name": "rpi_visual_stimuli",
+      "remote_url": "https://github.com/hung-lo/rpi_visual_stimuli.git",
+      "default_branch": "main",
+      "commit": "6e1b2776e59c89127f9a6b56854096eb726990da",
+      "latest_commit_date": "2026-08-24T14:15:07-04:00",
+      "working_tree": "clean",
+      "python_requirement": ">=3.7",
+      "runtime_dependencies": ["numpy", "Pillow", "RPi.GPIO on ARM"],
+      "development_dependencies": ["pytest>=7,<8"],
+      "entrypoints": ["run_drifting_gratings.py", "run_retinotopy.py"],
+      "configuration": ["config/system_config.json"],
+      "persistent_paths": ["/mnt/hd/vstim_cache", "/mnt/hd/<session_id>"],
+      "hardware_dependencies": ["legacy rpg display", "RPi.GPIO", "legacy optional remote camera reference"],
+      "tests": {"files_present": 38, "status": "not_started: pytest unavailable"}
+    },
+    {
+      "name": "vstim_natural",
+      "remote_url": "https://github.com/hung-lo/vstim_natural.git",
+      "default_branch": "main",
+      "commit": "8a5f368c20344e25500cdfa6b272eccb673cad4a",
+      "latest_commit_date": "2026-08-24T17:46:53-04:00",
+      "working_tree": "clean",
+      "python_requirement": "unspecified",
+      "runtime_dependencies": ["Pillow", "RPi.GPIO on ARM"],
+      "development_dependencies": ["pytest not declared"],
+      "entrypoints": ["run_stringer_vstim.py", "run_stringer_vstim_cam.py", "fullscreen_test.py"],
+      "configuration": ["no standalone config file found"],
+      "persistent_paths": ["session outputs selected by runner"],
+      "hardware_dependencies": ["legacy display path", "RPi.GPIO", "legacy optional remote camera reference"],
+      "tests": {"files_present": 8, "status": "not_started: pytest unavailable"}
+    },
+    {
+      "name": "vstim_natural_img_reward",
+      "remote_url": "https://github.com/hung-lo/vstim_natural_img_reward.git",
+      "default_branch": "master",
+      "commit": "f64b56d0562b5c35aa64ffba34c29b1d7416bec1",
+      "latest_commit_date": "2026-09-03T15:28:34-04:00",
+      "working_tree": "clean",
+      "python_requirement": "unspecified",
+      "runtime_dependencies": ["Pillow", "gpiozero", "RPi.GPIO on ARM"],
+      "development_dependencies": ["pytest not declared"],
+      "entrypoints": ["run_stringer_reward_conditioning.py", "run_spout_training.py", "run_stringer_vstim.py", "run_stringer_vstim_cam.py"],
+      "configuration": ["reward_conditioning_config.example.json", "spout_training_config.example.json"],
+      "persistent_paths": ["assignment/state paths are configured by legacy JSON"],
+      "hardware_dependencies": ["gpiozero", "RPi.GPIO on ARM", "reward", "suction", "lick", "legacy optional remote camera reference"],
+      "tests": {"files_present": 10, "status": "not_started: pytest unavailable"}
+    },
+    {
+      "name": "rpi_rig_monitor",
+      "remote_url": "https://github.com/hung-lo/rpi_rig_monitor.git",
+      "default_branch": "main",
+      "commit": "70b80f25c12ac64d087ebeb78a22a091a0d03511",
+      "latest_commit_date": "2026-09-03T13:00:44-04:00",
+      "working_tree": "clean",
+      "python_requirement": "unspecified",
+      "runtime_dependencies": ["Flask==2.2.5", "Werkzeug==2.2.3", "Jinja2==3.1.2", "itsdangerous==2.1.2", "click==8.1.7", "MarkupSafe==2.1.3"],
+      "development_dependencies": ["pytest not declared"],
+      "entrypoints": ["run_monitor.py", "tools/send_demo_telemetry.py", "tools/send_spout_demo_telemetry.py"],
+      "configuration": ["monitor/config.py"],
+      "persistent_paths": ["in-memory monitor state", "local preview image directory"],
+      "hardware_dependencies": ["none; UDP receiver and web dashboard"],
+      "tests": {"files_present": 6, "status": "not_started: pytest unavailable"}
+    }
+  ]
+}

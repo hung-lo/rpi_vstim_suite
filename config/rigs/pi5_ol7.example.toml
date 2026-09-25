@@ -1,0 +1,11 @@
+[display]
+backend = "kms"
+connector = "HDMI-A-1"
+width_px = 1280
+height_px = 720
+refresh_hz = 60.0
+pixel_format = "RGB565"
+calibration_id = ""
+physical_width_cm = 15.50
+physical_height_cm = 8.72
+eye_distance_cm = 16.0

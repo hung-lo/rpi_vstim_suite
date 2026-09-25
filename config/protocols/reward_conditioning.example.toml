@@ -1,0 +1,5 @@
+[protocol]
+name = "reward-conditioning"
+version = "placeholder"
+mode = "simulation-only"
+
