@@ -104,13 +104,18 @@ storage remain later acceptance work.
   v1 binding omitted the connector/lease destructor request metadata. Add
   explicit release acknowledgment handling, sanitizer/self-test coverage, and
   a Pi enumeration-only preflight without submitting a lease.
+- [x] Complete the first post-fix supervised HDMI-A-1-only lease probe:
+  `drmModeGetLease()` returned connector 33, primary plane 81, CRTC 92, and
+  cursor plane 655; HDMI-A-2 remained compositor-managed and release restored
+  labwc. No modeset or page flip was performed.
 - [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
   restoration; blocked by the active `labwc` DRM owner.
 - [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
   HDMI-A-2 preview continuity, revocation, and recovery; the first supervised
   probe-only request terminated with a native client segmentation fault before
-  reporting a lease object set. The binding fix and enumeration-only preflight
-  are complete, but the supervised retry remains pending. See
+  reporting a lease object set. The post-fix acquisition/object/recovery probe
+  passed; page flips, revocation, and longer recovery testing remain pending.
+  See
   `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
@@ -131,13 +136,12 @@ session configuration was changed. See
 `docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
 
 **Canonical Gate 3: not satisfied.** The software implementation, native
-read-only resource proof, live lease capability discovery, and offline binding
-preflight are complete. The first supervised probe-only request faulted before
-reporting a lease object set, and no live retry has yet been made.
+read-only resource proof, live lease capability discovery, offline binding
+preflight, and the first supervised lease/object/recovery probe are complete.
+The probe did not modeset or page-flip.
 Ownership-permitted page-flip
-timing, lease object-set behavior, physical photodiode validation, CRTC
-restoration under modeset, and production frame-cache rendering remain
-unverified or deferred.
+timing, physical photodiode validation, CRTC restoration under modeset, and
+production frame-cache rendering remain unverified or deferred.
 
 ## Historical hardware evidence
 

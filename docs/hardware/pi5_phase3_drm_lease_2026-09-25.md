@@ -142,6 +142,76 @@ validation until it succeeds:
 If that request fails, capture its status and stderr, verify labwc and both
 outputs, and stop. Do not retry repeatedly or proceed to page flips.
 
+## First post-fix supervised lease validation
+
+This supervised run used the corrected client from commit `4134739`. No
+LightDM, labwc startup, boot, autologin, persistent display, storage, camera,
+GPIO, reward, or session configuration was changed.
+
+### Preflight
+
+Captured at `2026-09-25T14:14:08.211443738-04:00`:
+
+| Item | Verified value |
+|---|---|
+| active session | Wayland session `436`, user `pi`, `seat0`, active |
+| compositor | labwc PID `756533`, `/usr/bin/labwc -m` |
+| HDMI-A-1 | enabled, current `1024x600@59.820999 Hz`, connector 33 |
+| HDMI-A-2 | enabled, current `1024x600@59.820999 Hz`, connector 42 |
+| mapping | HDMI-A-1 stimulus, HDMI-A-2 camera preview |
+| DRM master before request | labwc on `/dev/dri/card1` |
+
+Fresh direct read-only probes confirmed HDMI-A-1 connector 33 / CRTC 92 and
+HDMI-A-2 connector 42 / CRTC 104 before the lease request.
+
+### Lease request and object inspection
+
+The exact probe ran at `2026-09-25T14:14:19.152133618-04:00` and completed at
+`2026-09-25T14:14:19.381598406-04:00` with status 0 (227 ms):
+
+```text
+./kms_probe --lease --connector HDMI-A-1 --width 1024 --height 600 \
+  --refresh 59.82 --format RGB565 --probe-only --json
+```
+
+The granted lease reported:
+
+```json
+{
+  "connector": "HDMI-A-1",
+  "connector_id": 33,
+  "crtc_id": 92,
+  "lease_objects": [33, 81, 92, 655],
+  "selected_mode": "1024x600@59.8214",
+  "modeset": false,
+  "page_flip": false
+}
+```
+
+The lease object set is consistent with the requested output: connector 33,
+primary plane 81, CRTC 92, and cursor plane 655. HDMI-A-2 was not requested.
+The native debug lifecycle showed lease fd receipt, lease release, and the
+device `released` acknowledgment.
+
+### Release and compositor recovery
+
+After cleanup, checked at `2026-09-25T14:14:33.160993478-04:00`:
+
+- labwc PID `756533` was still running;
+- session 436 remained active on Wayland seat0;
+- HDMI-A-1 and HDMI-A-2 were both enabled at `1024x600@59.820999 Hz`;
+- `wlr-randr` remained usable for both outputs; and
+- `/dev/dri/card1` was again held by labwc and its normal desktop helpers.
+
+The client completed the release lifecycle within the 227 ms probe run. No
+independent compositor-recovery timestamp was taken between process exit and
+the post-check, so the exact sub-second restoration interval is not claimed.
+
+This validates HDMI-A-1-only lease acquisition, a usable leased fd and object
+set, HDMI-A-2 compositor continuity, and clean lease release. It does not
+validate modesetting, page flips, frame timing, photodiode timing, or
+production rendering.
+
 ## Validation completed before retry
 
 - WSL development environment: Python `3.11.16`; full pytest `118 passed`,
@@ -173,15 +243,16 @@ immediately queryable in their pre-test compositor state after process exit.
 
 ## Gate and next action
 
-This validates only that the surrounding compositor/session remained intact
-after the failed client attempt. It does **not** validate DRM leasing, native
-page flips, or timing.
+This historical section validates only that the surrounding compositor/session
+remained intact after the failed client attempt. It does **not** describe the
+successful post-fix lease probe above.
 
-The hardware lease subtask is stopped before the supervised retry. The
-segmentation fault is eliminated from the binding and the enumeration-only
-preflight is clean, but no live lease request has been repeated and no
-page-flip, failure-path, or timing test was attempted.
+The first hardware lease subtask was stopped before the supervised retry. The
+post-fix supervised probe has now validated lease acquisition, object
+inspection, and release; no page-flip, failure-path, or timing test was
+attempted.
 
-Canonical Gate 3 remains not passed. Physical photodiode timing, production
+Canonical Gate 3 remains not passed. The first supervised lease/recovery probe
+passed, but physical modeset/page-flip timing, photodiode timing, production
 frame rendering, SSD/storage validation, and integrated display/camera/GPIO
-acceptance remain pending as well.
+acceptance remain pending.
