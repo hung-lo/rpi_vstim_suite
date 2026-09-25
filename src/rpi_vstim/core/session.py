@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
-from .provenance import collect_provenance
+from .provenance import collect_provenance, resolve_source_commit
 from .timestamps import monotonic_ns, utc_ns
 
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -59,6 +59,8 @@ class SessionOutput:
                 "protocol": self.context.protocol_name,
                 "protocol_version": self.context.protocol_version,
                 "created_utc_ns": self.context.created_utc_ns,
+                "random_seeds": self.context.random_seeds,
+                "source_commit": self.context.source_commit,
                 "status": "CREATED",
                 "phase": "00",
             },
@@ -69,6 +71,7 @@ def new_session(config: Config, *, protocol_name: str | None = None, session_id:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("session_id contains unsupported characters")
     protocol = protocol_name or config.protocol.name
+    source_commit = resolve_source_commit()
     context = SessionContext(
         session_id=session_id,
         protocol_name=protocol,
@@ -78,7 +81,7 @@ def new_session(config: Config, *, protocol_name: str | None = None, session_id:
         created_monotonic_ns=monotonic_ns(),
         resolved_config=config.as_dict(),
         random_seeds={"protocol": seed},
-        source_commit=os.environ.get("RPI_VSTIM_SOURCE_COMMIT", "unknown"),
-        host_provenance=collect_provenance(),
+        source_commit=source_commit,
+        host_provenance=collect_provenance(source_commit=source_commit),
     )
     return SessionOutput(context)

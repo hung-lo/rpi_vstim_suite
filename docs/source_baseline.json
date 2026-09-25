@@ -19,7 +19,7 @@
       "entrypoints": ["run_drifting_gratings.py", "run_retinotopy.py"],
       "configuration": ["config/system_config.json"],
       "persistent_paths": ["/mnt/hd/vstim_cache", "/mnt/hd/<session_id>"],
-      "hardware_dependencies": ["legacy rpg display", "RPi.GPIO", "optional remote camera"],
+      "hardware_dependencies": ["legacy rpg display", "RPi.GPIO", "legacy optional remote camera reference"],
       "tests": {"files_present": 38, "status": "not_started: pytest unavailable"}
     },
     {
@@ -35,7 +35,7 @@
       "entrypoints": ["run_stringer_vstim.py", "run_stringer_vstim_cam.py", "fullscreen_test.py"],
       "configuration": ["no standalone config file found"],
       "persistent_paths": ["session outputs selected by runner"],
-      "hardware_dependencies": ["legacy display path", "RPi.GPIO", "optional remote camera"],
+      "hardware_dependencies": ["legacy display path", "RPi.GPIO", "legacy optional remote camera reference"],
       "tests": {"files_present": 8, "status": "not_started: pytest unavailable"}
     },
     {
@@ -51,7 +51,7 @@
       "entrypoints": ["run_stringer_reward_conditioning.py", "run_spout_training.py", "run_stringer_vstim.py", "run_stringer_vstim_cam.py"],
       "configuration": ["reward_conditioning_config.example.json", "spout_training_config.example.json"],
       "persistent_paths": ["assignment/state paths are configured by legacy JSON"],
-      "hardware_dependencies": ["gpiozero", "RPi.GPIO on ARM", "reward", "suction", "lick", "optional remote camera"],
+      "hardware_dependencies": ["gpiozero", "RPi.GPIO on ARM", "reward", "suction", "lick", "legacy optional remote camera reference"],
       "tests": {"files_present": 10, "status": "not_started: pytest unavailable"}
     },
     {

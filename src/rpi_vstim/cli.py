@@ -1,4 +1,4 @@
-"""Small, non-hardware-safe Phase 00 command-line surface."""
+"""Small, non-hardware Phase 00 command-line surface."""
 
 from __future__ import annotations
 
@@ -29,7 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = commands.add_parser("run", help="reserved protocol entry point")
     run.add_argument("protocol", choices=[p.name for p in available_protocols()])
-    run.add_argument("--camera", action="store_true")
+    run.add_argument("--camera", action="store_true", help="enable configured local cameras")
+    run.add_argument("--cameras", help="comma-separated configured local camera IDs or 'all'")
 
     return parser
 
@@ -60,6 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config" and args.config_command == "validate":
         try:
             config = load_config(args.path)
+            if args.experimental and (
+                not config.session.experimental or config.session.simulation
+            ):
+                raise ConfigError(
+                    "--experimental requires session.experimental=true and session.simulation=false"
+                )
             config.validate(require_paths=args.experimental, repo_root=Path.cwd())
         except (ConfigError, OSError, ValueError) as exc:
             print(f"config invalid: {exc}", file=sys.stderr)

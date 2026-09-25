@@ -30,11 +30,24 @@ reward_pin_bcm = 19
 suction_pin_bcm = 25
 lick_pin_bcm = 26
 
-[camera]
+[cameras]
 enabled_by_default = false
-host = ""
-user = "pi"
-remote_root = ""
+record_to_session = true
+verify_output_growth = true
+
+[[cameras.devices]]
+id = "camera_1"
+role = "face"
+required = false
+backend = "auto"
+device = ""
+
+[[cameras.devices]]
+id = "camera_2"
+role = "behavior"
+required = false
+backend = "auto"
+device = ""
 
 [telemetry]
 enabled = false

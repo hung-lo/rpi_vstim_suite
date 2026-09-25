@@ -303,3 +303,9 @@ gpiochip13 - 4 lines:
 	line   2:	"WIFI_SDIO_D2"  	input
 	line   3:	"WIFI_SDIO_D3"  	input
 
+== phase 00 follow-up ==
+This is the recorded read-only audit snapshot. The reusable audit script now
+also enumerates V4L2/libcamera/rpicam discovery, media topology, DRM modes,
+loaded display modules, and display/session variables. Rerun it on the lab
+network before hardware validation; the many /dev/video* nodes above are not
+stable identities for the two physical cameras.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from rpi_vstim.core.config import DisplayConfig
 from rpi_vstim.core.timestamps import monotonic_ns, utc_ns
 
@@ -30,6 +32,8 @@ class FakeDisplayBackend:
             self.config.pixel_format,
         ):
             raise ValueError("frame program does not match display configuration")
+        if not math.isclose(program.refresh_hz, self.config.refresh_hz, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError("frame program refresh_hz does not match display configuration")
 
     def present(self, program: FrameProgram, *, sequence_id: str) -> DisplayResult:
         self.validate_program(program)

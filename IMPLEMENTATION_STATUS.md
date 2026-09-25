@@ -10,6 +10,8 @@
 - [x] Add session, lifecycle, provenance, event logging, and output skeletons.
 - [x] Add protocol placeholders and compatibility wrappers.
 - [x] Add read-only Pi 5 audit report.
+- [x] Apply Phase 00 validation/reproducibility review fixes.
+- [x] Define two local camera identities in the Phase 00 schema.
 - [ ] Authenticate a future deployment workflow with a stored, approved SSH key.
 
 ### Target inventory findings
@@ -23,4 +25,6 @@ files were accessed and no target files or services were changed.
 
 No experiment execution, real GPIO, DRM/KMS, camera acquisition, UDP send,
 asset conversion, reward logic, protocol scheduling, or Pi modification is
-implemented in Phase 00.
+implemented in Phase 00. The expanded audit script has not been rerun because
+the Pi is not reachable from this Mac; that is deferred hardware validation.
+Phase 01 has not started.

@@ -22,11 +22,21 @@ class LifecycleState(StrEnum):
 
 
 class Lifecycle:
+    TERMINAL_STATES = frozenset(
+        {
+            LifecycleState.COMPLETE,
+            LifecycleState.INCOMPLETE,
+            LifecycleState.INTERRUPTED,
+            LifecycleState.FAILED,
+            LifecycleState.CLEANUP_FAILED,
+        }
+    )
+
     def __init__(self) -> None:
         self.state = LifecycleState.CREATED
 
     def transition(self, state: LifecycleState) -> None:
-        if self.state in {LifecycleState.COMPLETE, LifecycleState.FAILED, LifecycleState.CLEANUP_FAILED}:
+        if self.state in self.TERMINAL_STATES:
             raise RuntimeError(f"cannot transition from terminal state {self.state}")
         self.state = state
 
@@ -35,7 +45,7 @@ class Lifecycle:
 class RuntimeServices:
     display: object | None = None
     hardware: object | None = None
-    camera: object | None = None
+    cameras: object | None = None
     telemetry: object | None = None
     lifecycle: Lifecycle = field(default_factory=Lifecycle)
 
@@ -53,4 +63,3 @@ class ExperimentRuntime:
         if exc_type is not None:
             self.services.lifecycle.state = LifecycleState.FAILED
         return False
-

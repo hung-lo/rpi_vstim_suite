@@ -9,3 +9,4 @@ build/
 .preview_cache/
 docs/hardware/*_local.*
 
+.DS_Store

@@ -5,6 +5,7 @@
 **Primary behavior-Pi deployment target:** `pi@10.42.84.10`  
 **Target platform:** Raspberry Pi 5, Raspberry Pi OS Lite 64-bit, Python 3.13.x  
 **Status:** Implementation blueprint only; no source repositories should be deleted or modified as part of the initial merge.
+**Revision:** V2 — single experiment Pi 5 with two local cameras; removes the legacy second-camera-Pi/SSH-transfer architecture.
 
 ---
 
@@ -19,13 +20,15 @@ Create a new repository that replaces the experiment-side functionality currentl
 The new repository must run on Raspberry Pi 5 and expose one consistent runtime for:
 
 1. Stringer natural-image presentation without reward.
-2. Stringer natural-image presentation with the remote face camera.
+2. Stringer natural-image presentation with local dual-camera recording on the same Pi 5.
 3. Natural-image reward conditioning.
 4. Lick-spout training.
 5. Drifting gratings.
 6. Retinotopy mapping.
 
 It must also publish optional, best-effort, read-only telemetry to the separate `hung-lo/rpi_rig_monitor` repository. The monitor remains a separate repository and separate Raspberry Pi. It must never become a dependency of the experiment runtime.
+
+The production experiment architecture uses **one Pi 5 for the complete experiment-side runtime**: visual stimulus presentation, lick acquisition, reward/suction/TTL control, local recording from two cameras, session logging, and telemetry publication. There is no second camera-acquisition Pi and no SSH-based camera-control or video-transfer path in the production design.
 
 This is not a mechanical copy-and-paste merge. The present display dependency, `SjulsonLab/rpg`, is explicitly a Raspberry Pi 3/4 implementation built around legacy framebuffer, mailbox, `fbset`, `/dev/vcio`, and WiringPi interfaces. The Pi 5 production implementation therefore requires a new display abstraction and a Pi 5 KMS/DRM backend before any protocol can be declared production-ready.
 
@@ -48,7 +51,7 @@ Codex must follow these decisions unless a hardware proof demonstrates that one 
 Use the repositories as follows:
 
 - **`rpi_visual_stimuli`**: starting point for the shared package structure, session handling, configuration, preflight, event logging, duration calculations, persistent cache concepts, operator status, camera wrapper, gray screen, GPIO abstraction ideas, drifting gratings, and retinotopy.
-- **`vstim_natural`**: source of truth for the natural-image selection, reproducible scheduling, no-adjacent-repeat behavior, image conversion, natural-image timing, ITI generation, raw-image preparation, photodiode behavior, and natural-image camera workflow.
+- **`vstim_natural`**: source of truth for the natural-image selection, reproducible scheduling, no-adjacent-repeat behavior, image conversion, natural-image timing, ITI generation, raw-image preparation, photodiode behavior, and the *session semantics* of the legacy camera workflow. Its remote-camera transport is reference-only and must not be carried into the Pi 5 production design.
 - **`vstim_natural_img_reward`**: source of truth for reward-conditioning behavior, permanent mouse assignments, phase state, 8:3:1 block construction, 90% reward schedule, reward/suction/lick handling, spout training, water safeguards, behavior/QC summaries, session completion states, and nonblocking telemetry.
 - **`rpi_rig_monitor`**: separate consumer of telemetry. Do not copy its Flask application into the experiment repository.
 
@@ -88,6 +91,31 @@ Do not pin the project to exactly Python 3.13.5. The user asked for Python 3.13.
 - No video stream, framebuffer capture, HDMI capture, or live camera stream to the monitor.
 - Natural-image preview on the monitor uses a separately installed local image library and the image filename in telemetry.
 
+
+### 2.7 Single-Pi dual-camera runtime model
+
+The Pi 5 is the only experiment-side computer. It owns display, GPIO/lick/reward control, both cameras, logging, and telemetry. Design around isolation rather than a second machine.
+
+Required process boundaries:
+
+- **Main experiment/controller process:** protocol state, plan execution, display calls, session orchestration, and small in-memory event construction.
+- **Dedicated GPIO worker process:** reward, suction, TTL, and lick-edge capture only. No camera, disk, JSON, terminal, or network work.
+- **Two local camera capture workers/processes:** one independently supervised capture process per configured camera. Prefer direct camera-to-file pipelines rather than pulling frames through Python.
+- **Telemetry worker process:** serialization/networking only.
+- Optional post-session media verification/remux work occurs only after TASK/POST timing-critical activity has ended.
+
+Rules:
+
+- No SSH camera control in production.
+- No camera file transfer between Pis in production.
+- No live video transmission to `rpi_rig_monitor`.
+- Camera workers must use bounded memory and stream directly to local session storage.
+- Do not perform CPU-heavy transcoding, computer vision, or full-frame Python copies during TASK unless later hardware tests explicitly prove that timing is unaffected.
+- A camera failure must not be able to leave reward/suction outputs unsafe or corrupt already-written stimulus/event data.
+- Camera requirements are per camera: a protocol may require both, require one, or treat cameras as optional according to the resolved config.
+- Stable camera identity must not depend only on `/dev/video0`/`/dev/video1`; use serial/device path/media topology or another stable identifier discovered during hardware audit.
+- Because the audited Pi 5 has 2 GB RAM, camera buffering and image-stimulus caching must be bounded and measured under full simultaneous load.
+
 ---
 
 ## 3. Scope
@@ -104,11 +132,15 @@ rpi-vstim run drifting-gratings
 rpi-vstim run retinotopy
 ```
 
-Natural-image camera use is a shared option rather than a separate implementation:
+Camera recording is a shared local service rather than a separate implementation. Protocols enable configured camera IDs without changing their stimulus scheduler. For natural images, retain the familiar compatibility option while adding an explicit multi-camera form:
 
 ```bash
-rpi-vstim run natural-images --camera
+rpi-vstim run natural-images --camera          # enable the configured default camera set
+rpi-vstim run natural-images --cameras all    # explicitly enable both configured cameras
+rpi-vstim run natural-images --cameras face,behavior
 ```
+
+The exact camera IDs/roles come from rig configuration; `face` and `behavior` are examples, not hard-coded production names.
 
 The repository must also retain thin compatibility wrappers so the operator can use familiar commands during migration:
 
@@ -165,7 +197,8 @@ rpi-vstim config import-legacy <legacy_json>
 - Random generators must be local objects with recorded seeds. Do not use process-global random state for protocol plans.
 - The complete resolved configuration and all seeds must be saved before the first stimulus.
 - Interrupts and exceptions must leave display and GPIO outputs in a safe state.
-- An unavailable camera may fail a camera-required session but must not corrupt completed stimulus data.
+- An unavailable required camera may fail preflight/session startup, while an optional camera may degrade explicitly; neither case may corrupt completed stimulus data.
+- Dual-camera recording must not measurably degrade display timing, lick capture, reward/suction timing, or telemetry parent-call latency.
 - An unavailable monitor must not change protocol timing or session success.
 - Experimental mode must refuse to run when display mode, refresh rate, GPIO ownership, state files, disk, or required calibrations are invalid.
 
@@ -179,7 +212,7 @@ Preserve the validated behavior from `vstim_natural`:
 - Jittered ITIs represented as integer monitor-refresh counts.
 - Initial and final gray periods.
 - Photodiode patch behavior.
-- Selected-image table, plan, event logging, metadata, and camera archival behavior.
+- Selected-image table, plan, event logging, metadata, and local dual-camera archival behavior.
 
 The current non-camera and camera runners differ in their final-ITI behavior. Do not silently erase this difference. Implement explicit compatibility profiles:
 
@@ -569,7 +602,7 @@ Recommended local paths:
 ~/.config/rpi_vstim/protocols/*.toml
 ```
 
-Do not store camera credentials, SSH private keys, writable state, or machine-specific monitor addresses in Git.
+Do not store writable state or machine-specific monitor addresses in Git. Camera configuration may include stable local device identifiers, but never secrets. The production camera path does not require SSH credentials.
 
 ### 9.2 Required system configuration sections
 
@@ -605,11 +638,24 @@ reward_pin_bcm = 19
 suction_pin_bcm = 25
 lick_pin_bcm = 26
 
-[camera]
+[cameras]
 enabled_by_default = false
-host = ""
-user = "pi"
-remote_root = ""
+record_to_session = true
+verify_output_growth = true
+
+[[cameras.devices]]
+id = "camera_1"
+role = "face"
+required = false
+backend = "auto"
+device = ""
+
+[[cameras.devices]]
+id = "camera_2"
+role = "behavior"
+required = false
+backend = "auto"
+device = ""
 
 [telemetry]
 enabled = false
@@ -630,6 +676,9 @@ Use frozen dataclasses and explicit validators. Do not rely on scattered module-
 Experimental mode must reject:
 
 - Missing monitor host when telemetry is enabled or marked required; the checked-in example remains disabled until the monitor Pi address is configured locally.
+- Duplicate camera IDs or duplicate binding of two logical camera roles to the same physical device.
+- Missing/unresolved stable device identity for a camera marked required in experimental mode.
+- Unsupported camera backend/format/FPS combination once the hardware-specific rig profile is populated.
 - Missing display calibration required by the selected protocol.
 - Non-integer frame counts after duration conversion.
 - Nonexistent asset or state directories.
@@ -707,10 +756,11 @@ Use `contextlib.ExitStack` or equivalent ownership rules. Cleanup order must be 
 2. Force reward and suction outputs low.
 3. Stop hardware worker.
 4. Restore/close display backend.
-5. Stop and secure camera data if enabled.
-6. Close telemetry with a bounded timeout.
-7. Flush logs.
-8. Atomically finalize manifest and status.
+5. Stop both camera workers, flush capture files, and record per-camera final states if enabled.
+6. Perform only bounded local media verification needed before final status; defer expensive remux/transcode/repair until timing-critical work has ended.
+7. Close telemetry with a bounded timeout.
+8. Flush logs.
+9. Atomically finalize manifest and status.
 
 Cleanup failures must be recorded without hiding the primary exception.
 
@@ -1263,29 +1313,122 @@ Add a preview command that renders representative still frames to PNG on any com
 
 ---
 
-## 19. Camera consolidation
+## 19. Local dual-camera subsystem
 
-There are overlapping copies of `remote_camera_control.py`. Compare them function-by-function and keep the most robust behavior from all fixes.
+The legacy repositories contain overlapping `remote_camera_control.py` implementations. Review them for useful **lifecycle and recovery semantics only**: startup checks, output-growth verification, clean stop, conversion/recovery behavior, and clear final states. Do not preserve the SSH/remote-transfer architecture.
 
-Move the result to `core/camera.py` plus small transport helpers.
+The Pi 5 production system records **two cameras locally on the same Pi that presents stimuli and controls behavior hardware**.
 
-Required behavior:
+Recommended package boundary:
 
-- SSH key authentication; no embedded password.
-- Explicit remote host/user/path configuration.
-- Startup checks.
-- Start recording and verify output growth.
-- Stop recording and confirm process termination.
-- Transfer raw files.
-- Hash verification.
-- H.264-to-MP4 conversion with recovery/retry behavior.
-- MP4 verification.
-- Delete remote raw files only after local verification succeeds.
-- Preserve remote data on uncertain cleanup states.
-- Write camera event log and final archival state.
-- Distinguish protocol complete, video pending, and camera cleanup failed.
+```text
+src/rpi_vstim/camera/
+├── base.py
+├── models.py
+├── local_capture.py
+├── supervisor.py
+├── diagnostics.py
+└── verify.py
+```
 
-Camera operations must occur outside the frame and GPIO timing paths.
+Keep the abstraction small. The implementation may supervise external capture tools (for example V4L2/FFmpeg or Raspberry Pi camera tools) when that avoids Python frame copies and gives more predictable resource use. Choose the concrete backend only after the Pi audit identifies the two real cameras and their supported modes.
+
+### 19.1 Camera identity and configuration
+
+Each configured camera must have:
+
+```text
+id
+role
+required
+backend
+stable_device_identifier
+requested_width_px
+requested_height_px
+requested_fps
+requested_pixel_format_or_codec
+output_naming_policy
+```
+
+Do not bind production identity only to `/dev/videoN`; those numbers may change across reboots. Record enough udev/media/camera metadata to resolve the intended physical camera deterministically.
+
+### 19.2 Process model
+
+- Use one independently supervised local capture worker/process per camera.
+- Camera workers do not own GPIO and do not execute protocol logic.
+- The GPIO worker never performs camera operations.
+- The display/frame loop never waits for camera I/O.
+- Camera status enters the parent through a bounded IPC/status channel.
+- Camera writes go directly to session storage with bounded buffering.
+- Do not keep full-frame queues in Python memory.
+
+### 19.3 Start/stop behavior
+
+Before a camera-required session starts:
+
+1. Resolve both configured physical devices by stable identity.
+2. Confirm each required device is available and not already owned by another process.
+3. Confirm the requested capture mode is supported.
+4. Confirm session storage exists, has sufficient free space, and passes a conservative write-throughput preflight.
+5. Start each camera independently.
+6. Confirm each output file exists and grows within a bounded timeout.
+7. Record camera start timestamps using both UTC and monotonic time.
+
+On shutdown:
+
+1. Request orderly stop for both camera workers.
+2. Apply a bounded timeout, then escalate termination only if required.
+3. Flush/close files and record size/duration/worker exit status for each camera.
+4. Verify the local files sufficiently to distinguish `recorded`, `recorded_unverified`, `failed`, and `repair_needed`.
+5. Never delete the only copy of a recording as part of automatic cleanup.
+
+### 19.4 Media conversion and recovery
+
+Legacy H.264-to-MP4 rescue logic is useful as a recovery reference, but conversion is now local.
+
+- Prefer capturing directly into a robust/appropriate format when the hardware backend supports it without additional CPU cost.
+- If H.264 elementary streams remain the most reliable capture format, record them during the session and remux/verify after timing-critical activity.
+- Do not run expensive transcoding during TASK.
+- Preserve the original capture if remux/repair fails.
+- Any post-session repair state must be visible in `final_status.json` and the camera event log.
+
+### 19.5 Dual-camera session outputs
+
+Write a camera manifest containing per-camera:
+
+```text
+camera_id
+role
+stable_device_identifier
+backend
+negotiated_mode
+start_utc_ns
+start_monotonic_ns
+stop_utc_ns
+stop_monotonic_ns
+output_path
+bytes_written
+reported_frames_if_available
+dropped_frames_if_available
+exit_status
+verification_state
+```
+
+Use deterministic filenames such as:
+
+```text
+camera/<camera_id>/capture.h264
+camera/<camera_id>/capture.mp4
+camera/<camera_id>/events.jsonl
+```
+
+The exact extension may vary by backend, but the manifest is authoritative.
+
+### 19.6 Performance rule
+
+The dual-camera subsystem is not accepted merely because both files record. It must pass simultaneous-load tests with the real display, GPIO/lick worker, telemetry, and session logging. Any camera mode that causes missed vblanks, unsafe GPIO latency, excessive lick-event loss, memory pressure, thermal throttling, or storage stalls is rejected or reduced in resolution/FPS/codec load.
+
+Camera operations must remain outside the display and GPIO timing paths.
 
 ---
 
@@ -1335,7 +1478,7 @@ calibration ID
 asset manifest hash
 all random seeds
 monitor destination configuration without secrets
-camera host identifier
+local camera stable identifiers, roles, negotiated capture modes, and capture backend/tool versions
 ```
 
 ### 20.4 Cache model
@@ -1427,6 +1570,7 @@ stimulus_parameters
 eta_sec
 planned_finish_utc
 camera_state
+camera_states
 qc_state
 ```
 
@@ -1791,17 +1935,34 @@ With no mouse and controlled water collection:
 
 Use at least the same scale as the prior 50-trial display calibration. Report median, p95, range, and outliers. Physical timing should remain within one display refresh of the approved behavioral target unless a stricter protocol-specific threshold is defined in `docs/hardware_acceptance.md`.
 
-### 25.4 Camera validation
+### 25.4 Dual-camera validation
 
-Run:
+First identify the real camera stack and stable identities using read-only tools such as `v4l2-ctl --list-devices`, `udevadm info`, `lsusb -t`, media-controller inspection, and Raspberry Pi camera enumeration commands when applicable. Do not assume the many `/dev/video*` nodes correspond one-to-one with the two physical cameras.
 
-- Start/stop.
+Validate each camera alone and both simultaneously:
+
+- Stable device resolution across reboot/replug where applicable.
+- Requested versus negotiated resolution/FPS/format.
+- Start/stop and bounded shutdown.
 - Output-growth confirmation.
-- Interrupted transfer recovery.
-- Conversion retry/recovery.
-- Hash mismatch handling.
-- Remote retention after failure.
-- Successful verified cleanup.
+- Local file verification.
+- Conversion/remux retry/recovery when used.
+- Capture-process crash handling.
+- One-camera failure while the other continues.
+- Disk-full/low-space preflight behavior.
+- No deletion of the only local capture after verification failure.
+- Per-camera timestamp/manifest completeness.
+- Dropped-frame reporting when the backend exposes it.
+
+Then run an integrated single-Pi stress test with:
+
+- Both cameras recording.
+- KMS display presenting a representative high-load frame program.
+- GPIO worker active with simulated/manual lick edges and reward outputs disabled or safely instrumented.
+- Telemetry enabled and disabled in comparison runs.
+- Normal session logging to the target storage.
+
+Record CPU load, RAM/swap, disk throughput/latency, temperature/throttling, display missed-vblank metrics, lick-event integrity, camera drops, and telemetry publish latency. The selected two-camera mode is accepted only if it does not measurably compromise experimental timing/safety.
 
 ### 25.5 Monitor validation
 
@@ -1898,11 +2059,13 @@ Codex must implement in this order. Do not mark a later hardware-dependent phase
 
 - [ ] Run read-only SSH audit at `pi@10.42.84.10`.
 - [ ] Resolve OS/Python/mount/permission issues.
+- [ ] Identify both physical cameras and map stable identities, supported formats, FPS/resolutions, and USB/CSI/media topology.
+- [ ] Measure target storage free space and baseline sequential write throughput suitable for two concurrent camera streams.
 - [ ] Create and review the actual rig profile.
 - [ ] Install dependencies using bootstrap script.
 - [ ] Confirm no runtime requires root.
 
-**Gate 2:** Target report is complete and Python 3.13.x, DRM, GPIO, storage, and time sync are ready.
+**Gate 2:** Target report is complete and Python 3.13.x, DRM, GPIO, both cameras, storage, and time sync are ready for backend implementation.
 
 ### Phase 3 - KMS/DRM display proof and backend
 
@@ -1916,19 +2079,22 @@ Codex must implement in this order. Do not mark a later hardware-dependent phase
 
 **Gate 3:** Direct KMS backend passes engineering acceptance on the actual display.
 
-### Phase 4 - Natural images and camera
+### Phase 4 - Natural images and local dual-camera subsystem
 
 - [ ] Port converter and asset verification.
 - [ ] Port selection/sequence/ITI behavior.
 - [ ] Add both legacy final-ITI profiles.
 - [ ] Port event/metadata outputs.
-- [ ] Consolidate camera controller.
+- [ ] Replace the legacy remote camera transport with the local dual-camera supervisor/workers.
+- [ ] Add stable device resolution and per-camera manifests.
+- [ ] Keep capture streaming/buffering bounded and outside Python frame queues.
 - [ ] Pass golden plan tests.
-- [ ] Run no-camera and camera hardware sessions without a mouse.
+- [ ] Run no-camera, each-camera-only, and both-camera hardware sessions without a mouse.
+- [ ] Run display timing comparison with cameras off versus both cameras on.
 
-**Gate 4:** Natural-image presentation matches plan, physical frame timing, photodiode behavior, and camera archival requirements.
+**Gate 4:** Natural-image presentation matches plan and physical photodiode timing while both local cameras can record concurrently without unacceptable display, memory, storage, or thermal impact.
 
-### Phase 5 - Pi 5 GPIO worker and spout training
+### Phase 5 - Pi 5 GPIO worker, spout training, and integrated contention test
 
 - [ ] Port worker to explicit lgpio backend.
 - [ ] Add safe IPC/event model.
@@ -1936,8 +2102,10 @@ Codex must implement in this order. Do not mark a later hardware-dependent phase
 - [ ] Validate no-water GPIO behavior.
 - [ ] Validate controlled reward/suction/lick behavior.
 - [ ] Pass criterion/water/accounting tests.
+- [ ] Stress the GPIO/lick worker while both cameras record and the KMS display runs.
+- [ ] Verify camera workers cannot block reward/suction cleanup or cause lick-event loss.
 
-**Gate 5:** GPIO safety and spout-training hardware acceptance pass.
+**Gate 5:** GPIO safety and spout-training acceptance pass under the same-Pi dual-camera load, not only with cameras disabled.
 
 ### Phase 6 - Reward conditioning
 
@@ -1946,7 +2114,7 @@ Codex must implement in this order. Do not mark a later hardware-dependent phase
 - [ ] Add compatibility segmented display mode.
 - [ ] Add continuous KMS milestone mode behind calibration.
 - [ ] Build new Pi 5 timing calibration.
-- [ ] Run no-mouse 50+ trial validation.
+- [ ] Run no-mouse 50+ trial validation with the production dual-camera mode enabled as well as a camera-off comparison run.
 - [ ] Verify acquisition and reversal plans.
 
 **Gate 6:** Reward timing and safety are physically validated and a versioned Pi 5 calibration profile exists.
@@ -2006,7 +2174,8 @@ The new system is complete only when all are true:
 - Reward/suction timing has a new Pi 5 physical calibration.
 - Spout-training criterion and water safeguards pass tests.
 - Drifting gratings and retinotopy pass geometry/frame tests.
-- Camera data is verified and safely retained/cleaned.
+- Both local cameras can record concurrently on the experiment Pi; their data and manifests are verified and safely retained.
+- Full dual-camera recording does not cause unacceptable display timing errors, lick loss, reward/suction timing degradation, memory pressure, disk stalls, or thermal throttling.
 - Existing important output filenames and columns remain usable.
 - Assignment/state data was not lost or mutated unsafely.
 - Telemetry is nonblocking, optional, and protocol-neutral.
@@ -2036,6 +2205,10 @@ Codex must not:
 - Run reward/suction hardware tests without an explicit water-actuation flag.
 - Run experimental reward conditioning with an uncalibrated Pi 5 display profile.
 - Hide cleanup or camera failures behind a generic `complete` status.
+- Reintroduce a second/remote camera Pi, SSH camera control, or automatic cross-Pi video transfer into the production path.
+- Hard-code camera identity to `/dev/video0` and `/dev/video1`.
+- Pull full camera frames through Python or run CPU-heavy video transcoding during TASK without a saved hardware timing/resource acceptance report.
+- Let a camera worker own reward/suction/lick GPIO or run inside the GPIO timing process.
 - Treat software timestamps as physical onset without calibration.
 - Modify `/boot/firmware/config.txt`, kernel command line, or system groups without backup and an explicit logged step.
 
@@ -2051,7 +2224,8 @@ Codex must keep these current during implementation:
 - `docs/reward_timing.md`: timing references, event flow, and calibration semantics.
 - `docs/data_format.md`: common and protocol-specific outputs.
 - `docs/telemetry_protocol.md`: packet schema and examples.
-- `docs/camera_workflow.md`: success/failure states.
+- `docs/camera_workflow.md`: local two-camera identity, process model, outputs, success/failure states, and recovery.
+- `docs/resource_budget.md`: simultaneous display/GPIO/dual-camera/storage/telemetry load measurements and accepted operating envelope.
 - `docs/deployment.md`: clean install and update.
 - `docs/rollback.md`: code and hardware rollback.
 - `docs/hardware_acceptance.md`: exact commands, measurements, acceptance results, and sign-off.
@@ -2069,7 +2243,7 @@ Codex must keep these current during implementation:
 6. When old repositories disagree, encode named compatibility profiles rather than silently choosing one.
 7. Record all deliberate behavior changes in an ADR and changelog.
 8. Never perform destructive remote actions automatically.
-9. Remote target commands begin with identity and read-only preflight checks.
+9. Remote deployment/audit commands to the experiment Pi begin with identity and read-only preflight checks; camera recording itself is local and does not use SSH.
 10. Physical hardware gates require saved reports; a successful command exit is not sufficient evidence.
 11. Do not mark the implementation production-ready while the display or reward calibration is pending.
 12. Maintain the old Pi 4 path as a rollback reference until the user explicitly approves retirement.
@@ -2082,4 +2256,4 @@ Begin with the following bounded task:
 
 > Create the `rpi_vstim_suite` repository skeleton, `pyproject.toml`, package CLI, configuration dataclasses/validation, fake display backend, simulated hardware worker, common session/lifecycle/provenance outputs, compatibility-wrapper stubs, Python 3.13 CI, source-baseline templates, migration-matrix template, and `IMPLEMENTATION_STATUS.md`. Do not yet copy protocol monoliths or modify the Pi. Then inventory the four source repositories at their current commits and fill the baseline/migration files. Run tests and commit this as Phase 0/1 groundwork.
 
-After that commit, perform the read-only Pi 5 audit and start the standalone KMS display probe. The KMS gate is the first hardware-critical milestone.
+After that commit, perform the read-only Pi 5 audit, including explicit identification of both local cameras and their stable device/mode information, then start the standalone KMS display probe. The KMS gate is the first hardware-critical milestone; dual-camera resource acceptance follows once the display backend exists.
