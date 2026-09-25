@@ -22,11 +22,13 @@ class KmsDisplayBackend:
         *,
         native_binary: Path | str | None = None,
         photodiode: PhotodiodePatch | None = None,
+        use_lease: bool = False,
     ) -> None:
         self.config: DisplayConfig | None = None
         self.info: DisplayInfo | None = None
         self.native_binary = native_binary
         self.photodiode = photodiode or PhotodiodePatch("bottom_right", 50, 255, 0)
+        self.use_lease = use_lease
 
     def open(self, config: DisplayConfig) -> DisplayInfo:
         result = probe_config(config)
@@ -83,6 +85,7 @@ class KmsDisplayBackend:
                 patch_corner=self.photodiode.corner,
                 patch_on=self.photodiode.on_value,
                 patch_off=self.photodiode.off_value,
+                lease=self.use_lease,
             )
         except Exception:
             self.close()

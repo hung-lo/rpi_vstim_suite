@@ -49,10 +49,12 @@ def test_native_probe_wrapper_builds_bounded_command(monkeypatch, tmp_path):
         color=(1, 2, 3),
         patch_corner="top_left",
         patch_size=12,
+        lease=True,
     )
     assert result["completed_frame_count"] == 2
     assert "--connector" in calls["command"]
     assert "top_left" in calls["command"]
+    assert "--lease" in calls["command"]
     assert calls["kwargs"]["timeout"] >= 10.0
     assert "--probe-only" not in calls["command"]
 

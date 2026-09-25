@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     kms_probe_command.add_argument("--config", type=Path, help="TOML configuration file")
     kms_probe_command.add_argument("--binary", type=Path, help="native kms_probe executable")
     kms_probe_command.add_argument("--device", help="DRM card; omitted scans card*")
+    kms_probe_command.add_argument("--lease", action="store_true")
     kms_probe_command.add_argument("--json", action="store_true", dest="as_json")
     kms_smoke_command = hardware_commands.add_parser(
         "kms-smoke", help="short native DRM page-flip smoke test with restoration"
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     kms_smoke_command.add_argument("--binary", type=Path, help="native kms_probe executable")
     kms_smoke_command.add_argument("--device", help="DRM card; omitted scans card*")
     kms_smoke_command.add_argument("--frames", type=int, default=60)
+    kms_smoke_command.add_argument("--lease", action="store_true")
     kms_smoke_command.add_argument("--json", action="store_true", dest="as_json")
 
     config = commands.add_parser("config", help="validate configuration")
@@ -107,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 binary=args.binary,
                 device=args.device,
                 probe_only=args.hardware_command == "kms-probe",
+                lease=args.lease,
             )
             print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else payload)
         except (ConfigError, NativeKmsError, OSError, ValueError) as exc:

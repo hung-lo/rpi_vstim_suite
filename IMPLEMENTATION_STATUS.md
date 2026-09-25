@@ -98,10 +98,15 @@ storage remain later acceptance work.
 - [x] Separate native access/resource compatibility diagnostics from
   modesetting ownership and page-flip status; add compositor-ownership error
   classification and synthetic dropped-frame statistics.
+- [x] Add an isolated Wayland DRM-lease client boundary, lease-fd handoff to
+  the existing native KMS path, and hardware-independent lease lifecycle tests.
 - [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
   restoration; blocked by the active `labwc` DRM owner.
 - [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
-  HDMI-A-2 preview continuity, revocation, and recovery.
+  HDMI-A-2 preview continuity, revocation, and recovery; the first supervised
+  probe-only request terminated with a native client segmentation fault before
+  reporting a lease object set. See
+  `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
 Provisional user-authorized mapping: `HDMI-A-1` is the stimulus display and
@@ -119,10 +124,12 @@ session configuration was changed. See
 `docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
 
 **Canonical Gate 3: not satisfied.** The software implementation, native
-read-only resource proof, and live lease capability discovery are complete,
-but ownership-permitted page-flip timing, lease object-set behavior, physical
-photodiode validation, CRTC restoration under modeset, and production
-frame-cache rendering remain unverified or deferred.
+read-only resource proof, and live lease capability discovery are complete.
+The lease client boundary exists but its first supervised probe-only request
+faulted before reporting a lease object set. Ownership-permitted page-flip
+timing, lease object-set behavior, physical photodiode validation, CRTC
+restoration under modeset, and production frame-cache rendering remain
+unverified or deferred.
 
 ## Historical hardware evidence
 

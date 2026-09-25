@@ -23,6 +23,8 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "drm_lease.h"
+
 #define MAX_FRAMES 10000U
 #define POLL_TIMEOUT_MS 2000
 
@@ -44,6 +46,7 @@ typedef struct {
     const char *patch_corner;
     bool json;
     bool probe_only;
+    bool lease;
     bool color_set;
     unsigned int color[3];
 } Options;
@@ -82,6 +85,9 @@ typedef struct {
     bool primary_plane_compatible;
     drmModeModeInfo mode;
     bool mode_selected;
+    bool lease_active;
+    uint32_t *lease_objects;
+    int lease_object_count;
     bool modeset_active;
 } KmsState;
 
@@ -262,23 +268,15 @@ static int select_mode(const Options *options, KmsState *state) {
     return 0;
 }
 
-static int discover_state(const Options *options, KmsState *state, const char *device) {
-    state->device_exists = access(device, F_OK) == 0;
-    state->device_readable = access(device, R_OK) == 0;
-    state->fd = open(device, O_RDWR | O_CLOEXEC);
-    if (state->fd < 0) {
-        fprintf(stderr, "cannot open DRM device %s (exists=%s readable=%s): %s\n",
-                device, state->device_exists ? "true" : "false",
-                state->device_readable ? "true" : "false", strerror(errno));
-        return -1;
-    }
+static int inspect_state_fd(const Options *options, KmsState *state, int fd, const char *device) {
+    state->fd = fd;
     snprintf(state->device, sizeof(state->device), "%s", device);
+    state->device_exists = true;
+    state->device_readable = true;
     state->resources = drmModeGetResources(state->fd);
     if (state->resources == NULL) {
         fprintf(stderr, "cannot enumerate DRM resources on %s: %s\n",
                 device, strerror(errno));
-        close(state->fd);
-        state->fd = -1;
         return -1;
     }
     state->resources_enumerated = true;
@@ -367,6 +365,19 @@ static int discover_state(const Options *options, KmsState *state, const char *d
     return 0;
 }
 
+static int discover_state(const Options *options, KmsState *state, const char *device) {
+    state->device_exists = access(device, F_OK) == 0;
+    state->device_readable = access(device, R_OK) == 0;
+    state->fd = open(device, O_RDWR | O_CLOEXEC);
+    if (state->fd < 0) {
+        fprintf(stderr, "cannot open DRM device %s (exists=%s readable=%s): %s\n",
+                device, state->device_exists ? "true" : "false",
+                state->device_readable ? "true" : "false", strerror(errno));
+        return -1;
+    }
+    return inspect_state_fd(options, state, state->fd, device);
+}
+
 static int discover_device(const Options *options, KmsState *state) {
     if (options->device != NULL) {
         return discover_state(options, state, options->device);
@@ -400,6 +411,45 @@ static int discover_device(const Options *options, KmsState *state) {
     }
     fprintf(stderr, "no DRM card exposes connected connector %s\n", options->connector);
     return -1;
+}
+
+static bool lease_contains(const KmsState *state, uint32_t object_id) {
+    for (int index = 0; index < state->lease_object_count; ++index) {
+        if (state->lease_objects[index] == object_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int validate_lease_objects(KmsState *state) {
+    drmModeObjectListPtr lease = drmModeGetLease(state->fd);
+    if (lease == NULL || lease->count == 0) {
+        fprintf(stderr, "leased DRM fd returned no lease object set: %s\n", strerror(errno));
+        free(lease);
+        return -1;
+    }
+    state->lease_object_count = (int)lease->count;
+    state->lease_objects = calloc(lease->count, sizeof(*state->lease_objects));
+    if (state->lease_objects == NULL) {
+        fprintf(stderr, "cannot allocate leased DRM object list\n");
+        free(lease);
+        state->lease_object_count = 0;
+        return -1;
+    }
+    memcpy(state->lease_objects, lease->objects,
+           lease->count * sizeof(*state->lease_objects));
+    free(lease);
+    if (!lease_contains(state, state->connector->connector_id) ||
+        !lease_contains(state, state->crtc_id) ||
+        !lease_contains(state, state->primary_plane_id)) {
+        fprintf(stderr,
+                "leased DRM object set is missing connector %u, CRTC %u, or primary plane %u\n",
+                state->connector->connector_id, state->crtc_id, state->primary_plane_id);
+        return -1;
+    }
+    state->lease_active = true;
+    return 0;
 }
 
 static int create_dumb_buffer(const Options *options, KmsState *state, DumbBuffer *buffer) {
@@ -572,6 +622,9 @@ static int restore_crtc(KmsState *state) {
 }
 
 static void free_state(KmsState *state) {
+    free(state->lease_objects);
+    state->lease_objects = NULL;
+    state->lease_object_count = 0;
     if (state->planes != NULL) {
         drmModeFreePlaneResources(state->planes);
         state->planes = NULL;
@@ -641,6 +694,17 @@ static void fourcc_string(uint32_t format, char *buffer, size_t size) {
     snprintf(buffer, size, "%s", value);
 }
 
+static void print_lease_objects_json(const KmsState *state) {
+    printf("[");
+    for (int index = 0; index < state->lease_object_count; ++index) {
+        if (index != 0) {
+            putchar(',');
+        }
+        printf("%u", state->lease_objects[index]);
+    }
+    printf("]");
+}
+
 static void print_probe_only(const Options *options, const KmsState *state) {
     if (options->json) {
         printf("{\n  \"device\": ");
@@ -649,6 +713,10 @@ static void print_probe_only(const Options *options, const KmsState *state) {
         json_string(options->connector);
         printf(",\n  \"connector_id\": %u,\n  \"crtc_id\": %u,\n",
                state->connector->connector_id, state->crtc_id);
+        printf("  \"ownership\": \"%s\",\n  \"lease_objects\": ",
+               state->lease_active ? "lease-active" : "direct");
+        print_lease_objects_json(state);
+        printf(",\n");
         printf("  \"selected_mode\": \"%s@%.6g\",\n  \"nominal_refresh_hz\": %.9g,\n",
                state->mode.name, mode_refresh(&state->mode), mode_refresh(&state->mode));
         printf("  \"primary_plane_id\": %u,\n  \"primary_formats\": [",
@@ -684,6 +752,14 @@ static void print_probe_only(const Options *options, const KmsState *state) {
         printf("device=%s connector=%s crtc=%u mode=%s@%.6g primary_plane=%u\n",
                state->device, options->connector, state->crtc_id,
                state->mode.name, mode_refresh(&state->mode), state->primary_plane_id);
+        printf("ownership=%s lease_objects=", state->lease_active ? "lease-active" : "direct");
+        for (int index = 0; index < state->lease_object_count; ++index) {
+            if (index != 0) {
+                putchar(',');
+            }
+            printf("%u", state->lease_objects[index]);
+        }
+        putchar('\n');
         printf("primary_formats=");
         for (uint32_t index = 0; index < state->primary_format_count; ++index) {
             char format[5];
@@ -780,6 +856,10 @@ static void print_result(
         json_string(options->connector);
         printf(",\n  \"connector_id\": %u,\n  \"crtc_id\": %u,\n",
                state->connector->connector_id, state->crtc_id);
+        printf("  \"ownership\": \"%s\",\n  \"lease_objects\": ",
+               state->lease_active ? "lease-active" : "direct");
+        print_lease_objects_json(state);
+        printf(",\n");
         printf("  \"requested_mode\": \"%ux%u@%.6g\",\n",
                options->width, options->height, options->refresh);
         printf("  \"selected_mode\": \"%s@%.6g\",\n",
@@ -866,6 +946,7 @@ static void usage(const char *program) {
             "  --patch-on VALUE    photodiode on value (default 255)\n"
             "  --patch-off VALUE   photodiode off value (default 0)\n"
             "  --color R,G,B       hold background color while toggling patch\n"
+            "  --lease             acquire a Wayland DRM lease for the connector\n"
             "  --probe-only        enumerate resources without modesetting\n"
             "  --json              emit machine-readable result\n",
             program);
@@ -912,12 +993,13 @@ int main(int argc, char **argv) {
         {"patch-on", required_argument, NULL, 'a'},
         {"patch-off", required_argument, NULL, 'b'},
         {"color", required_argument, NULL, 'o'},
+        {"lease", no_argument, NULL, 'L'},
         {"probe-only", no_argument, NULL, 'P'},
         {"json", no_argument, NULL, 'j'},
         {"help", no_argument, NULL, '?'}
     };
     int option;
-    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:Pj", long_options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:LPj", long_options, NULL)) != -1) {
         char *end = NULL;
         switch (option) {
         case 'd': options.device = optarg; break;
@@ -942,6 +1024,7 @@ int main(int argc, char **argv) {
             }
             options.color_set = true;
             break;
+        case 'L': options.lease = true; break;
         case 'P': options.probe_only = true; break;
         case 'j': options.json = true; break;
         case '?': usage(argv[0]); return 0;
@@ -963,16 +1046,33 @@ int main(int argc, char **argv) {
         fprintf(stderr, "invalid KMS probe options\n");
         return 2;
     }
+    if (options.lease && options.device != NULL) {
+        fprintf(stderr, "--lease cannot be combined with --device; the lease supplies its DRM fd\n");
+        return 2;
+    }
 
     KmsState state = {.fd = -1};
     FlipState flips = {0};
     DumbBuffer buffers[2] = {0};
+    DrmLease lease = {.fd = -1, .state = DRM_LEASE_FAILED};
     bool restored = false;
     bool aborted = false;
     int exit_code = 1;
     install_signal_handlers();
 
-    if (discover_device(&options, &state) != 0) {
+    if (options.lease) {
+        char lease_error[256] = {0};
+        if (drm_lease_acquire(options.connector, &lease, lease_error, sizeof(lease_error)) != 0) {
+            fprintf(stderr, "DRM lease acquisition failed: %s\n", lease_error);
+            goto cleanup;
+        }
+        int leased_fd = drm_lease_take_fd(&lease);
+        if (leased_fd < 0 || inspect_state_fd(&options, &state, leased_fd, "wayland-drm-lease") != 0 ||
+            validate_lease_objects(&state) != 0) {
+            fprintf(stderr, "DRM lease resource validation failed\n");
+            goto cleanup;
+        }
+    } else if (discover_device(&options, &state) != 0) {
         goto cleanup;
     }
     if (options.probe_only) {
@@ -1056,5 +1156,12 @@ cleanup:
     }
     free(flips.events);
     free_state(&state);
+    if (options.lease) {
+        char lease_error[256] = {0};
+        if (drm_lease_release(&lease, lease_error, sizeof(lease_error)) != 0) {
+            fprintf(stderr, "DRM lease/compositor recovery failed: %s\n", lease_error);
+            exit_code = 1;
+        }
+    }
     return exit_code;
 }

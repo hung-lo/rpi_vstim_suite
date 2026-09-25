@@ -40,6 +40,7 @@ def run_native_probe(
     patch_on: int = 255,
     patch_off: int = 0,
     probe_only: bool = False,
+    lease: bool = False,
 ) -> dict[str, Any]:
     if frames <= 0:
         raise ValueError("frames must be positive")
@@ -72,6 +73,8 @@ def run_native_probe(
     ]
     if probe_only:
         command.append("--probe-only")
+    if lease:
+        command.append("--lease")
     if device:
         command.extend(("--device", device))
     if color is not None:
