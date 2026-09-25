@@ -47,6 +47,7 @@ typedef struct {
     bool json;
     bool probe_only;
     bool lease;
+    bool lease_discover;
     bool color_set;
     unsigned int color[3];
 } Options;
@@ -947,9 +948,43 @@ static void usage(const char *program) {
             "  --patch-off VALUE   photodiode off value (default 0)\n"
             "  --color R,G,B       hold background color while toggling patch\n"
             "  --lease             acquire a Wayland DRM lease for the connector\n"
+            "  --lease-discover    enumerate lease offers without requesting a lease\n"
             "  --probe-only        enumerate resources without modesetting\n"
             "  --json              emit machine-readable result\n",
             program);
+}
+
+static void print_lease_discovery(
+    const Options *options, const DrmLeaseDiscovery *discovery
+) {
+    if (options->json) {
+        printf("{\n  \"ownership\": \"lease-available\",\n");
+        printf("  \"requested_connector\": \"%s\",\n", options->connector);
+        printf("  \"drm_fd_received\": %s,\n",
+               discovery->drm_fd_received ? "true" : "false");
+        printf("  \"offers\": [");
+        for (unsigned int index = 0; index < discovery->offer_count; ++index) {
+            const DrmLeaseOffer *offer = &discovery->offers[index];
+            printf("%s{\"name\":\"%s\",\"connector_id\":%u,\"withdrawn\":%s}",
+                   index == 0 ? "" : ",",
+                   offer->name,
+                   offer->connector_id,
+                   offer->withdrawn ? "true" : "false");
+        }
+        printf("]\n}\n");
+        return;
+    }
+    printf("lease discovery: requested=%s drm_fd_received=%s offers=%u\n",
+           options->connector,
+           discovery->drm_fd_received ? "true" : "false",
+           discovery->offer_count);
+    for (unsigned int index = 0; index < discovery->offer_count; ++index) {
+        const DrmLeaseOffer *offer = &discovery->offers[index];
+        printf("  %s connector_id=%u withdrawn=%s\n",
+               offer->name,
+               offer->connector_id,
+               offer->withdrawn ? "true" : "false");
+    }
 }
 
 static int parse_color(const char *value, unsigned int color[3]) {
@@ -994,12 +1029,13 @@ int main(int argc, char **argv) {
         {"patch-off", required_argument, NULL, 'b'},
         {"color", required_argument, NULL, 'o'},
         {"lease", no_argument, NULL, 'L'},
+        {"lease-discover", no_argument, NULL, 'D'},
         {"probe-only", no_argument, NULL, 'P'},
         {"json", no_argument, NULL, 'j'},
         {"help", no_argument, NULL, '?'}
     };
     int option;
-    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:LPj", long_options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:LDPj", long_options, NULL)) != -1) {
         char *end = NULL;
         switch (option) {
         case 'd': options.device = optarg; break;
@@ -1025,6 +1061,7 @@ int main(int argc, char **argv) {
             options.color_set = true;
             break;
         case 'L': options.lease = true; break;
+        case 'D': options.lease_discover = true; break;
         case 'P': options.probe_only = true; break;
         case 'j': options.json = true; break;
         case '?': usage(argv[0]); return 0;
@@ -1049,6 +1086,26 @@ int main(int argc, char **argv) {
     if (options.lease && options.device != NULL) {
         fprintf(stderr, "--lease cannot be combined with --device; the lease supplies its DRM fd\n");
         return 2;
+    }
+    if (options.lease_discover && options.lease) {
+        fprintf(stderr, "--lease-discover cannot be combined with --lease\n");
+        return 2;
+    }
+    if (options.lease_discover && options.device != NULL) {
+        fprintf(stderr, "--lease-discover cannot be combined with --device\n");
+        return 2;
+    }
+
+    if (options.lease_discover) {
+        DrmLeaseDiscovery discovery = {0};
+        char discovery_error[256] = {0};
+        if (drm_lease_discover(
+                options.connector, &discovery, discovery_error, sizeof(discovery_error)) != 0) {
+            fprintf(stderr, "DRM lease discovery failed: %s\n", discovery_error);
+            return 1;
+        }
+        print_lease_discovery(&options, &discovery);
+        return 0;
     }
 
     KmsState state = {.fd = -1};

@@ -100,12 +100,17 @@ storage remain later acceptance work.
   classification and synthetic dropped-frame statistics.
 - [x] Add an isolated Wayland DRM-lease client boundary, lease-fd handoff to
   the existing native KMS path, and hardware-independent lease lifecycle tests.
+- [x] Diagnose and fix the first DRM-lease client SIGSEGV: the hand-written
+  v1 binding omitted the connector/lease destructor request metadata. Add
+  explicit release acknowledgment handling, sanitizer/self-test coverage, and
+  a Pi enumeration-only preflight without submitting a lease.
 - [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
   restoration; blocked by the active `labwc` DRM owner.
 - [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
   HDMI-A-2 preview continuity, revocation, and recovery; the first supervised
   probe-only request terminated with a native client segmentation fault before
-  reporting a lease object set. See
+  reporting a lease object set. The binding fix and enumeration-only preflight
+  are complete, but the supervised retry remains pending. See
   `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
@@ -119,14 +124,17 @@ HDMI-A-2/CRTC 104/primary plane 93; both primary planes advertise `RG16`
 (DRM RGB565). A one-frame HDMI-A-1 modeset attempt failed before modesetting
 with an explicit DRM-master ownership diagnostic because `labwc` owns
 `/dev/dri/card1`. The active Wayland registry exposes `wp_drm_lease_device_v1`
-and offers both HDMI connectors, but no lease was requested. No compositor or
+and offers both HDMI connectors. After the binding fix, the Pi sanitizer
+preflight enumerated HDMI-A-1/connector 33 and HDMI-A-2/connector 42 and
+cleanly released the device without submitting a lease. No compositor or
 session configuration was changed. See
 `docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
 
 **Canonical Gate 3: not satisfied.** The software implementation, native
-read-only resource proof, and live lease capability discovery are complete.
-The lease client boundary exists but its first supervised probe-only request
-faulted before reporting a lease object set. Ownership-permitted page-flip
+read-only resource proof, live lease capability discovery, and offline binding
+preflight are complete. The first supervised probe-only request faulted before
+reporting a lease object set, and no live retry has yet been made.
+Ownership-permitted page-flip
 timing, lease object-set behavior, physical photodiode validation, CRTC
 restoration under modeset, and production frame-cache rendering remain
 unverified or deferred.
