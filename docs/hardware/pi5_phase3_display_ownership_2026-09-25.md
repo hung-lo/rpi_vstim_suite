@@ -34,7 +34,11 @@ The active compositor layout, read with `wlr-randr`, is:
 | stimulus role (provisional) | `HDMI-A-1`, connector 33 | `1024x600@59.821 Hz` | `0,0` | Lenovo LEN L1950wD |
 | preview role (provisional) | `HDMI-A-2`, connector 42 | `1024x600@59.821 Hz` | `1024,0` | Addi-Data HDMI |
 
-Both outputs are therefore managed by the same labwc DRM session. The native
+Both outputs are therefore managed by the same labwc DRM session. The role
+labels in this historical pre-lease table were provisional and are superseded
+by the physical mapping recorded in
+`pi5_phase3_drm_lease_2026-09-25.md`: HDMI-A-2 is stimulus and HDMI-A-1 is the
+camera monitor. The native
 probe can enumerate both connectors, their CRTCs (92 and 104), and compatible
 primary planes, but `drmModeSetCrtc()` is a modesetting ownership operation.
 The real-hardware smoke attempt failed before modesetting with:

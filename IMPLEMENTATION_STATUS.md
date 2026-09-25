@@ -123,9 +123,14 @@ storage remain later acceptance work.
   `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
-Provisional user-authorized mapping: `HDMI-A-1` is the stimulus display and
-`HDMI-A-2` is the camera-preview display. This remains configurable and is not
-presented as physically re-verified.
+- [x] Verify the physical display roles with a controlled leased pattern:
+  `HDMI-A-2` is the visual-stimulus display and `HDMI-A-1` is the
+  camera-monitor display. The mapping remains configurable in the Pi 5 rig
+  profile.
+
+The 10,000-frame RGB565 attempt was intentionally interrupted at 9,972
+completed frames after the physical-role mismatch was observed. It is recorded
+as a mapping-discovery run, not as a timing failure or long-duration acceptance.
 
 The native probe compiled on the Pi with Debian Trixie `libdrm-dev`. Its
 read-only mode returned HDMI-A-1/CRTC 92/primary plane 81 and
@@ -141,10 +146,11 @@ session configuration was changed. See
 
 **Canonical Gate 3: not satisfied.** The software implementation, native
 read-only resource proof, live lease capability discovery, offline binding
-preflight, the first supervised lease/object/recovery probe, and the first
-300-frame leased modeset/page-flip run are complete. Physical photodiode
-validation, long-duration acceptance, production frame-cache rendering, and
-integrated hardware acceptance remain unverified or deferred.
+preflight, supervised lease/object/recovery probes, the first 300-frame leased
+modeset/page-flip run, and physical connector-role discovery are complete.
+Long-duration timing acceptance, RGB565/XRGB8888 comparison, production
+frame-cache rendering, physical photodiode validation, and integrated hardware
+acceptance remain unverified or deferred.
 
 ## Historical hardware evidence
 

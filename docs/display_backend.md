@@ -10,14 +10,15 @@ selection.
 
 The `[display]` section has independent `stimulus_connector` and
 `preview_connector` values. An empty preview value disables preview routing.
-The provisional, user-authorized rig mapping is:
+The current physically verified Pi 5 rig mapping is:
 
 ```text
-stimulus: HDMI-A-1
-preview:  HDMI-A-2
+stimulus: HDMI-A-2
+preview:  HDMI-A-1
 ```
 
-This is a configuration assumption, not a physical re-verification. Connector
+The mapping was verified by a short HDMI-A-1-only leased pattern observed on
+the camera monitor, followed by a short HDMI-A-2-only leased control. Connector
 names are not embedded in protocol code and can be swapped in a rig profile.
 
 Mode selection requires the configured width/height and accepts a refresh only
@@ -72,7 +73,6 @@ generic display failure. No full display timing acceptance or 10,000-frame
 stress result is claimed.
 
 On the current Pi, labwc 0.9.2 with wlroots 0.19 exposes
-`wp_drm_lease_device_v1` and offers both HDMI outputs. A lease has not yet
-been requested. The ownership investigation and supervised next test are
-documented in
-`docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
+`wp_drm_lease_device_v1` and offers both HDMI outputs. The ownership and
+physical-role validation are documented in
+`docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.

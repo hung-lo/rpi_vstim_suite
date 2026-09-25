@@ -1,9 +1,9 @@
-# User-authorized provisional roles from the 2026-09-25 Pi audit.
+# Physically verified roles on the 2026-09-25 Pi.
 # Replace connector names without changing protocol code if cables are swapped.
 [display]
 backend = "kms"
-stimulus_connector = "HDMI-A-1"
-preview_connector = "HDMI-A-2"
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
 width_px = 1024
 height_px = 600
 refresh_hz = 59.82

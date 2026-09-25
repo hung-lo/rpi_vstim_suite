@@ -330,3 +330,57 @@ are now validated. Physical photodiode timing, median/reporting refinement,
 long-duration 10,000-frame acceptance, production frame rendering,
 SSD/storage validation, and integrated display/camera/GPIO acceptance remain
 pending.
+
+## Physical display-role discovery and interrupted endurance attempt
+
+The next validation began from commit `1ad9f0c`. Fresh preflight at
+`2026-09-25T14:30:36-04:00` confirmed session 436, labwc PID `756533`, both
+outputs connected/current at `1024x600@59.820999 Hz`, and the expected DRM
+objects (HDMI-A-1 connector 33 / CRTC 92; HDMI-A-2 connector 42 / CRTC 104).
+
+The single RGB565 endurance command was started once for 10,000 frames on
+HDMI-A-1. The operator observed that the camera-monitor screen, rather than
+the intended visual-stimulus screen, was blinking. This is a physical role
+mapping discovery, not a timing failure. The SSH control connection was then
+interrupted, so the remote probe was stopped directly with SIGINT at
+`2026-09-25T14:33:44-04:00`; no retry was made.
+
+The probe's normal cleanup completed:
+
+```text
+page-flip run interrupted
+KMS probe failed; restored=true completed=9972
+DRM lease: state=lease-releasing
+DRM lease: state=device-released
+```
+
+Post-cleanup checks confirmed labwc PID `756533` remained alive, session 436
+remained active, both outputs were connected/enabled/current, and normal labwc
+DRM ownership returned. The incomplete output is not used as a 10,000-frame
+timing result.
+
+The physical mapping is now:
+
+| Physical role | DRM connector | Evidence |
+|---|---|---|
+| visual stimulus | `HDMI-A-2`, connector 42 | A1-only lease visibly blinked the camera monitor; the complementary output is the stimulus screen; EDID reports a 470×260 mm Addi-Data display |
+| camera monitor | `HDMI-A-1`, connector 33 | A1-only lease visibly blinked this screen; EDID reports a 150×100 mm Lenovo display |
+
+As the smallest corroborating control, one 30-frame HDMI-A-2-only lease was
+run once at `2026-09-25T14:34:28-04:00`. It completed 30/30 RGB565 page flips
+at `1024x600@59.8214 Hz`, with lease objects connector 42, primary plane 93,
+CRTC 104, and cursor plane 666; it reported `restored=true`. Labwc remained
+PID `756533` and both outputs recovered normally. HDMI-A-1 was not requested
+by this control lease and remained compositor-managed.
+
+The authoritative Pi 5 rig profile now assigns:
+
+```text
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
+```
+
+This is a configurable role change only; no protocol logic, boot/session
+configuration, camera, GPIO, reward, storage, or persistent compositor
+configuration was changed. The 10,000-frame timing run must be restarted only
+after a new supervised authorization using the corrected role.
