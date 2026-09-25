@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .event_log import EventLogger
 from .provenance import collect_provenance, resolve_source_commit
 from .timestamps import monotonic_ns, utc_ns
 
@@ -47,27 +48,93 @@ class SessionContext:
 class SessionOutput:
     def __init__(self, context: SessionContext) -> None:
         self.context = context
+        self._manifest: dict[str, Any] = {}
+        self._events: EventLogger | None = None
 
     def write_initial_outputs(self) -> None:
         self.context.session_root.mkdir(parents=True, exist_ok=True)
         atomic_write_json(self.context.session_root / "resolved_config.json", self.context.resolved_config)
         atomic_write_json(self.context.session_root / "provenance.json", self.context.host_provenance)
-        atomic_write_json(
-            self.context.session_root / "session_manifest.json",
+        self._manifest = {
+            "session_id": self.context.session_id,
+            "protocol": self.context.protocol_name,
+            "protocol_version": self.context.protocol_version,
+            "created_utc_ns": self.context.created_utc_ns,
+            "random_seeds": self.context.random_seeds,
+            "source_commit": self.context.source_commit,
+            "status": "CREATED",
+            "lifecycle": "CREATED",
+            "phase": "00",
+            "degraded": [],
+        }
+        self._write_manifest()
+        self._events = EventLogger(self.context.session_root / "events.csv")
+        self._events.open(["event", "lifecycle", "sequence_id", "timestamp_utc_ns", "detail"])
+        self.record_event("SESSION_CREATED", lifecycle="CREATED")
+
+    def _write_manifest(self) -> None:
+        atomic_write_json(self.context.session_root / "session_manifest.json", self._manifest)
+
+    def write_plan(self, plan: Any) -> None:
+        value = plan.as_dict() if hasattr(plan, "as_dict") else plan
+        atomic_write_json(self.context.session_root / "plan.json", value)
+
+    def record_event(
+        self,
+        event: str,
+        *,
+        lifecycle: str = "",
+        sequence_id: str = "",
+        detail: str = "",
+    ) -> None:
+        if self._events is None:
+            raise RuntimeError("session outputs are not initialized")
+        self._events.write(
             {
-                "session_id": self.context.session_id,
-                "protocol": self.context.protocol_name,
-                "protocol_version": self.context.protocol_version,
-                "created_utc_ns": self.context.created_utc_ns,
-                "random_seeds": self.context.random_seeds,
-                "source_commit": self.context.source_commit,
-                "status": "CREATED",
-                "phase": "00",
-            },
+                "event": event,
+                "lifecycle": lifecycle,
+                "sequence_id": sequence_id,
+                "timestamp_utc_ns": utc_ns(),
+                "detail": detail,
+            }
         )
 
+    def update_status(
+        self,
+        status: str,
+        *,
+        lifecycle: str | None = None,
+        error: str | None = None,
+        degraded: list[str] | None = None,
+        cleanup_errors: list[str] | None = None,
+    ) -> None:
+        if not self._manifest:
+            raise RuntimeError("session outputs are not initialized")
+        self._manifest["status"] = status
+        if lifecycle is not None:
+            self._manifest["lifecycle"] = lifecycle
+        if error is not None:
+            self._manifest["error"] = error
+        if degraded is not None:
+            self._manifest["degraded"] = sorted(set(degraded))
+        if cleanup_errors is not None:
+            self._manifest["cleanup_errors"] = list(cleanup_errors)
+        self._manifest["updated_utc_ns"] = utc_ns()
+        self._write_manifest()
 
-def new_session(config: Config, *, protocol_name: str | None = None, session_id: str = "phase00-simulation", seed: int = 0) -> SessionOutput:
+    def close(self) -> None:
+        if self._events is not None:
+            self._events.close()
+            self._events = None
+
+
+def new_session(
+    config: Config,
+    *,
+    protocol_name: str | None = None,
+    session_id: str = "phase00-simulation",
+    seed: int = 0,
+) -> SessionOutput:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("session_id contains unsupported characters")
     protocol = protocol_name or config.protocol.name

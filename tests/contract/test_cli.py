@@ -10,3 +10,42 @@ def test_doctor_is_non_hardware(capsys):
     assert main(["doctor", "--json"]) == 0
     assert '"hardware_access": false' in capsys.readouterr().out
 
+
+def test_every_software_groundwork_protocol_runs_without_hardware(tmp_path, capsys):
+    protocols = (
+        "natural-images",
+        "reward-conditioning",
+        "spout-training",
+        "drifting-gratings",
+        "retinotopy",
+    )
+    for protocol in protocols:
+        assert main(
+            [
+                "run",
+                protocol,
+                "--simulate",
+                "--output-root",
+                str(tmp_path / protocol),
+                "--session-id",
+                "session",
+            ]
+        ) == 0
+        assert "COMPLETE" in capsys.readouterr().out
+
+
+def test_explicit_config_protocol_mismatch_is_rejected(tmp_path, capsys):
+    config_path = tmp_path / "natural.toml"
+    config_path.write_text('[protocol]\nname = "natural-images"\n', encoding="utf-8")
+    assert main(
+        [
+            "run",
+            "retinotopy",
+            "--simulate",
+            "--config",
+            str(config_path),
+            "--output-root",
+            str(tmp_path / "mismatch"),
+        ]
+    ) == 2
+    assert "protocol/config mismatch" in capsys.readouterr().err

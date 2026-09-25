@@ -1,5 +1,12 @@
 [protocol]
 name = "spout-training"
-version = "placeholder"
+version = "software-groundwork"
 mode = "simulation-only"
-
+max_rewards = 60
+interval_min_s = 8.0
+interval_max_s = 12.0
+criterion_window = 20
+criterion_min_rewards = 20
+criterion_fraction = 0.8
+reward_volume_ul = 5.0
+suction_delay_s = 2.5

@@ -1,5 +1,7 @@
 [protocol]
 name = "natural-images"
-version = "placeholder"
+version = "software-groundwork"
 compatibility_profile = "natural_legacy_plain"
-
+image_count = 5
+repeat_count = 2
+selection_seed = 777
