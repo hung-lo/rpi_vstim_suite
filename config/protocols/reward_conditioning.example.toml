@@ -3,3 +3,7 @@ name = "reward-conditioning"
 version = "software-groundwork"
 mode = "simulation-only"
 blocks = 10
+mouse_id = "simulation-mouse"
+phase = "acquisition"
+trial_frames = 90
+reward_boundary_frames = 60

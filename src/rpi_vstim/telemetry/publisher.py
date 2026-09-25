@@ -21,16 +21,21 @@ class TelemetryPublisher:
 class InMemoryTelemetryPublisher(TelemetryPublisher):
     """Bounded telemetry sink for simulated sessions and integration tests."""
 
-    def __init__(self, *, fail: bool = False, max_messages: int = 256) -> None:
+    def __init__(
+        self, *, fail: bool = False, fail_after: int | None = None, max_messages: int = 256
+    ) -> None:
         self.fail = fail
+        self.fail_after = fail_after
+        self.publish_count = 0
         self.messages: deque[dict[str, Any]] = deque(maxlen=max_messages)
         self.dropped_count = 0
         self.failed = False
 
     def publish(self, payload: object) -> bool:
-        if self.fail:
+        if self.fail or (self.fail_after is not None and self.publish_count >= self.fail_after):
             self.failed = True
             return False
+        self.publish_count += 1
         if len(self.messages) == self.messages.maxlen:
             self.dropped_count += 1
         if hasattr(payload, "as_dict"):

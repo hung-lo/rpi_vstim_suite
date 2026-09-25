@@ -5,8 +5,13 @@ from rpi_vstim.core.lifecycle import LifecycleState
 from rpi_vstim.core.runtime import run_simulated_session
 
 
-def simulation_config(tmp_path, *, cameras=False, telemetry_required=False):
-    values = {"paths": {"output_root": tmp_path}}
+def simulation_config(
+    tmp_path, *, protocol_name="natural-images", cameras=False, telemetry_required=False
+):
+    values = {
+        "paths": {"output_root": tmp_path},
+        "protocol": {"name": protocol_name, "version": "software-groundwork"},
+    }
     if cameras:
         values["cameras"] = {
             "devices": [
@@ -43,7 +48,7 @@ def test_natural_simulation_covers_no_camera_and_two_local_cameras(tmp_path):
 
 def test_reward_simulation_replays_the_frozen_production_schedule(tmp_path):
     result = run_simulated_session(
-        simulation_config(tmp_path),
+        simulation_config(tmp_path, protocol_name="reward-conditioning"),
         protocol_name="reward-conditioning",
         session_id="reward",
         seed=23,

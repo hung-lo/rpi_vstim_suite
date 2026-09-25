@@ -25,6 +25,8 @@ class PlannedEvent:
     def __post_init__(self) -> None:
         if self.frame_count < 0:
             raise ValueError("frame_count must be non-negative")
+        if self.phase not in {"PRE", "TASK", "POST"}:
+            raise ValueError(f"unsupported plan phase: {self.phase}")
         if self.planned_start_frame < 0:
             raise ValueError("planned_start_frame must be non-negative")
         if self.photodiode not in {"on", "off"}:

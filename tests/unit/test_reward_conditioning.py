@@ -57,10 +57,12 @@ def test_phase_reversal_requires_manual_selection_and_water_is_guarded():
 
 def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
     settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=10)
-    first = build_plan(settings)
-    second = build_plan(settings)
+    assignment = MouseAssignment.create("mouse-1", image_pool(), seed=100)
+    first = build_plan(settings, assignment)
+    second = build_plan(settings, assignment)
     assert first.stable_json() == second.stable_json()
     assert len(first.events) == 500
     assert sum(event.metadata["reward_scheduled"] for event in first.events) == 198
     assert sum(event.metadata["reward_eligible"] for event in first.events) == 220
     assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)
+    assert all(event.metadata["reward_scheduled"] is not None for event in first.events)

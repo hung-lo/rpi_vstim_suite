@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from enum import StrEnum
@@ -8,6 +9,9 @@ from typing import Iterable
 
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
 from rpi_vstim.core.session import atomic_write_json
+
+
+PROTOCOL_VERSION = "exposure_reward_partial_reversal_v1"
 
 
 class RewardPhase(StrEnum):
@@ -76,14 +80,12 @@ class AssignmentStore:
     def path_for(self, mouse_id: str) -> Path:
         if not mouse_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in mouse_id):
             raise ValueError("mouse_id contains unsupported characters")
-        return self.root / f"{mouse_id}.json"
+        return self.root / f"{mouse_id}_exposure_reward_v1_assignment.json"
 
     def load(self, mouse_id: str) -> MouseAssignment | None:
         path = self.path_for(mouse_id)
         if not path.is_file():
             return None
-        import json
-
         return MouseAssignment.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
     def save(self, assignment: MouseAssignment) -> None:
@@ -98,6 +100,41 @@ class AssignmentStore:
         return assignment
 
 
+class PhaseStateStore:
+    """Separate persistent phase file matching the legacy runner's contract."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def path_for(self, mouse_id: str) -> Path:
+        if not mouse_id or any(
+            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            for char in mouse_id
+        ):
+            raise ValueError("mouse_id contains unsupported characters")
+        return self.root / f"{mouse_id}_reward_conditioning_state.json"
+
+    def load(self, mouse_id: str) -> "PhaseState | None":
+        path = self.path_for(mouse_id)
+        if not path.is_file():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if value.get("schema_version") != 1 or value.get("protocol_version") != PROTOCOL_VERSION:
+            raise ValueError("unsupported reward phase state")
+        return PhaseState.from_dict(value)
+
+    def save(self, state: "PhaseState") -> None:
+        atomic_write_json(self.path_for(state.mouse_id), state.as_dict())
+
+    def load_or_create(self, mouse_id: str) -> "PhaseState":
+        state = self.load(mouse_id)
+        if state is not None:
+            return state
+        state = PhaseState(mouse_id=mouse_id)
+        self.save(state)
+        return state
+
+
 @dataclass(frozen=True)
 class RewardTrial:
     trial_id: str
@@ -106,11 +143,8 @@ class RewardTrial:
     reward_scheduled: bool
     reward_eligible: bool = False
     suction_scheduled: bool = False
+    reward_delivered: bool | None = None
     lick_count: int = 0
-
-    @property
-    def reward_delivered(self) -> bool:
-        return self.reward_scheduled
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -185,12 +219,37 @@ class WaterBudget:
 
 @dataclass
 class PhaseState:
+    mouse_id: str = ""
     phase: RewardPhase = RewardPhase.ACQUISITION
+    reversal_has_started: bool = False
+    first_reversal_session_id: str | None = None
 
-    def begin_reversal(self, *, manual: bool) -> None:
+    def begin_reversal(self, *, manual: bool, session_id: str | None = None) -> None:
         if not manual:
             raise ValueError("reversal requires an explicit manual selection")
         self.phase = RewardPhase.REVERSAL
+        self.reversal_has_started = True
+        if self.first_reversal_session_id is None:
+            self.first_reversal_session_id = session_id
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "mouse_id": self.mouse_id,
+            "protocol_version": PROTOCOL_VERSION,
+            "current_phase": self.phase.value,
+            "reversal_has_started": self.reversal_has_started,
+            "first_reversal_session_id": self.first_reversal_session_id,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> "PhaseState":
+        return cls(
+            mouse_id=str(value["mouse_id"]),
+            phase=RewardPhase(value.get("current_phase", "acquisition")),
+            reversal_has_started=bool(value.get("reversal_has_started", False)),
+            first_reversal_session_id=value.get("first_reversal_session_id"),
+        )
 
 
 @dataclass(frozen=True)
@@ -205,12 +264,22 @@ class RewardConditioningSettings:
     phase: RewardPhase = RewardPhase.ACQUISITION
 
 
-def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
+def build_plan(
+    settings: RewardConditioningSettings,
+    assignment: MouseAssignment,
+    phase_state: PhaseState | None = None,
+) -> SessionPlan:
     if settings.blocks < 1 or settings.blocks % 10:
         raise ValueError("blocks must be a positive multiple of 10")
-    assignment = MouseAssignment.create(settings.mouse_id, settings.image_pool, seed=settings.seed)
+    if settings.trial_frames < 1:
+        raise ValueError("trial_frames must be at least 1")
+    if not 0 <= settings.reward_boundary_frames <= settings.trial_frames:
+        raise ValueError("reward_boundary_frames must be within trial_frames")
+    if assignment.mouse_id != settings.mouse_id:
+        raise ValueError("assignment mouse_id does not match settings")
+    phase = phase_state.phase if phase_state is not None else settings.phase
     blocks = [
-        build_exposure_block(assignment, seed=settings.seed + block, phase=settings.phase)
+        build_exposure_block(assignment, seed=settings.seed + block, phase=phase)
         for block in range(settings.blocks)
     ]
     eligible_count = sum(trial.reward_eligible for block in blocks for trial in block)
@@ -237,6 +306,7 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
                         "exposure_role": trial.exposure_role,
                         "reward_eligible": trial.reward_eligible,
                         "reward_scheduled": scheduled,
+                        "reward_delivered": None,
                         "suction_scheduled": trial.suction_scheduled,
                         "reward_boundary_frames": settings.reward_boundary_frames,
                     },
@@ -246,7 +316,7 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
         "reward-conditioning",
         settings.seed,
         with_frame_offsets(events),
-        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks, "phase": settings.phase.value},
+        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks, "phase": phase.value},
     )
 
 
@@ -254,8 +324,13 @@ class RewardConditioningProtocol:
     name = "reward-conditioning"
     version = "software-groundwork"
 
-    def build_plan(self, settings: RewardConditioningSettings) -> SessionPlan:
-        return build_plan(settings)
+    def build_plan(
+        self,
+        settings: RewardConditioningSettings,
+        assignment: MouseAssignment,
+        phase_state: PhaseState | None = None,
+    ) -> SessionPlan:
+        return build_plan(settings, assignment, phase_state)
 
 
 protocol = RewardConditioningProtocol()

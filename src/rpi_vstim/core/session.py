@@ -106,6 +106,7 @@ class SessionOutput:
         lifecycle: str | None = None,
         error: str | None = None,
         degraded: list[str] | None = None,
+        cleanup_errors: list[str] | None = None,
     ) -> None:
         if not self._manifest:
             raise RuntimeError("session outputs are not initialized")
@@ -116,6 +117,8 @@ class SessionOutput:
             self._manifest["error"] = error
         if degraded is not None:
             self._manifest["degraded"] = sorted(set(degraded))
+        if cleanup_errors is not None:
+            self._manifest["cleanup_errors"] = list(cleanup_errors)
         self._manifest["updated_utc_ns"] = utc_ns()
         self._write_manifest()
 

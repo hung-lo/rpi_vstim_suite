@@ -22,13 +22,16 @@ def test_telemetry_message_round_trips_with_optional_fields():
 
     restored = TelemetryMessage.from_json(message.to_json())
     assert restored == message
-    assert json.loads(message.to_json())["schema_version"] == 3
+    payload = json.loads(message.to_json())
+    assert payload["schema_version"] == 1
+    assert payload["telemetry_schema_version"] == 3
+    assert payload["type"] == "trial_complete"
 
 
 def test_telemetry_message_rejects_wrong_version_or_missing_fields():
     with pytest.raises(ValueError, match="version"):
         TelemetryMessage.from_json('{"schema_version": 2}')
-    with pytest.raises(ValueError, match="required"):
+    with pytest.raises(ValueError, match="version"):
         TelemetryMessage.from_json('{"schema_version": 3}')
 
 
