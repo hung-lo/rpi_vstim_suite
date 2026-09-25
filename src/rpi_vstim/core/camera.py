@@ -27,6 +27,8 @@ class FakeCameraStatus:
     role: str
     stable_device_identifier: str
     required: bool
+    requested_start: bool = False
+    requested_stop: bool = False
     state: CameraState = CameraState.CONFIGURED
     output_path: str = ""
     bytes_written: int = 0
@@ -57,6 +59,7 @@ class FakeLocalCameraService:
     def start(self, session_root: Path) -> None:
         self.session_root = session_root
         for status in self.statuses.values():
+            status.requested_start = True
             status.output_path = f"camera/{status.camera_id}/capture.fake.json"
             if status.camera_id in self.fail_ids:
                 status.state = CameraState.FAILED if status.required else CameraState.DEGRADED
@@ -71,6 +74,7 @@ class FakeLocalCameraService:
 
     def stop(self) -> None:
         for status in self.statuses.values():
+            status.requested_stop = True
             if status.state == CameraState.RECORDING:
                 status.state = CameraState.COMPLETED
         self._write_manifest()
