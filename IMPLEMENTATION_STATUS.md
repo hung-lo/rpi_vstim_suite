@@ -122,6 +122,17 @@ storage remain later acceptance work.
   photodiode patch application through the existing leased KMS backend.
 - [x] Run the production-renderer smoke path on real HDMI-A-2 hardware for
   300 leased page flips with an external prepared frame pair.
+- [x] Run a short real simultaneous dual-camera smoke using stable IMX708
+  sensor/topology identities and the installed `rpicam-*` stack; both workers
+  captured concurrently for 15 seconds and exited successfully.
+- [x] Run one short combined HDMI-A-2 leased production-renderer plus
+  two-camera test; 3,600/3,600 page flips completed, HDMI-A-1 remained
+  compositor-managed, and compositor/display recovery succeeded. The full
+  trace and resource samples are in
+  `docs/hardware/pi5_phase3_combined_display_camera_2026-09-25.json` and
+  `docs/hardware/pi5_phase3_combined_resources_2026-09-25.log`.
+- [x] Exercise one controlled combined interruption/recovery path; no orphan
+  camera/KMS processes remained and both stable cameras re-enumerated.
 - [ ] Validate physical photodiode timing and long-term optical behavior; the
   required acquisition hardware/wiring is not documented.
 
@@ -155,8 +166,11 @@ long-duration software timing, XRGB8888 compatibility, bounded production
 frame preparation, real-Pi production-renderer timing, compositor recovery,
 HDMI-A-1 continuity, and physical connector-role discovery are complete.
 Physical photodiode timing, asset-level natural-image acceptance, storage
-validation, and integrated camera/GPIO/reward acceptance remain unverified or
-deferred.
+validation, production camera-supervisor stop semantics, timing acceptance
+under the eventual camera and storage workload, and integrated
+camera/GPIO/reward acceptance remain unverified or deferred. The combined
+smoke is readiness evidence only; its 105 long and 105 short out-of-tolerance
+intervals are not final timing acceptance.
 
 ## Historical hardware evidence
 
@@ -168,7 +182,8 @@ audit.
 
 ## Deferred until the relevant hardware gate
 
-Real display timing acceptance, production frame rendering, GPIO, camera
-acquisition, UDP send, asset conversion, reward actuation, and production
-experiment execution remain deferred. The separate `rpi_rig_monitor` Pi
-remains outside this phase and is unchanged.
+Physical display timing acceptance, production camera acquisition/supervision,
+GPIO, UDP send, asset conversion, reward actuation, and production experiment
+execution remain deferred. The short `rpicam-*` smoke is hardware evidence,
+not a production camera backend. The separate `rpi_rig_monitor` Pi remains
+outside this phase and is unchanged.
