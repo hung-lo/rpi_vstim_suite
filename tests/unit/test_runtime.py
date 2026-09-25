@@ -1,7 +1,6 @@
 import json
-from dataclasses import replace
 
-from rpi_vstim.core.config import Config, config_from_mapping
+from rpi_vstim.core.config import config_from_mapping
 from rpi_vstim.core.lifecycle import LifecycleState
 from rpi_vstim.core.runtime import run_simulated_session
 

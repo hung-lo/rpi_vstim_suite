@@ -22,8 +22,6 @@ thermal inventory checks. `/mnt/hd` is not mounted, and the connected HDMI
 mode/connector choice still needs physical confirmation. No assignment/state
 files were accessed and no target files or services were changed.
 
-## Explicitly deferred
-
 ## Overnight software groundwork
 
 - [x] Simulated lifecycle orchestration with manifests, events, failure paths,
@@ -37,6 +35,8 @@ files were accessed and no target files or services were changed.
 - [x] Protocol-neutral bounded telemetry contract.
 - [x] Independent metadata-only fake local camera state for two cameras.
 - [x] End-to-end simulated acceptance tests.
+
+## Explicitly deferred
 
 Real experiment execution, GPIO, DRM/KMS, camera acquisition, UDP send, asset
 conversion, reward actuation, and Pi modification remain deferred. The

@@ -66,18 +66,29 @@ def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> t
     counts = Counter(value for value in values for _ in range(repeats))
     if not counts:
         return ()
-    if max(counts.values()) > (sum(counts.values()) + 1) // 2:
-        raise ValueError("cannot avoid adjacent repeated images")
     rng = random.Random(seed)
     result: list[str] = []
     previous = None
     while counts:
-        candidates = [value for value in counts if value != previous]
-        rng.shuffle(candidates)
-        candidates.sort(key=lambda value: counts[value], reverse=True)
-        value = candidates[0]
+        candidates = []
+        for value in counts:
+            if value == previous:
+                continue
+            remaining = counts.copy()
+            remaining[value] -= 1
+            if not remaining[value]:
+                del remaining[value]
+            total = sum(remaining.values())
+            feasible = not remaining or max(remaining.values()) <= (total + 1) // 2
+            if value in remaining:
+                feasible = feasible and remaining[value] <= total - remaining[value]
+            if feasible:
+                candidates.extend([value] * counts[value])
+        if not candidates:
+            raise ValueError("cannot avoid adjacent repeated images")
+        value = rng.choice(candidates)
         counts[value] -= 1
-        if not counts[value]:
+        if counts[value] == 0:
             del counts[value]
         result.append(value)
         previous = value

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Any, Iterable
 
 from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
 from rpi_vstim.core.config import Config
-from rpi_vstim.core.lifecycle import Lifecycle, LifecycleState, RuntimeServices
+from rpi_vstim.core.lifecycle import LifecycleState, RuntimeServices
 from rpi_vstim.core.session import SessionOutput, new_session
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
