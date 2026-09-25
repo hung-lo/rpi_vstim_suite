@@ -125,8 +125,10 @@ storage remain later acceptance work.
 
 - [x] Verify the physical display roles with a controlled leased pattern:
   `HDMI-A-2` is the visual-stimulus display and `HDMI-A-1` is the
-  camera-monitor display. The mapping remains configurable in the Pi 5 rig
-  profile.
+  camera-monitor display. A photo/manual cable trace additionally confirms
+  physical HDMI0 (nearest the USB-C power input) maps to DRM HDMI-A-1 and
+  physical HDMI1 maps to DRM HDMI-A-2. The mapping remains configurable in
+  the Pi 5 rig profile.
 
 The 10,000-frame RGB565 attempt was intentionally interrupted at 9,972
 completed frames after the physical-role mismatch was observed. It is recorded

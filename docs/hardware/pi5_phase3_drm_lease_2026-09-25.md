@@ -366,6 +366,12 @@ The physical mapping is now:
 | visual stimulus | `HDMI-A-2`, connector 42 | A1-only lease visibly blinked the camera monitor; the complementary output is the stimulus screen; EDID reports a 470×260 mm Addi-Data display |
 | camera monitor | `HDMI-A-1`, connector 33 | A1-only lease visibly blinked this screen; EDID reports a 150×100 mm Lenovo display |
 
+Additional physical corroboration supplied after this run confirms that the
+bottom-left camera-monitor screen is cabled to the Pi 5 micro-HDMI port closest
+to the USB-C power input (physical HDMI0). This matches the audited connector
+mapping: physical HDMI0 → DRM `HDMI-A-1` / connector 33 → camera monitor, and
+physical HDMI1 → DRM `HDMI-A-2` / connector 42 → visual-stimulus display.
+
 As the smallest corroborating control, one 30-frame HDMI-A-2-only lease was
 run once at `2026-09-25T14:34:28-04:00`. It completed 30/30 RGB565 page flips
 at `1024x600@59.8214 Hz`, with lease objects connector 42, primary plane 93,
