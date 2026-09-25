@@ -62,4 +62,4 @@ simulation = true
 
 [protocol]
 name = "natural-images"
-version = "placeholder"
+version = "software-groundwork"

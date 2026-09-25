@@ -83,7 +83,7 @@ class FakeLocalCameraService:
         return [asdict(status) | {"state": status.state.value} for status in self.statuses.values()]
 
     def _write_manifest(self) -> None:
-        if self.session_root is None:
+        if self.session_root is None or not self.statuses:
             return
         from .session import atomic_write_json
 

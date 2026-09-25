@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from dataclasses import replace
+from pathlib import Path
 
 from . import __version__
 from .core.config import ConfigError, load_config
@@ -84,6 +84,25 @@ def main(argv: list[str] | None = None) -> int:
         if args.simulate:
             try:
                 config = load_config(args.config)
+                if args.cameras or args.camera:
+                    if args.cameras in (None, "all"):
+                        selected_ids = {device.id for device in config.cameras.devices}
+                    else:
+                        selected_ids = {item.strip() for item in args.cameras.split(",") if item.strip()}
+                    unknown_ids = selected_ids - {device.id for device in config.cameras.devices}
+                    if unknown_ids:
+                        raise ConfigError(f"unknown camera ID(s): {', '.join(sorted(unknown_ids))}")
+                    config = replace(
+                        config,
+                        cameras=replace(
+                            config.cameras,
+                            devices=tuple(
+                                device for device in config.cameras.devices if device.id in selected_ids
+                            ),
+                        ),
+                    )
+                else:
+                    config = replace(config, cameras=replace(config.cameras, devices=()))
                 if args.output_root is not None:
                     config = replace(config, paths=replace(config.paths, output_root=args.output_root))
                 result = run_simulated_session(

@@ -1,5 +1,5 @@
 [protocol]
 name = "reward-conditioning"
-version = "placeholder"
+version = "software-groundwork"
 mode = "simulation-only"
-
+blocks = 10

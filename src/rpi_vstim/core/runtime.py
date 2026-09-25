@@ -10,6 +10,13 @@ from rpi_vstim.core.lifecycle import Lifecycle, LifecycleState, RuntimeServices
 from rpi_vstim.core.session import SessionOutput, new_session
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
+from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan as build_natural_plan
+from rpi_vstim.protocols.reward_conditioning import (
+    RewardConditioningSettings,
+    RewardPhase,
+    build_plan as build_reward_plan,
+)
+from rpi_vstim.telemetry.payloads import TelemetryMessage
 from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher
 
 
@@ -48,6 +55,43 @@ def build_simulated_services(
     )
 
 
+def build_simulation_plan(config: Config, *, protocol_name: str | None, seed: int):
+    """Build a bounded virtual plan without requiring assets or hardware."""
+    name = protocol_name or config.protocol.name
+    parameters = config.protocol.parameters
+    if name == "natural-images":
+        images = tuple(parameters.get("images", (f"natural_image_{index:04d}.png" for index in range(14))))
+        settings = NaturalImageSettings(
+            images=images,
+            seed=seed,
+            trial_count=parameters.get("trial_count"),
+            image_count=parameters.get("image_count", 5),
+            repeat_count=parameters.get("repeat_count", 2),
+            selection_seed=parameters.get("selection_seed", 777),
+            refresh_hz=config.display.refresh_hz,
+            image_duration_s=parameters.get("image_duration_s", 0.5),
+            iti_frames=tuple(parameters.get("iti_frames", (42, 60))),
+            initial_gray_frames=parameters.get("initial_gray_frames", 180),
+            final_gray_frames=parameters.get("final_gray_frames", 180),
+            compatibility_profile=parameters.get("compatibility_profile", "natural_legacy_plain"),
+            camera_ids=tuple(device.id for device in config.cameras.devices),
+        )
+        return build_natural_plan(settings)
+    if name == "reward-conditioning":
+        images = tuple(parameters.get("images", (f"reward_image_{index:02d}.png" for index in range(14))))
+        settings = RewardConditioningSettings(
+            mouse_id=str(parameters.get("mouse_id", "simulation-mouse")),
+            image_pool=images,
+            seed=seed,
+            blocks=int(parameters.get("blocks", 10)),
+            trial_frames=int(parameters.get("trial_frames", 90)),
+            reward_boundary_frames=int(parameters.get("reward_boundary_frames", 60)),
+            phase=RewardPhase(parameters.get("phase", "acquisition")),
+        )
+        return build_reward_plan(settings)
+    raise ValueError(f"simulation is not implemented for protocol: {name}")
+
+
 def run_simulated_session(
     config: Config,
     *,
@@ -69,8 +113,8 @@ def run_simulated_session(
     config = replace(config, session=simulation_session, display=simulation_display)
     session = new_session(config, protocol_name=protocol_name, session_id=session_id, seed=seed)
     session.write_initial_outputs()
-    if plan is not None:
-        session.write_plan(plan)
+    plan = plan or build_simulation_plan(config, protocol_name=protocol_name, seed=seed)
+    session.write_plan(plan)
     services = build_simulated_services(
         config,
         camera_failures=camera_failures,
@@ -79,14 +123,22 @@ def run_simulated_session(
     lifecycle = services.lifecycle
     degraded: list[str] = []
     error: str | None = None
+    sequence_number = 0
 
     def transition(state: LifecycleState) -> None:
+        nonlocal sequence_number
         lifecycle.transition(state)
         session.update_status(state.value, lifecycle=state.value, degraded=degraded)
         session.record_event(state.value, lifecycle=state.value)
-        if not services.telemetry.publish(
-            {"event": "lifecycle", "state": state.value, "session_id": session.context.session_id}
-        ):
+        sequence_number += 1
+        if not services.telemetry.publish(TelemetryMessage(
+            message_type="lifecycle",
+            session_id=session.context.session_id,
+            protocol=session.context.protocol_name,
+            lifecycle=state.value,
+            sequence_number=sequence_number,
+            degraded=list(degraded),
+        )):
             if config.telemetry.required:
                 raise TelemetryRequiredError("required telemetry publisher failed")
             if "telemetry" not in degraded:
@@ -105,16 +157,38 @@ def run_simulated_session(
             degraded.append("camera")
         transition(LifecycleState.PREPARING)
         transition(LifecycleState.PRE)
-        services.display.present_color((0, 0, 0), frames=1)
         if interrupt:
             raise SimulationInterrupted("simulated interruption")
         if protocol_failure:
             raise RuntimeError("simulated protocol failure")
-        transition(LifecycleState.TASK)
-        services.display.present_color((128, 128, 128), frames=1)
-        session.record_event("TASK_PRESENTED", lifecycle=LifecycleState.TASK.value, sequence_id="simulation-0")
-        transition(LifecycleState.POST)
-        services.display.present_color((0, 0, 0), frames=1)
+        for event in plan.events:
+            target_lifecycle = {
+                "PRE": LifecycleState.PRE,
+                "TASK": LifecycleState.TASK,
+                "POST": LifecycleState.POST,
+            }.get(event.phase, LifecycleState.TASK)
+            if lifecycle.state != target_lifecycle:
+                transition(target_lifecycle)
+            color = (255, 255, 255) if event.photodiode == "on" else (127, 127, 127)
+            services.display.present_color(color, frames=max(1, event.frame_count))
+            session.record_event(
+                "PLAN_EVENT",
+                lifecycle=target_lifecycle.value,
+                sequence_id=event.sequence_id or event.event_id,
+                detail=event.kind,
+            )
+            sequence_number += 1
+            services.telemetry.publish(TelemetryMessage(
+                message_type="trial" if event.trial_id else "state",
+                session_id=session.context.session_id,
+                protocol=session.context.protocol_name,
+                lifecycle=target_lifecycle.value,
+                sequence_number=sequence_number,
+                trial_id=event.trial_id,
+                stimulus=event.metadata.get("image"),
+                cameras=services.cameras.manifest(),
+                degraded=list(degraded),
+            ))
         transition(LifecycleState.FINALIZING)
         transition(LifecycleState.COMPLETE)
     except SimulationInterrupted as exc:
