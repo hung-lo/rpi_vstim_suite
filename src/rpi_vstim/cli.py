@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .core.config import ConfigError, load_config
 from .core.runtime import run_simulated_session
-from .protocols import available_protocols
+from .protocols import available_protocols, get_protocol
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command")
 
-    commands.add_parser("list-protocols", help="list protocol placeholders")
+    commands.add_parser("list-protocols", help="list available protocol implementations")
     doctor = commands.add_parser("doctor", help="show Phase 00 diagnostic status")
     doctor.add_argument("--json", action="store_true", dest="as_json")
 
@@ -84,6 +84,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.simulate:
             try:
                 config = load_config(args.config)
+                if args.config is None:
+                    protocol = get_protocol(args.protocol)
+                    config = replace(
+                        config,
+                        protocol=replace(
+                            config.protocol,
+                            name=args.protocol,
+                            version=protocol.version,
+                        ),
+                    )
                 if args.cameras or args.camera:
                     if args.cameras in (None, "all"):
                         selected_ids = {device.id for device in config.cameras.devices}

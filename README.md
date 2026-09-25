@@ -19,7 +19,16 @@ rpi-vstim list-protocols
 rpi-vstim config validate config/system.example.toml
 rpi-vstim run natural-images --simulate --output-root /tmp/rpi-vstim-sim
 rpi-vstim run reward-conditioning --simulate --output-root /tmp/rpi-vstim-sim
+rpi-vstim run spout-training --simulate --output-root /tmp/rpi-vstim-sim
+rpi-vstim run drifting-gratings --simulate --output-root /tmp/rpi-vstim-sim
+rpi-vstim run retinotopy --simulate --output-root /tmp/rpi-vstim-sim
 ```
+
+For an explicit protocol TOML, pass `--config`; the configured protocol name
+must match the command. With no config, the CLI selects the named software
+groundwork protocol and uses the fake display, simulated hardware, and bounded
+telemetry sink. Run `python -m pytest -q`, `python -m compileall -q src tests`,
+and `bash -n scripts/*.sh` before review.
 
 The old repositories and `rpi_rig_monitor` remain separate reference
 repositories. No old Git history is merged here.

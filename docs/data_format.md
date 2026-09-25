@@ -12,3 +12,6 @@ camera media, and QC files remain reserved for later phases. Camera outputs
 will be local per-camera session artifacts; they must not depend on a second
 camera Pi or SSH transfer and must retain the legacy names documented in the
 implementation plan where compatibility requires it.
+
+Reward plans distinguish `reward_scheduled` from `reward_delivered`; planned
+events use `null` for the latter until a runtime observation exists.

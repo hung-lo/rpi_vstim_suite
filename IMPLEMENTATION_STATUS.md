@@ -35,6 +35,9 @@ files were accessed and no target files or services were changed.
 - [x] Protocol-neutral bounded telemetry contract.
 - [x] Independent metadata-only fake local camera state for two cameras.
 - [x] End-to-end simulated acceptance tests.
+- [x] Pure drifting-grating, retinotopy, and spout-training plans with
+  deterministic golden tests.
+- [x] Overnight compatibility, resource-budget, and fault-injection coverage.
 
 ## Explicitly deferred
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 import random
 from typing import Iterable
 

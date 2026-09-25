@@ -1,4 +1,16 @@
 [protocol]
 name = "drifting-gratings"
-version = "placeholder"
-
+version = "software-groundwork"
+orientations_deg = [0.0, 22.5, 45.0, 67.5, 90.0, 112.5, 135.0, 157.5]
+trials_per_orientation = 2
+stim_duration_s = 0.5
+iti_base_s = 0.7
+iti_jitter_max_s = 0.5
+temporal_frequency_hz = 2.0
+spatial_frequency_cycles_per_cm = 0.2
+contrast = 1.0
+mean_luminance = 0.5
+starting_phase_deg = 0.0
+initial_gray_s = 3.0
+final_gray_s = 3.0
+grating_mode = "fullscreen"
