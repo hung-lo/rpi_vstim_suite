@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 
 
 @dataclass(frozen=True)
@@ -22,3 +23,9 @@ _PROTOCOLS = (
 def available_protocols() -> tuple[ProtocolInfo, ...]:
     return _PROTOCOLS
 
+
+def get_protocol(name: str):
+    for info in _PROTOCOLS:
+        if info.name == name:
+            return getattr(import_module(info.module), "protocol")
+    raise KeyError(f"unknown protocol: {name}")

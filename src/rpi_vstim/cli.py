@@ -6,9 +6,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from dataclasses import replace
 
 from . import __version__
 from .core.config import ConfigError, load_config
+from .core.runtime import run_simulated_session
 from .protocols import available_protocols
 
 
@@ -31,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("protocol", choices=[p.name for p in available_protocols()])
     run.add_argument("--camera", action="store_true", help="enable configured local cameras")
     run.add_argument("--cameras", help="comma-separated configured local camera IDs or 'all'")
+    run.add_argument("--simulate", action="store_true", help="run the hardware-independent simulation")
+    run.add_argument("--config", type=Path, help="TOML configuration file")
+    run.add_argument("--output-root", type=Path, help="simulation session output directory")
+    run.add_argument("--session-id", default="simulation")
+    run.add_argument("--seed", type=int, default=0)
 
     return parser
 
@@ -74,6 +81,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"valid: {args.path or 'package defaults'}")
         return 0
     if args.command == "run":
+        if args.simulate:
+            try:
+                config = load_config(args.config)
+                if args.output_root is not None:
+                    config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+                result = run_simulated_session(
+                    config,
+                    protocol_name=args.protocol,
+                    session_id=args.session_id,
+                    seed=args.seed,
+                )
+            except (ConfigError, OSError, ValueError) as exc:
+                print(f"simulation invalid: {exc}", file=sys.stderr)
+                return 2
+            print(f"{result.final_state.value}: {result.session.context.session_root}")
+            if result.degraded:
+                print(f"degraded: {', '.join(result.degraded)}")
+            return 0 if result.ok else 1
         print(
             f"protocol '{args.protocol}' is a Phase 00 placeholder; no experiment was started",
             file=sys.stderr,
