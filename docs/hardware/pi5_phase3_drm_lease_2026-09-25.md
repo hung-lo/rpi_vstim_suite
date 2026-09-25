@@ -212,6 +212,78 @@ set, HDMI-A-2 compositor continuity, and clean lease release. It does not
 validate modesetting, page flips, frame timing, photodiode timing, or
 production rendering.
 
+## First leased modeset and page-flip timing validation
+
+This supervised run used the same HDMI-A-1-only lease path after the
+successful probe above. Preflight at `2026-09-25T14:21:28.223531551-04:00`
+confirmed session 436, labwc PID 756533, HDMI-A-1 connector 33 / CRTC 92 /
+primary plane 81, HDMI-A-2 connector 42 / CRTC 104 / primary plane 93, and
+both outputs at `1024x600@59.820999 Hz`. The lease discovery global and both
+connector offers were present.
+
+The native command was:
+
+```text
+./kms_probe --lease --connector HDMI-A-1 --width 1024 --height 600 \
+  --refresh 59.82 --format RGB565 --frames 300 --json
+```
+
+The run started at `2026-09-25T14:21:37.367946078-04:00`, completed at
+`2026-09-25T14:21:42.685940154-04:00`, and returned status 0 after 5.314 s.
+The first leased modeset succeeded and the native result reported:
+
+| Metric | Result |
+|---|---:|
+| lease objects | connector 33, primary plane 81, CRTC 92, cursor plane 655 |
+| selected mode | 1024×600 @ 59.8214 Hz |
+| pixel format | RGB565 |
+| frames requested/completed | 300 / 300 |
+| mean interval | 16,716.216950 µs |
+| standard deviation | 12.364572 µs |
+| median interval | 16,716.408000 µs |
+| p95 / p99 | 16,718.908 / 16,792.019 µs |
+| min / max | 16,632.037 / 16,816.629 µs |
+| estimated refresh | 59.8221477 Hz |
+| intervals outside 5% tolerance | 0 |
+| long / short intervals | 0 / 0 |
+| estimated dropped frames | 0 |
+| missed vblank events | 0 |
+| aborted / CRTC restored | false / true |
+
+The deterministic pattern alternated full-screen black/white RGB565 buffers
+with the existing 50-pixel bottom-right photodiode patch, even frames on and
+odd frames off. Kernel page-flip sequence numbers were contiguous from
+217306212 through 217306511. The complete structured result, including all 300
+completion timestamps, is preserved in
+`docs/hardware/pi5_phase3_leased_pageflip_timing_2026-09-25.json`.
+
+After the normal run, checked at `2026-09-25T14:21:57.625270605-04:00`:
+
+- labwc PID 756533 remained alive with no compositor/session restart;
+- HDMI-A-2 remained enabled and current at `1024x600@59.820999 Hz`;
+- HDMI-A-1 also returned to its normal compositor mode;
+- `wlr-randr` remained usable for both outputs; and
+- `/dev/dri/card1` was again held by labwc and its normal helpers.
+
+The native debug lifecycle showed lease fd receipt, modeset/page-flip
+completion, CRTC restoration, lease release, and device `released`. The probe
+did not separately timestamp the release subphase; recovery was verified after
+the process completed.
+
+### Controlled early-exit cleanup
+
+Because the normal run was clean, one planned SIGINT cleanup test was run with
+30 requested frames. SIGINT arrived after 12 completed frames. The process
+returned status 1 as expected for an interrupted run, reported `restored=true`,
+and completed without a crash. The lease release/device `released` lifecycle
+completed normally. A post-check at `2026-09-25T14:22:11.434379728-04:00`
+confirmed labwc PID 756533, active session 436, both outputs enabled/current,
+and normal labwc DRM ownership. No further retry was made.
+
+This validates native leased modesetting, short software page-flip timing,
+HDMI-A-2 continuity, normal release/recovery, and the controlled cleanup path.
+It is not physical photodiode timing or final long-duration acceptance.
+
 ## Validation completed before retry
 
 - WSL development environment: Python `3.11.16`; full pytest `118 passed`,
@@ -252,7 +324,9 @@ post-fix supervised probe has now validated lease acquisition, object
 inspection, and release; no page-flip, failure-path, or timing test was
 attempted.
 
-Canonical Gate 3 remains not passed. The first supervised lease/recovery probe
-passed, but physical modeset/page-flip timing, photodiode timing, production
-frame rendering, SSD/storage validation, and integrated display/camera/GPIO
-acceptance remain pending.
+Canonical Gate 3 remains not passed. DRM leasing, leased resource inspection,
+native leased modesetting, 300-frame software page flips, and cleanup/recovery
+are now validated. Physical photodiode timing, median/reporting refinement,
+long-duration 10,000-frame acceptance, production frame rendering,
+SSD/storage validation, and integrated display/camera/GPIO acceptance remain
+pending.

@@ -108,14 +108,18 @@ storage remain later acceptance work.
   `drmModeGetLease()` returned connector 33, primary plane 81, CRTC 92, and
   cursor plane 655; HDMI-A-2 remained compositor-managed and release restored
   labwc. No modeset or page flip was performed.
-- [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
-  restoration; blocked by the active `labwc` DRM owner.
+- [x] Validate the first leased HDMI-A-1 modeset and 300 native page flips at
+  1024x600 RGB565; collect software vblank timing with zero missed/dropped
+  intervals and verify CRTC/lease/compositor recovery.
+- [ ] Validate physical timing, long-duration acceptance, and final CRTC
+  restoration criteria; the active `labwc` DRM owner still requires the lease
+  path for future runs.
 - [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
   HDMI-A-2 preview continuity, revocation, and recovery; the first supervised
   probe-only request terminated with a native client segmentation fault before
   reporting a lease object set. The post-fix acquisition/object/recovery probe
-  passed; page flips, revocation, and longer recovery testing remain pending.
-  See
+  and 300-frame native page-flip run passed; revocation, long-duration, and
+  integrated testing remain pending. See
   `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
 - [ ] Integrate production frame-cache loading and protocol rendering.
 
@@ -137,11 +141,10 @@ session configuration was changed. See
 
 **Canonical Gate 3: not satisfied.** The software implementation, native
 read-only resource proof, live lease capability discovery, offline binding
-preflight, and the first supervised lease/object/recovery probe are complete.
-The probe did not modeset or page-flip.
-Ownership-permitted page-flip
-timing, physical photodiode validation, CRTC restoration under modeset, and
-production frame-cache rendering remain unverified or deferred.
+preflight, the first supervised lease/object/recovery probe, and the first
+300-frame leased modeset/page-flip run are complete. Physical photodiode
+validation, long-duration acceptance, production frame-cache rendering, and
+integrated hardware acceptance remain unverified or deferred.
 
 ## Historical hardware evidence
 
