@@ -170,7 +170,11 @@ validation, production camera-supervisor stop semantics, timing acceptance
 under the eventual camera and storage workload, and integrated
 camera/GPIO/reward acceptance remain unverified or deferred. The combined
 smoke is readiness evidence only; its 105 long and 105 short out-of-tolerance
-intervals are not final timing acceptance.
+intervals are not final timing acceptance and require later adjacent-pair,
+magnitude/distribution, and possible-visible-flicker analysis. User observation
+reported generally normal stimulus output with a few possible brief flashes,
+stable camera-monitor output, and normal recovery; this is not visual
+acceptance.
 
 ## Historical hardware evidence
 

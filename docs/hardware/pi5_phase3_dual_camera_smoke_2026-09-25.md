@@ -99,7 +99,10 @@ Display result:
 | lease restoration | `restored=true` |
 
 The 210 out-of-tolerance intervals are real concurrent-load evidence, not
-hidden by averaging. The complete native trace is
+hidden by averaging. They are flagged for later analysis of whether the 105
+long and 105 short intervals form compensating adjacent pairs, their exact
+magnitude and distribution, and whether their timing plausibly explains the
+brief visual flashes reported below under camera load. The complete native trace is
 `pi5_phase3_combined_display_camera_2026-09-25.json`; resource samples are in
 `pi5_phase3_combined_resources_2026-09-25.log`.
 
@@ -110,10 +113,13 @@ exited 0. The Pi reported labwc PID 756533 throughout the recovery checks;
 both DRM connectors remained connected and no compositor process restart was
 observed.
 
-The software checks cannot observe the physical screens. The user should
-confirm that the top-right stimulus display showed the alternating/renderer
-pattern and that the bottom-left camera-monitor display stayed stable without
-blanking or a compositor restart. No machine-observed abnormality was found.
+User physical observation during this run: the top-right stimulus display
+appeared generally normal, with perhaps a few brief flashes/flickers but no
+sustained corruption, freezing, or blanking. The bottom-left camera-monitor/
+desktop display remained stable, and both screens recovered normally afterward.
+This is recorded as physical observation only, not as either a failure or
+clean visual acceptance. The software checks cannot independently observe the
+screens.
 
 ## Priority D — controlled interruption and recovery
 
