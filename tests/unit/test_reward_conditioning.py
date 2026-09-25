@@ -31,7 +31,8 @@ def test_assignment_is_permanent_and_uses_temporary_state(tmp_path):
 def test_exposure_block_has_exact_8_3_1_counts():
     block = build_exposure_block(MouseAssignment.create("m", image_pool(), seed=1), seed=2)
     counts = {role: sum(trial.exposure_role == role for trial in block) for role in ("high", "medium", "low")}
-    assert counts == {"high": 8, "medium": 3, "low": 1}
+    assert counts == {"high": 32, "medium": 12, "low": 6}
+    assert all(left.image != right.image for left, right in zip(block, block[1:]))
 
 
 def test_reward_outcomes_are_reproducible_and_match_90_percent_count():
@@ -55,9 +56,11 @@ def test_phase_reversal_requires_manual_selection_and_water_is_guarded():
 
 
 def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
-    settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=2)
+    settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=10)
     first = build_plan(settings)
     second = build_plan(settings)
     assert first.stable_json() == second.stable_json()
-    assert len(first.events) == 24
+    assert len(first.events) == 500
+    assert sum(event.metadata["reward_scheduled"] for event in first.events) == 198
+    assert sum(event.metadata["reward_eligible"] for event in first.events) == 220
     assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)

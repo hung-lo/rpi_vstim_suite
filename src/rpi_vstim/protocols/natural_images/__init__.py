@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from collections import Counter
+import random
 from typing import Iterable
 
 from rpi_vstim.core.duration import seconds_to_frames
@@ -25,11 +27,14 @@ class NaturalImageSettings:
     images: tuple[str, ...]
     seed: int = 0
     trial_count: int | None = None
+    image_count: int | None = None
+    repeat_count: int = 1
+    selection_seed: int = 777
     refresh_hz: float = 60.0
     image_duration_s: float = 0.5
-    iti_frames: tuple[int, ...] = (30, 60)
-    initial_gray_frames: int = 60
-    final_gray_frames: int = 60
+    iti_frames: tuple[int, ...] = (42, 60)
+    initial_gray_frames: int = 180
+    final_gray_frames: int = 180
     compatibility_profile: str = "natural_legacy_plain"
     camera_ids: tuple[str, ...] = ()
 
@@ -47,7 +52,36 @@ def discover_images(root: Path) -> tuple[str, ...]:
 
 def select_images(images: Iterable[str], *, count: int | None, seed: int) -> tuple[str, ...]:
     values = tuple(images)
-    return no_adjacent_repeat(values, len(values) if count is None else count, seed=seed)
+    if count is None:
+        return values
+    if count > len(values):
+        raise ValueError("image selection count exceeds available images")
+    return tuple(sorted(random.Random(seed).sample(values, count)))
+
+
+def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> tuple[str, ...]:
+    values = tuple(images)
+    if repeats < 1:
+        raise ValueError("repeat_count must be at least 1")
+    counts = Counter(value for value in values for _ in range(repeats))
+    if not counts:
+        return ()
+    if max(counts.values()) > (sum(counts.values()) + 1) // 2:
+        raise ValueError("cannot avoid adjacent repeated images")
+    rng = random.Random(seed)
+    result: list[str] = []
+    previous = None
+    while counts:
+        candidates = [value for value in counts if value != previous]
+        rng.shuffle(candidates)
+        candidates.sort(key=lambda value: counts[value], reverse=True)
+        value = candidates[0]
+        counts[value] -= 1
+        if not counts[value]:
+            del counts[value]
+        result.append(value)
+        previous = value
+    return tuple(result)
 
 
 def build_plan(settings: NaturalImageSettings) -> SessionPlan:
@@ -55,7 +89,19 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
         raise ValueError(
             f"unsupported natural-image compatibility profile: {settings.compatibility_profile}"
         )
-    selected = select_images(settings.images, count=settings.trial_count, seed=settings.seed)
+    if settings.trial_count is not None:
+        selected = no_adjacent_repeat(settings.images, settings.trial_count, seed=settings.seed)
+    else:
+        selected_images = select_images(
+            settings.images,
+            count=settings.image_count,
+            seed=settings.selection_seed,
+        )
+        selected = _shuffle_repetitions(
+            selected_images,
+            settings.repeat_count,
+            seed=settings.seed,
+        )
     image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
     itis = seeded_choices(settings.iti_frames, len(selected), seed=settings.seed + 1)
     events: list[PlannedEvent] = [

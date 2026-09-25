@@ -26,6 +26,18 @@ class MouseAssignment:
     def all_images(self) -> tuple[str, ...]:
         return self.high_exposure + self.medium_exposure + self.low_exposure
 
+    def reward_images(self, phase: RewardPhase) -> frozenset[str]:
+        if phase == RewardPhase.ACQUISITION:
+            indexes = (0, 1)
+        elif phase == RewardPhase.REVERSAL:
+            indexes = (0, 2)
+        else:
+            raise ValueError(f"unsupported reward phase: {phase}")
+        return frozenset(
+            [self.high_exposure[index] for index in indexes]
+            + [self.medium_exposure[index] for index in indexes]
+        )
+
     @classmethod
     def create(cls, mouse_id: str, image_pool: Iterable[str], *, seed: int) -> "MouseAssignment":
         images = tuple(image_pool)
@@ -92,6 +104,8 @@ class RewardTrial:
     image: str
     exposure_role: str
     reward_scheduled: bool
+    reward_eligible: bool = False
+    suction_scheduled: bool = False
     lick_count: int = 0
 
     @property
@@ -104,23 +118,43 @@ class RewardTrial:
             "image": self.image,
             "exposure_role": self.exposure_role,
             "reward_scheduled": self.reward_scheduled,
+            "reward_eligible": self.reward_eligible,
+            "suction_scheduled": self.suction_scheduled,
             "reward_delivered": self.reward_delivered,
             "lick_count": self.lick_count,
         }
 
 
-def build_exposure_block(assignment: MouseAssignment, *, seed: int) -> tuple[RewardTrial, ...]:
-    """Build one exact 8:3:1 exposure block without hardware effects."""
-    roles = (
-        [("high", assignment.high_exposure)] * 8
-        + [("medium", assignment.medium_exposure)] * 3
-        + [("low", assignment.low_exposure)]
+def build_exposure_block(
+    assignment: MouseAssignment,
+    *,
+    seed: int,
+    phase: RewardPhase = RewardPhase.ACQUISITION,
+) -> tuple[RewardTrial, ...]:
+    """Build one frozen 50-trial block: 8:3:1 per image exposure tier."""
+    rows = (
+        [("high", image) for image in assignment.high_exposure for _ in range(8)]
+        + [("medium", image) for image in assignment.medium_exposure for _ in range(3)]
+        + [("low", image) for image in assignment.low_exposure]
     )
     rng = random.Random(seed)
-    rng.shuffle(roles)
+    reward_images = assignment.reward_images(phase)
+    for _ in range(1000):
+        rng.shuffle(rows)
+        if all(left[1] != right[1] for left, right in zip(rows, rows[1:])):
+            break
+    else:
+        raise RuntimeError("could not construct a non-repeating exposure block")
     return tuple(
-        RewardTrial(str(index + 1), rng.choice(images), role, reward_scheduled=False)
-        for index, (role, images) in enumerate(roles)
+        RewardTrial(
+            str(index + 1),
+            image,
+            role,
+            reward_scheduled=False,
+            reward_eligible=image in reward_images,
+            suction_scheduled=image in reward_images,
+        )
+        for index, (role, image) in enumerate(rows)
     )
 
 
@@ -164,24 +198,32 @@ class RewardConditioningSettings:
     mouse_id: str
     image_pool: tuple[str, ...]
     seed: int = 0
-    blocks: int = 1
+    blocks: int = 10
     refresh_hz: float = 60.0
     trial_frames: int = 90
     reward_boundary_frames: int = 60
+    phase: RewardPhase = RewardPhase.ACQUISITION
 
 
 def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
-    if settings.blocks < 0:
-        raise ValueError("blocks must be non-negative")
+    if settings.blocks < 1 or settings.blocks % 10:
+        raise ValueError("blocks must be a positive multiple of 10")
     assignment = MouseAssignment.create(settings.mouse_id, settings.image_pool, seed=settings.seed)
-    outcomes = build_reward_outcomes(settings.blocks * 12, seed=settings.seed + 1)
+    blocks = [
+        build_exposure_block(assignment, seed=settings.seed + block, phase=settings.phase)
+        for block in range(settings.blocks)
+    ]
+    eligible_count = sum(trial.reward_eligible for block in blocks for trial in block)
+    outcomes = iter(build_reward_outcomes(eligible_count, seed=settings.seed + 1))
     events: list[PlannedEvent] = []
     index = 0
-    for block in range(settings.blocks):
-        block_trials = build_exposure_block(assignment, seed=settings.seed + block)
+    for block, block_trials in enumerate(blocks):
         for trial in block_trials:
-            scheduled = outcomes[index]
             index += 1
+            if trial.reward_eligible:
+                scheduled = next(outcomes)
+            else:
+                scheduled = False
             events.append(
                 PlannedEvent(
                     f"trial-{index}",
@@ -193,7 +235,9 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
                     metadata={
                         "image": trial.image,
                         "exposure_role": trial.exposure_role,
+                        "reward_eligible": trial.reward_eligible,
                         "reward_scheduled": scheduled,
+                        "suction_scheduled": trial.suction_scheduled,
                         "reward_boundary_frames": settings.reward_boundary_frames,
                     },
                 )
@@ -202,7 +246,7 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
         "reward-conditioning",
         settings.seed,
         with_frame_offsets(events),
-        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks},
+        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks, "phase": settings.phase.value},
     )
 
 
