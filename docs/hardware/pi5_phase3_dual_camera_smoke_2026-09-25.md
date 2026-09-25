@@ -24,7 +24,13 @@ Deferred. Repository and audit documentation describe the software patch only:
 bottom-right, 50 pixels, on value 255, off value 0, with even-frame-on and
 odd-frame-off state. They do not identify an actual photodiode, DAQ, ADC, input
 channel, GPIO input, cable, ground, or acquisition program. No physical input
-or GPIO was guessed or touched.
+or GPIO was guessed or touched. No spare photodiode is currently available,
+so this is deferred and is not a near-term blocker. The present display test
+validates Pi 5 DRM lease/KMS behavior, not final optical timing certification;
+the eventual stimulus display may change, potentially to the OL7 used on the
+2P setup. A display change requires fresh EDID/mode/refresh, leased page-flip,
+and production-renderer timing checks before photodiode validation with the
+final hardware.
 
 ## Priority B — simultaneous camera smoke
 
@@ -144,7 +150,12 @@ follow-up, not evidence of a camera capture failure.
 
 The Pi has now passed a short real simultaneous dual-camera smoke and a short
 combined leased-display/two-camera resource test. This does not pass canonical
-Gate 3. Physical photodiode timing, storage/SSD validation, a production
+Gate 3. Final-display optical timing, storage/SSD validation, a production
 camera supervisor, clean timing under the eventual camera mode and storage
 load, integrated GPIO/reward acceptance, and behavioral-session acceptance
-remain open.
+remain open. The SSD is reportedly available but not physically connected; do
+not use the Pi SD card as production-storage acceptance. Once connected,
+storage validation must cover device/UUID/mount intent, mount/read/write/free
+space, conservative throughput, sustained two-camera SSD recording, and
+combined leased display + two-camera + SSD-write load with resource and timing
+collection.

@@ -509,8 +509,20 @@ cache reuse/eviction, invalid dimensions/strides, and preparation failures.
 
 No photodiode, DAQ, or already-documented safe acquisition wiring was found in
 the repository or Pi audit. Physical optical timing, polarity, onset latency,
-and one-frame-offset validation are therefore deferred; no GPIO or guessed
-wiring was used.
+and one-frame-offset validation are therefore deferred; no spare photodiode is
+currently available, and no GPIO or guessed wiring was used. This is not a
+near-term blocker. The current work validates the Pi 5 DRM lease/KMS
+architecture and the present display, not final optical timing certification
+of the eventual rig. The final stimulus display may change later, potentially
+to the OL7 used on the 2P setup.
+
+If the stimulus display changes, the required revalidation sequence is:
+
+1. re-audit EDID, mode, and refresh;
+2. rerun leased page-flip timing;
+3. rerun production-renderer timing; and
+4. perform photodiode validation only when the final display and acquisition
+   hardware are available.
 
 ## Updated Gate 3 assessment
 
@@ -518,5 +530,14 @@ Completed display-only evidence now includes corrected HDMI-A-2 lease
 ownership, 10,000-frame software timing, RGB565/XRGB8888 compatibility,
 bounded production-frame preparation, real-Pi production-renderer page flips,
 HDMI-A-1 compositor continuity, and clean restoration. Canonical Gate 3 remains
-open for physical photodiode timing, natural-image/asset-level acceptance,
+open for final-display optical timing, natural-image/asset-level acceptance,
 SSD/storage validation, and later integrated camera/GPIO/reward acceptance.
+The present display result must not be treated as final optical certification.
+
+The experiment SSD is reportedly available but is not physically connected.
+Storage validation remains deferred; the Pi SD card is not a production-storage
+substitute. After connection, identify the device/UUID/mount point, verify
+existing `/etc/fstab` intent, verify mount/read/write/free space, run a
+conservative throughput test, record sustained two-camera capture to the SSD,
+and run combined leased display + two-camera + SSD-write load with RAM/CPU,
+temperature/throttling, and display timing collection.

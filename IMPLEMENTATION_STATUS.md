@@ -56,9 +56,10 @@ Phase 2 is the current hardware-gated stage.
 readiness, camera enumeration readiness, and display discovery readiness are
 verified enough for the scoped display-only work authorized by the addendum.
 Production storage readiness remains deferred until the experiment SSD is
-attached. The fstab-referenced storage UUID is absent and `/mnt/hd` has no
-mapping. The provisional display-role mapping is user-authorized, not a new
-physical verification.
+physically attached. The SSD is now reportedly available but its device,
+UUID, mount point, and `/mnt/hd` mapping remain unverified; the fstab intent
+must be checked when it is connected. The current HDMI role mapping was later
+physically corroborated during Phase 3 and remains configurable.
 
 ### Phase 2 follow-up — 2026-09-25
 
@@ -72,8 +73,8 @@ physical verification.
   modes, while HDMI-A-2 advertises only `1024x600`.
 - [x] Confirm `rpicam-apps` 1.11.1/libcamera 0.7.0 and pass individual
   no-preview open smoke tests for both cameras.
-- [ ] Resolve the absent experiment storage and select the intended physical
-  display before claiming the full Gate 2.
+- [ ] Connect and resolve the experiment SSD, then verify the intended mount
+  and storage path before claiming the full Gate 2.
 
 The package installation is a Phase 2 bootstrap change. No mount, boot,
 persistent configuration, mode-setting, full-screen stimulus, or production
@@ -134,7 +135,8 @@ storage remain later acceptance work.
 - [x] Exercise one controlled combined interruption/recovery path; no orphan
   camera/KMS processes remained and both stable cameras re-enumerated.
 - [ ] Validate physical photodiode timing and long-term optical behavior; the
-  required acquisition hardware/wiring is not documented.
+  required acquisition hardware is unavailable and final-screen wiring is not
+  yet relevant. This is deferred, not a near-term blocker.
 
 - [x] Verify the physical display roles with a controlled leased pattern:
   `HDMI-A-2` is the visual-stimulus display and `HDMI-A-1` is the
@@ -168,13 +170,18 @@ HDMI-A-1 continuity, and physical connector-role discovery are complete.
 Physical photodiode timing, asset-level natural-image acceptance, storage
 validation, production camera-supervisor stop semantics, timing acceptance
 under the eventual camera and storage workload, and integrated
-camera/GPIO/reward acceptance remain unverified or deferred. The combined
-smoke is readiness evidence only; its 105 long and 105 short out-of-tolerance
-intervals are not final timing acceptance and require later adjacent-pair,
-magnitude/distribution, and possible-visible-flicker analysis. User observation
-reported generally normal stimulus output with a few possible brief flashes,
-stable camera-monitor output, and normal recovery; this is not visual
-acceptance.
+camera/GPIO/reward acceptance remain unverified or deferred. The current
+display work validates the Pi 5 DRM lease/KMS architecture and the present
+display; it is not final optical timing certification of the eventual rig.
+The eventual stimulus display may change, including to the OL7 used on the 2P
+setup. If it changes, re-audit EDID/mode/refresh, rerun leased page-flip and
+production-renderer timing, and perform photodiode validation only when the
+final screen and acquisition hardware are available. The combined smoke is
+readiness evidence only; its 105 long and 105 short out-of-tolerance intervals
+require later adjacent-pair, magnitude/distribution, and possible-visible-
+flicker analysis. User observation reported generally normal stimulus output
+with a few possible brief flashes, stable camera-monitor output, and normal
+recovery; this is not visual acceptance.
 
 ## Historical hardware evidence
 
@@ -186,8 +193,16 @@ audit.
 
 ## Deferred until the relevant hardware gate
 
-Physical display timing acceptance, production camera acquisition/supervision,
-GPIO, UDP send, asset conversion, reward actuation, and production experiment
-execution remain deferred. The short `rpicam-*` smoke is hardware evidence,
-not a production camera backend. The separate `rpi_rig_monitor` Pi remains
-outside this phase and is unchanged.
+Physical display/optical timing acceptance, production camera
+acquisition/supervision, GPIO, UDP send, asset conversion, reward actuation,
+and production experiment execution remain deferred. The short `rpicam-*`
+smoke is hardware evidence, not a production camera backend. The separate
+`rpi_rig_monitor` Pi remains outside this phase and is unchanged.
+
+When the SSD is physically connected, storage work takes priority: identify
+the device/UUID/mount point, verify existing `/etc/fstab` intent, verify
+mount/read/write/free space, run conservative throughput testing, run
+sustained two-camera recording to the SSD, and run combined leased display +
+two-camera + SSD-write load while collecting RAM, CPU, temperature, throttling,
+and display timing. The Pi SD card must not be used as a substitute for
+production-storage acceptance.

@@ -321,10 +321,12 @@ that validation and the scoped display-only software work are recorded below.
 
 ## Addendum-authorized scoped display-only work — 2026-09-25
 
-The SSD is intentionally absent and production-storage validation is deferred.
-The user-authorized provisional roles are `HDMI-A-1` for visual stimulation
-and `HDMI-A-2` for camera preview; both remain configurable and are not a
-physical cable assignment claim.
+At the audit snapshot time, the SSD was absent and production-storage
+validation was deferred. The then-authorized provisional roles were
+`HDMI-A-1` for visual stimulation and `HDMI-A-2` for camera preview; both were
+configurable and were not a physical cable assignment claim. Later Phase 3
+work corrected and physically corroborated the roles as HDMI-A-2 stimulus and
+HDMI-A-1 camera monitor.
 
 Software-only changes now provide:
 
@@ -345,15 +347,20 @@ and individual `rpicam` open smoke tests. No repository code was deployed to
 the Pi, no display was taken over, and no full-screen/no-mouse stimulus smoke
 test was run.
 
-Remaining scoped display work is ownership-permitted page-flip/vblank
-validation, physical photodiode measurement, and production frame-cache
-integration. The SSD-dependent storage throughput test, concurrent camera load
-test, and final integrated acceptance remain deferred.
+Remaining scoped display work at that point was ownership-permitted
+page-flip/vblank validation, physical photodiode measurement, and production
+frame-cache integration. The SSD-dependent storage throughput test,
+concurrent camera load test, and final integrated acceptance remained
+deferred. Later work completed the display-only software milestones; physical
+photodiode validation remains deferred because no spare photodiode is
+available and the eventual stimulus display may change.
 
 ## Final Gate 2 assessment after the addendum
 
-Canonical Gate 2 remains **not satisfied overall**. The storage sub-gate is
-deferred because the experiment SSD is absent; no SD-card fallback was used.
+Canonical Gate 2 remains **not satisfied overall**. The storage sub-gate was
+deferred because the experiment SSD was absent at audit time; it is now
+reportedly available but still physically disconnected, and no SD-card fallback
+was used.
 Display discovery and camera enumeration are sufficiently characterized for
 the scoped software work, but native presentation/timing and integrated load
 acceptance remain unverified.
@@ -368,6 +375,23 @@ focused Ruff on changed files: PASS
 bash -n scripts/*.sh: PASS
 five simulation entry points: PASS
 ```
+
+## Current follow-up assumptions — 2026-09-25
+
+The audit snapshot above correctly records that the experiment SSD was not
+connected at audit time. The SSD is now reportedly available but remains
+physically disconnected, so its device identity, UUID, mount point, existing
+`/etc/fstab` intent, capacity, and throughput are still unverified. The Pi SD
+card is not a substitute for production-storage acceptance.
+
+Later Phase 3 work physically corroborated the display roles as
+`HDMI-A-2`/connector 42 for the visual stimulus and `HDMI-A-1`/connector 33
+for the camera monitor. The current leased-KMS results validate the Pi 5
+architecture and present display only. If the final stimulus display changes,
+including a possible move to the OL7 used on the 2P setup, EDID/mode/refresh,
+leased page-flip timing, and production-renderer timing must be re-audited;
+physical photodiode validation is deferred until the final screen and
+acquisition hardware are available.
 
 The full-repository Ruff run retains 43 pre-existing baseline findings outside
 this scoped change set; it is not used as evidence of Pi readiness.
