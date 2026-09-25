@@ -15,3 +15,12 @@ The Pi 5 audit records 2 GB RAM. Real display buffers, decoded stimulus cache,
 camera-worker queues, concurrent capture load, GPIO workers, and network
 telemetry must be measured on the Pi before any hardware phase. Those checks
 are deferred hardware validation and are not inferred from desktop tests.
+
+The software-only bounds currently established are the 256-message telemetry
+deque, one metadata record per fake camera, and no decoded-frame retention in
+the fake runtime. The provisional display probe parses command output only; it
+does not allocate presentation buffers or claim a KMS resource budget.
+
+Production storage and concurrent camera-write measurements remain deferred
+until the experiment SSD is attached. Temporary test directories must not be
+used as evidence for the future experiment SSD or as a fallback recording root.

@@ -11,6 +11,7 @@ from pathlib import Path
 from . import __version__
 from .core.config import ConfigError, load_config
 from .core.runtime import run_simulated_session
+from .display.diagnostics import DisplayProbeError, display_probe
 from .protocols import available_protocols, get_protocol
 
 
@@ -22,6 +23,14 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("list-protocols", help="list available protocol implementations")
     doctor = commands.add_parser("doctor", help="show Phase 00 diagnostic status")
     doctor.add_argument("--json", action="store_true", dest="as_json")
+
+    hardware = commands.add_parser("hardware", help="hardware discovery and diagnostics")
+    hardware_commands = hardware.add_subparsers(dest="hardware_command", required=True)
+    display_probe_command = hardware_commands.add_parser(
+        "display-probe", help="read DRM connectors and configured display modes"
+    )
+    display_probe_command.add_argument("--config", type=Path, help="TOML configuration file")
+    display_probe_command.add_argument("--json", action="store_true", dest="as_json")
 
     config = commands.add_parser("config", help="validate configuration")
     config_commands = config.add_subparsers(dest="config_command", required=True)
@@ -65,6 +74,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "doctor":
         return _doctor(args.as_json)
+    if args.command == "hardware" and args.hardware_command == "display-probe":
+        try:
+            config = load_config(args.config).display
+            print(display_probe(config, as_json=args.as_json))
+        except (ConfigError, DisplayProbeError, OSError, ValueError) as exc:
+            print(f"display probe failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
     if args.command == "config" and args.config_command == "validate":
         try:
             config = load_config(args.path)

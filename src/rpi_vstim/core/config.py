@@ -25,15 +25,23 @@ class PathsConfig:
 @dataclass(frozen=True)
 class DisplayConfig:
     backend: str = "fake"
-    connector: str = "HDMI-A-1"
+    stimulus_connector: str = "HDMI-A-1"
+    preview_connector: str | None = "HDMI-A-2"
     width_px: int = 1280
     height_px: int = 720
     refresh_hz: float = 60.0
+    require_exact_refresh: bool = True
+    refresh_tolerance_hz: float = 0.05
     pixel_format: str = "RGB565"
     calibration_id: str = ""
     physical_width_cm: float = 15.50
     physical_height_cm: float = 8.72
     eye_distance_cm: float = 16.0
+
+    @property
+    def connector(self) -> str:
+        """Backward-compatible alias for the configured stimulus connector."""
+        return self.stimulus_connector
 
 
 @dataclass(frozen=True)
@@ -116,10 +124,14 @@ class Config:
             raise ConfigError(f"unsupported display backend: {self.display.backend}")
         if self.display.pixel_format not in {"RGB565", "XRGB8888"}:
             raise ConfigError(f"unsupported pixel format: {self.display.pixel_format}")
-        if not self.display.connector:
-            raise ConfigError("display connector must not be empty")
+        if not self.display.stimulus_connector:
+            raise ConfigError("display stimulus_connector must not be empty")
         if self.display.width_px <= 0 or self.display.height_px <= 0 or self.display.refresh_hz <= 0:
             raise ConfigError("display dimensions and refresh_hz must be positive")
+        if self.display.preview_connector == self.display.stimulus_connector:
+            raise ConfigError("display preview_connector must differ from stimulus_connector")
+        if self.display.refresh_tolerance_hz < 0:
+            raise ConfigError("display refresh_tolerance_hz must not be negative")
         if min(self.display.physical_width_cm, self.display.physical_height_cm, self.display.eye_distance_cm) <= 0:
             raise ConfigError("display geometry must be positive")
         if self.photodiode.size_px <= 0 or not 0 <= self.photodiode.on_value <= 255 or not 0 <= self.photodiode.off_value <= 255:
@@ -220,6 +232,17 @@ def _replace_section(current: Any, values: dict[str, Any], section: str) -> Any:
     return replace(current, **converted)
 
 
+def _replace_display(current: DisplayConfig, values: dict[str, Any]) -> DisplayConfig:
+    values = dict(values)
+    if "connector" in values:
+        if "stimulus_connector" in values:
+            raise ConfigError("display must use only one of connector or stimulus_connector")
+        values["stimulus_connector"] = values.pop("connector")
+    if values.get("preview_connector") == "":
+        values["preview_connector"] = None
+    return _replace_section(current, values, "display")
+
+
 def _replace_cameras(current: CamerasConfig, values: dict[str, Any]) -> CamerasConfig:
     known = {item.name for item in fields(current)}
     unknown = set(values) - known
@@ -251,9 +274,11 @@ def config_from_mapping(raw: dict[str, Any]) -> Config:
     if "gpio" in raw and "hardware" in raw:
         raise ConfigError("use only one of [gpio] or [hardware]")
     config = Config()
-    for name in ("paths", "display", "photodiode", "telemetry", "session"):
+    for name in ("paths", "photodiode", "telemetry", "session"):
         if name in raw:
             config = replace(config, **{name: _replace_section(getattr(config, name), raw[name], name)})
+    if "display" in raw:
+        config = replace(config, display=_replace_display(config.display, raw["display"]))
     if "cameras" in raw:
         config = replace(config, cameras=_replace_cameras(config.cameras, raw["cameras"]))
     hardware_section = raw.get("hardware", raw.get("gpio"))

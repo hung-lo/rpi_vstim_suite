@@ -1,0 +1,11 @@
+Connectors:
+id	encoder	status		name
+33	32	connected	HDMI-A-1
+  modes:
+	index name refresh (Hz) hdisp hss hse htot vdisp vss vse vtot
+  #0 1024x600 59.82 1024 1068 1156 1344 600 603 609 625 50250 flags: nhsync, pvsync; type: preferred, driver
+  #1 1280x720 60.00 1280 1390 1430 1650 720 725 730 750 74250 flags: phsync, pvsync; type: driver
+42	41	connected	HDMI-A-2
+  modes:
+	index name refresh (Hz) hdisp hss hse htot vdisp vss vse vtot
+  #0 1024x600 59.82 1024 1068 1156 1344 600 603 609 625 50250 flags: nhsync, nvsync; type: preferred, driver

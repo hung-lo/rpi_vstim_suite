@@ -1,11 +1,23 @@
-# Deployment
+# Deployment and hardware boundaries
 
-Deployment and bootstrap scripts are placeholders. The only target hardware
-interaction performed for Phase 00 was the strictly read-only SSH inventory
-recorded in `docs/hardware/pi5_initial_audit.txt`. The expanded reusable audit
-script now includes local camera discovery, DRM connector/mode inventory,
-media topology, and display/session information. It was not rerun from this
-Mac; that verification is deferred until the lab network is reachable.
+Production deployment remains deferred while the experiment SSD is absent.
+The current Phase 2 audit is recorded in
+`docs/hardware/pi5_phase2_audit_2026-09-25.md`; it preserves the observed
+`/etc/fstab` reference to `/mnt/behavbox_ssd` and does not invent an `/mnt/hd`
+mapping.
+
+The package now provides a read-only display discovery command:
+
+```bash
+rpi-vstim hardware display-probe \
+  --config config/rigs/pi5_dual_display_provisional.example.toml --json
+```
+
+The user-authorized provisional roles are HDMI-A-1 for stimulus and HDMI-A-2
+for camera preview. The roles are configuration, not protocol constants, and
+can be swapped without code changes. The command does not set modes or present
+frames. The KMS `present()` boundary remains fail-closed until native
+page-flip/restore behavior is separately implemented and hardware-tested.
 
 The production experiment target is one Pi 5 with two local cameras. SSH is a
 deployment/audit transport only, not a camera-control or video-transfer path.

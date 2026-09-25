@@ -1,0 +1,16 @@
+# User-authorized provisional roles from the 2026-09-25 Pi audit.
+# Replace connector names without changing protocol code if cables are swapped.
+[display]
+backend = "kms"
+stimulus_connector = "HDMI-A-1"
+preview_connector = "HDMI-A-2"
+width_px = 1024
+height_px = 600
+refresh_hz = 59.82
+require_exact_refresh = true
+refresh_tolerance_hz = 0.05
+pixel_format = "RGB565"
+calibration_id = ""
+physical_width_cm = 15.40
+physical_height_cm = 8.60
+eye_distance_cm = 16.0

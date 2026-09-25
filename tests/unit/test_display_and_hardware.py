@@ -3,6 +3,7 @@ import pytest
 from rpi_vstim.core.config import DisplayConfig
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.display.frame_program import FrameProgram
+from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.hardware.simulated import SimulatedHardwareBackend
 
 
@@ -27,3 +28,23 @@ def test_simulated_hardware_starts_safe():
     assert hardware.start().outputs_safe
     hardware.stop()
     assert hardware.outputs_safe
+
+
+def test_kms_open_uses_selected_probe_and_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {
+                "connector": "HDMI-A-1",
+                "mode": "1024x600",
+                "refresh_hz": 59.82,
+            },
+            "preview": {"connector": "HDMI-A-2"},
+        },
+    )
+    display = KmsDisplayBackend()
+    info = display.open(DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82))
+    assert info.connector == "HDMI-A-1"
+    with pytest.raises(RuntimeError, match="page-flip"):
+        display.present_color((255, 255, 255), frames=1)
+    display.close()
