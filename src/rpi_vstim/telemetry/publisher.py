@@ -33,7 +33,9 @@ class InMemoryTelemetryPublisher(TelemetryPublisher):
             return False
         if len(self.messages) == self.messages.maxlen:
             self.dropped_count += 1
-        if is_dataclass(payload):
+        if hasattr(payload, "as_dict"):
+            payload = payload.as_dict()
+        elif is_dataclass(payload):
             payload = asdict(payload)
         elif not isinstance(payload, dict):
             payload = {"payload": payload}
