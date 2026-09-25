@@ -12,6 +12,7 @@ from . import __version__
 from .core.config import ConfigError, load_config
 from .core.runtime import run_simulated_session
 from .display.diagnostics import DisplayProbeError, display_probe
+from .display.native_probe import NativeKmsError, run_native_probe
 from .protocols import available_protocols, get_protocol
 
 
@@ -31,6 +32,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     display_probe_command.add_argument("--config", type=Path, help="TOML configuration file")
     display_probe_command.add_argument("--json", action="store_true", dest="as_json")
+    kms_probe_command = hardware_commands.add_parser(
+        "kms-probe", help="native DRM resource probe without modesetting"
+    )
+    kms_probe_command.add_argument("--config", type=Path, help="TOML configuration file")
+    kms_probe_command.add_argument("--binary", type=Path, help="native kms_probe executable")
+    kms_probe_command.add_argument("--device", help="DRM card; omitted scans card*")
+    kms_probe_command.add_argument("--json", action="store_true", dest="as_json")
+    kms_smoke_command = hardware_commands.add_parser(
+        "kms-smoke", help="short native DRM page-flip smoke test with restoration"
+    )
+    kms_smoke_command.add_argument("--config", type=Path, help="TOML configuration file")
+    kms_smoke_command.add_argument("--binary", type=Path, help="native kms_probe executable")
+    kms_smoke_command.add_argument("--device", help="DRM card; omitted scans card*")
+    kms_smoke_command.add_argument("--frames", type=int, default=60)
+    kms_smoke_command.add_argument("--json", action="store_true", dest="as_json")
 
     config = commands.add_parser("config", help="validate configuration")
     config_commands = config.add_subparsers(dest="config_command", required=True)
@@ -80,6 +96,21 @@ def main(argv: list[str] | None = None) -> int:
             print(display_probe(config, as_json=args.as_json))
         except (ConfigError, DisplayProbeError, OSError, ValueError) as exc:
             print(f"display probe failed: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    if args.command == "hardware" and args.hardware_command in {"kms-probe", "kms-smoke"}:
+        try:
+            config = load_config(args.config).display
+            payload = run_native_probe(
+                config,
+                frames=1 if args.hardware_command == "kms-probe" else args.frames,
+                binary=args.binary,
+                device=args.device,
+                probe_only=args.hardware_command == "kms-probe",
+            )
+            print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else payload)
+        except (ConfigError, NativeKmsError, OSError, ValueError) as exc:
+            print(f"KMS command failed: {exc}", file=sys.stderr)
             return 2
         return 0
     if args.command == "config" and args.config_command == "validate":

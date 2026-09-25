@@ -3,22 +3,32 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from rpi_vstim.core.config import DisplayConfig
 
 from .diagnostics import probe_config
 from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
+from .native_probe import display_result_from_probe, run_native_probe
+from .photodiode import PhotodiodePatch
 
 
 class KmsDisplayBackend:
     name = "kms"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        native_binary: Path | str | None = None,
+        photodiode: PhotodiodePatch | None = None,
+    ) -> None:
         self.config: DisplayConfig | None = None
         self.info: DisplayInfo | None = None
+        self.native_binary = native_binary
+        self.photodiode = photodiode or PhotodiodePatch("bottom_right", 50, 255, 0)
 
-    def open(self, config):
+    def open(self, config: DisplayConfig) -> DisplayInfo:
         result = probe_config(config)
         selected = result["stimulus"]
         self.config = config
@@ -45,23 +55,39 @@ class KmsDisplayBackend:
 
     def present(self, program: FrameProgram, *, sequence_id: str) -> DisplayResult:
         self.validate_program(program)
-        raise RuntimeError("native page-flip presentation is not enabled by the Phase 3 probe")
+        return self._present(program.frame_count, sequence_id=sequence_id)
 
     def present_color(self, rgb: tuple[int, int, int], *, frames: int) -> DisplayResult:
         if len(rgb) != 3 or any(not 0 <= value <= 255 for value in rgb):
             raise ValueError("rgb must contain three values from 0 to 255")
         if self.config is None:
             raise RuntimeError("display is not open")
-        return self.present(
-            FrameProgram(
-                self.config.width_px,
-                self.config.height_px,
-                self.config.refresh_hz,
-                self.config.pixel_format,
-                frames,
-            ),
-            sequence_id=f"color:{rgb}",
-        )
+        return self._present(frames, sequence_id=f"color:{rgb}", color=rgb)
+
+    def _present(
+        self,
+        frames: int,
+        *,
+        sequence_id: str,
+        color: tuple[int, int, int] | None = None,
+    ) -> DisplayResult:
+        if self.config is None:
+            raise RuntimeError("display is not open")
+        try:
+            payload = run_native_probe(
+                self.config,
+                frames=frames,
+                binary=self.native_binary,
+                color=color,
+                patch_size=self.photodiode.size_px,
+                patch_corner=self.photodiode.corner,
+                patch_on=self.photodiode.on_value,
+                patch_off=self.photodiode.off_value,
+            )
+        except Exception:
+            self.close()
+            raise
+        return display_result_from_probe(payload, self.config, sequence_id=sequence_id)
 
     def close(self) -> None:
         self.config = None

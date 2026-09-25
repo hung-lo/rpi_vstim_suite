@@ -18,8 +18,9 @@ are deferred hardware validation and are not inferred from desktop tests.
 
 The software-only bounds currently established are the 256-message telemetry
 deque, one metadata record per fake camera, and no decoded-frame retention in
-the fake runtime. The provisional display probe parses command output only; it
-does not allocate presentation buffers or claim a KMS resource budget.
+the fake runtime. The read-only display probe parses command output only; the
+separate native smoke path allocates two bounded display buffers and reports
+their timing, but is not a production resource-budget acceptance.
 
 Production storage and concurrent camera-write measurements remain deferred
 until the experiment SSD is attached. Temporary test directories must not be

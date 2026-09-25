@@ -16,8 +16,9 @@ rpi-vstim hardware display-probe \
 The user-authorized provisional roles are HDMI-A-1 for stimulus and HDMI-A-2
 for camera preview. The roles are configuration, not protocol constants, and
 can be swapped without code changes. The command does not set modes or present
-frames. The KMS `present()` boundary remains fail-closed until native
-page-flip/restore behavior is separately implemented and hardware-tested.
+frames. The explicit native KMS smoke command performs short page-flip testing
+only when the caller has confirmed DRM ownership and can restore the saved CRTC
+state.
 
 The production experiment target is one Pi 5 with two local cameras. SSH is a
 deployment/audit transport only, not a camera-control or video-transfer path.

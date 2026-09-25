@@ -24,15 +24,19 @@ These are provisional assumptions, not a new physical cable verification.
   dimensions, and refresh tolerance; it never falls back to another output.
 - `rpi-vstim hardware display-probe` reports the selected roles without setting
   a mode or presenting frames.
-- The Python KMS boundary can open/validate against the read-only probe but
-  fails closed on presentation until native page-flip code exists.
+- The standalone native probe and Python KMS wrapper provide bounded
+  alternating-pattern/color page-flip presentation with timing fields and
+  CRTC restoration.
 - Unit fixtures cover dual connected HDMI outputs, disabled preview,
-  disconnected/missing outputs, unsupported modes, and role separation.
+  disconnected/missing outputs, unsupported modes, exact/nearest refresh,
+  reordered connectors, and role separation.
 
-## Deferred native/hardware work
+## Hardware work still blocked or deferred
 
-The native boundary still needs a short, controlled implementation and test of
-synchronous page flips, vblank sequence/timestamps, bounded presentation
-buffers, photodiode-patch writes, abort handling, and restoration of the prior
-CRTC state. No long stimulus, reward/water/suction hardware, GPIO, dual-camera
-load, or 10,000-frame acceptance test belongs in this scoped work.
+The native code compiled and its read-only resource path passed on both real
+outputs. A modeset/page-flip smoke test could not start because `labwc` owns
+DRM master on `/dev/dri/card1`; no compositor changes were made. Real
+page-flip intervals, physical photodiode timing, CRTC restoration under
+ownership, and 10,000-frame acceptance remain unverified. No long stimulus,
+reward/water/suction hardware, GPIO, dual-camera load, or integrated acceptance
+test belongs in this scoped work.

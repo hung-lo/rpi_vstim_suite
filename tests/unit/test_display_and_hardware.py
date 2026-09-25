@@ -30,7 +30,7 @@ def test_simulated_hardware_starts_safe():
     assert hardware.outputs_safe
 
 
-def test_kms_open_uses_selected_probe_and_fails_closed(monkeypatch):
+def test_kms_open_uses_selected_probe_and_presents_native_result(monkeypatch):
     monkeypatch.setattr(
         "rpi_vstim.display.kms.probe_config",
         lambda config: {
@@ -42,9 +42,40 @@ def test_kms_open_uses_selected_probe_and_fails_closed(monkeypatch):
             "preview": {"connector": "HDMI-A-2"},
         },
     )
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.run_native_probe",
+        lambda config, **kwargs: {
+            "connector": "HDMI-A-1",
+            "selected_mode": "1024x600@59.82",
+            "pixel_format": "RGB565",
+            "requested_frame_count": kwargs["frames"],
+            "completed_frame_count": kwargs["frames"],
+            "first_page_flip_monotonic_ns": 100,
+            "last_page_flip_monotonic_ns": 100_000,
+            "first_page_flip_realtime_ns": 200,
+            "mean_vblank_interval_us": 16_683.0,
+            "std_vblank_interval_us": 2.0,
+            "maximum_vblank_interval_us": 16_700.0,
+            "missed_vblank_count": 0,
+            "aborted": False,
+        },
+    )
     display = KmsDisplayBackend()
     info = display.open(DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82))
     assert info.connector == "HDMI-A-1"
-    with pytest.raises(RuntimeError, match="page-flip"):
-        display.present_color((255, 255, 255), frames=1)
+    result = display.present_color((255, 255, 255), frames=2)
+    assert result.completed_frame_count == 2
+    assert result.missed_vblank_count == 0
     display.close()
+
+
+def test_kms_open_failure_does_not_leave_partial_state(monkeypatch):
+    def fail(_config):
+        raise RuntimeError("connector unavailable")
+
+    monkeypatch.setattr("rpi_vstim.display.kms.probe_config", fail)
+    display = KmsDisplayBackend()
+    with pytest.raises(RuntimeError, match="connector"):
+        display.open(DisplayConfig())
+    assert display.config is None
+    assert display.info is None

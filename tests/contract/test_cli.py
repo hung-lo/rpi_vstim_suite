@@ -49,3 +49,17 @@ def test_explicit_config_protocol_mismatch_is_rejected(tmp_path, capsys):
         ]
     ) == 2
     assert "protocol/config mismatch" in capsys.readouterr().err
+
+
+def test_native_kms_probe_cli_is_explicit_and_json(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "rpi_vstim.cli.run_native_probe",
+        lambda config, **kwargs: {
+            "connector": config.stimulus_connector,
+            "modeset": False,
+            "page_flip": False,
+            "probe_only": kwargs["probe_only"],
+        },
+    )
+    assert main(["hardware", "kms-probe", "--json"]) == 0
+    assert '"modeset": false' in capsys.readouterr().out

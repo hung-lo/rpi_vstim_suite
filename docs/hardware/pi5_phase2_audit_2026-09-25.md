@@ -334,8 +334,8 @@ Software-only changes now provide:
   selection with no fallback;
 - `rpi-vstim hardware display-probe`, which invokes the installed read-only
   `modetest -M vc4 -c` path and does not set modes or present frames;
-- a fail-closed Python KMS boundary that validates a selected display but
-  raises until native page-flip presentation exists;
+- a Python KMS boundary backed by the standalone native test-pattern/page-flip
+  path;
 - stable camera identity resolution by topology/sensor path rather than
   transient `/dev/videoN` numbering; and
 - explicit storage inspection that never mounts or changes a path.
@@ -345,11 +345,10 @@ and individual `rpicam` open smoke tests. No repository code was deployed to
 the Pi, no display was taken over, and no full-screen/no-mouse stimulus smoke
 test was run.
 
-Remaining scoped display work is native page-flip/vblank instrumentation,
-photodiode-patch integration, safe CRTC restoration, and a short controlled
-hardware smoke test. Those are not claimed here. The SSD-dependent storage
-throughput test, concurrent camera load test, and final integrated acceptance
-remain deferred.
+Remaining scoped display work is ownership-permitted page-flip/vblank
+validation, physical photodiode measurement, and production frame-cache
+integration. The SSD-dependent storage throughput test, concurrent camera load
+test, and final integrated acceptance remain deferred.
 
 ## Final Gate 2 assessment after the addendum
 

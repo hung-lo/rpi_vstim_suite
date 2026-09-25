@@ -5,9 +5,10 @@ Pi 5 visual-stimulus suite.
 
 The package provides deterministic protocol planning, a fake display, simulated
 hardware, bounded telemetry, session manifests, metadata-only dual-local-camera
-supervision, configurable display roles, and read-only DRM mode discovery.
-Native page-flip presentation, production camera capture, GPIO, network
-telemetry, reward actuation, and production storage remain hardware-gated.
+supervision, configurable display roles, read-only DRM mode discovery, and a
+native bounded KMS test-pattern backend. Production protocol frame rendering,
+camera capture, GPIO, network telemetry, reward actuation, and production
+storage remain hardware-gated.
 
 The production architecture is one Raspberry Pi 5 for stimulus presentation,
 GPIO/lick/reward control, logging, telemetry, and two independently configured

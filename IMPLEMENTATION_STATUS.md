@@ -86,14 +86,31 @@ storage remain later acceptance work.
 - [x] Add strict connector/mode/refresh selection with no silent fallback.
 - [x] Add hardware-independent DRM parser/selection fixtures and tests.
 - [x] Add read-only `rpi-vstim hardware display-probe` plumbing.
-- [x] Add a fail-closed KMS open/validation boundary; frame presentation still
-  requires the native page-flip layer.
-- [ ] Implement and hardware-test native page-flip/vblank presentation,
-  photodiode timing, and safe CRTC restoration.
+- [x] Implement the standalone direct-libdrm probe and bounded native
+  alternating-pattern/page-flip path.
+- [x] Add Python KMS wrapper/result conversion and timing-statistics helpers.
+- [x] Add configurable photodiode patch geometry/value plumbing and tests.
+- [x] Validate native read-only connector/CRTC/primary-plane discovery on both
+  real Pi HDMI outputs.
+- [ ] Hardware-test modesetting/page flips, physical timing, and safe CRTC
+  restoration; blocked by the active `labwc` DRM owner.
+- [ ] Integrate production frame-cache loading and protocol rendering.
 
 Provisional user-authorized mapping: `HDMI-A-1` is the stimulus display and
 `HDMI-A-2` is the camera-preview display. This remains configurable and is not
 presented as physically re-verified.
+
+The native probe compiled on the Pi with Debian Trixie `libdrm-dev`. Its
+read-only mode returned HDMI-A-1/CRTC 92/primary plane 81 and
+HDMI-A-2/CRTC 104/primary plane 93; both primary planes advertise `RG16`
+(DRM RGB565). A 60-frame HDMI-A-1 modeset attempt failed before modesetting
+with `Permission denied` because `labwc` owns `/dev/dri/card1`. No
+compositor or session configuration was changed.
+
+**Canonical Gate 3: not satisfied.** The software implementation and native
+read-only resource proof are complete, but ownership-permitted page-flip
+timing, physical photodiode validation, CRTC restoration under modeset, and
+production frame-cache rendering remain unverified or deferred.
 
 ## Historical hardware evidence
 
@@ -105,6 +122,7 @@ audit.
 
 ## Deferred until the relevant hardware gate
 
-Real display/KMS, GPIO, camera acquisition, UDP send, asset conversion,
-reward actuation, and production experiment execution remain deferred. The
-separate `rpi_rig_monitor` Pi remains outside this phase and is unchanged.
+Real display timing acceptance, production frame rendering, GPIO, camera
+acquisition, UDP send, asset conversion, reward actuation, and production
+experiment execution remain deferred. The separate `rpi_rig_monitor` Pi
+remains outside this phase and is unchanged.

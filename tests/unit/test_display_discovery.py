@@ -53,6 +53,23 @@ def test_non_exact_refresh_selects_nearest_supported_mode():
     assert select_display(inventory, config).mode.refresh_hz == 59.82
 
 
+def test_exact_refresh_rejects_unavailable_rate():
+    inventory = parse_modetest_connectors(FIXTURE)
+    config = DisplayConfig(width_px=1024, height_px=600, refresh_hz=60.0)
+    with pytest.raises(DisplaySelectionError, match="refresh"):
+        select_display(inventory, config)
+
+
+def test_reordered_connectors_and_empty_modes_fail_closed():
+    inventory = parse_modetest_connectors("""\
+42 41 connected HDMI-A-2
+33 32 connected HDMI-A-1
+""")
+    assert [connector.name for connector in inventory.connectors] == ["HDMI-A-2", "HDMI-A-1"]
+    with pytest.raises(DisplaySelectionError, match="unsupported"):
+        select_display(inventory, DisplayConfig(stimulus_connector="HDMI-A-1"))
+
+
 def test_disconnected_or_missing_connector_does_not_fallback():
     inventory = parse_modetest_connectors(FIXTURE.replace("connected\tHDMI-A-1", "disconnected\tHDMI-A-1"))
     config = DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82)
