@@ -390,3 +390,133 @@ This is a configurable role change only; no protocol logic, boot/session
 configuration, camera, GPIO, reward, storage, or persistent compositor
 configuration was changed. The 10,000-frame timing run must be restarted only
 after a new supervised authorization using the corrected role.
+
+## Corrected HDMI-A-2 stimulus endurance validation
+
+The corrected run used the physically verified stimulus connector and was
+started once after preflight at `2026-09-25T14:44:06.284826463-04:00`:
+
+```text
+./kms_probe --lease --connector HDMI-A-2 --width 1024 --height 600 \
+  --refresh 59.820999 --format RGB565 --frames 10000 --json
+```
+
+It completed at `2026-09-25T14:46:53.749530347-04:00` with status 0. The
+complete real-display trace is preserved in
+`docs/hardware/pi5_phase3_hdmi_a2_10000_rgb565_2026-09-25.json`.
+
+| Metric | Result |
+|---|---:|
+| leased connector | HDMI-A-2 / connector 42 |
+| excluded connector | HDMI-A-1 / connector 33 (not in lease object set) |
+| lease objects | 42, 93, 104, 666 |
+| selected mode | 1024×600 @ 59.8214 Hz |
+| pixel format | RGB565 |
+| requested/completed | 10,000 / 10,000 |
+| flip interval count | 9,999 |
+| mean interval | 16,716.411281 µs |
+| median interval | 16,716.389000 µs |
+| p95 / p99 | 16,720.092 / 16,722.649 µs |
+| min / max | 16,169.056 / 17,283.555 µs |
+| effective refresh | 59.8214523 Hz |
+| intervals >1.25× / >1.5× / >2× nominal | 0 / 0 / 0 |
+| short intervals <0.75× nominal | 0 |
+| long / short intervals at 5% tolerance | 0 / 0 |
+| missed vblank / estimated dropped frames | 0 / 0 |
+| page-flip errors / event-wait timeouts | 0 / 0 |
+| kernel sequences | contiguous, 217386720–217396719 |
+| aborted / restored | false / true |
+
+The measured flip-event duration was 167.147396 s. The lease lifecycle ended
+with `device-released`; no lease revocation or compositor error occurred.
+Post-run checks at `2026-09-25T14:47:17.625702190-04:00` confirmed labwc PID
+`756533`, active Wayland session 436, HDMI-A-1 and HDMI-A-2 connected/current,
+and normal labwc ownership of `/dev/dri/card1`. HDMI-A-1 therefore remained
+compositor-managed throughout this A2-only validation.
+
+This is long-duration software page-flip validation on the actual stimulus
+display. It is not physical photodiode or integrated camera/GPIO acceptance.
+
+## XRGB8888 compatibility comparison
+
+A single short HDMI-A-2-only XRGB8888 run was then performed for 300 frames.
+It completed 300/300 with lease objects 42, 93, 104, 666 and
+`restored=true`. The raw trace is
+`docs/hardware/pi5_phase3_hdmi_a2_300_xrgb8888_2026-09-25.json`.
+
+The XRGB8888 result was mean 16,716.105281 µs, median 16,716.278000 µs,
+p95/p99 16,722.759/16,769.796 µs, min/max 16,635.797/16,794.037 µs,
+effective refresh 59.8225474 Hz, with zero missed, dropped, long, short, or
+outside-tolerance intervals. The two-format runs were not a visual-quality
+measurement, but both formats were accepted by the same primary plane and
+showed stable page-flip timing.
+
+At 1024×600, RGB565 requires 1,228,800 packed bytes per buffer versus
+2,457,600 for XRGB8888; two buffers therefore use approximately 2.34 MiB
+versus 4.69 MiB before alignment. RGB565 remains the production default because
+it halves scanout memory and conversion bandwidth without a measured timing
+penalty. A visual-fidelity comparison remains unclaimed.
+
+## Bounded production frame renderer
+
+`ProductionFrameRenderer` now prepares RGB888 input into the existing native
+leased KMS path. It provides:
+
+- bounded eight-entry LRU caching of prepared frame bytes;
+- two reusable scanout buffers;
+- RGB565 and XRGB8888 conversion with explicit stride validation;
+- deterministic frame-indexed preparation and cache reuse;
+- configurable photodiode patch geometry and on/off values; and
+- a temporary packed two-frame handoff consumed by native `--frame-file`
+  before the page-flip loop.
+
+The real-Pi smoke command was:
+
+```text
+python3 -c 'from rpi_vstim.cli import main; raise SystemExit(main())' \
+  hardware kms-render-smoke \
+  --config pi5_dual_display.toml --binary /tmp/rpi-vstim-kms-phase3-debug/kms_probe \
+  --frames 300 --lease --json
+```
+
+The generated representative RGB888 frame pair went through the configured
+HDMI-A-2 lease and native page flips. The complete trace is preserved in
+`docs/hardware/pi5_phase3_hdmi_a2_production_renderer_300_2026-09-25.json`.
+It reported `frame_source=external-raw-pair`, 300/300 completed frames,
+mean/median 16,716.114880/16,716.370000 µs, p95/p99
+16,719.796/16,760.574 µs, min/max 16,635.444/16,795.148 µs, effective refresh
+59.822513 Hz, zero missed/dropped/long/short intervals, and `restored=true`.
+The frame pair produced two cache misses and two prepared frames; the default
+eight-entry cache and two-buffer memory bounds are documented in
+`docs/resource_budget.md`.
+Post-run Pi observation reported `41.1'C`, `throttled=0x0`, and load averages
+`0.00 0.08 0.13`; these were a post-run health check, not a continuous CPU or
+thermal profile.
+
+This validates prepared-frame conversion and handoff on the real Pi, not a
+natural-image asset corpus or a behavioral protocol session. Asset decoding is
+caller-owned and no unbounded image preload was added.
+
+## Photodiode software path and physical validation status
+
+The renderer and native result path preserve a configurable bottom-right
+50-pixel patch with on value 255 and off value 0 for the current profile. The
+renderer records the intended state with the prepared frame index, uses an
+explicit even-frame-on/odd-frame-off convention for alternating pairs, and
+applies the patch before the exact buffer submitted for that frame. Unit tests
+cover alternating states, pair preparation, patch geometry, format conversion,
+cache reuse/eviction, invalid dimensions/strides, and preparation failures.
+
+No photodiode, DAQ, or already-documented safe acquisition wiring was found in
+the repository or Pi audit. Physical optical timing, polarity, onset latency,
+and one-frame-offset validation are therefore deferred; no GPIO or guessed
+wiring was used.
+
+## Updated Gate 3 assessment
+
+Completed display-only evidence now includes corrected HDMI-A-2 lease
+ownership, 10,000-frame software timing, RGB565/XRGB8888 compatibility,
+bounded production-frame preparation, real-Pi production-renderer page flips,
+HDMI-A-1 compositor continuity, and clean restoration. Canonical Gate 3 remains
+open for physical photodiode timing, natural-image/asset-level acceptance,
+SSD/storage validation, and later integrated camera/GPIO/reward acceptance.

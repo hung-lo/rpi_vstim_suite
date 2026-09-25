@@ -8,7 +8,9 @@ restores the saved CRTC state.
 
 `--probe-only` enumerates the selected device, connector, mode, CRTC, primary
 plane, and supported formats without modesetting. The normal path is a short
-alternating-pattern test with a configurable photodiode patch. It does not
+alternating-pattern test with a configurable photodiode patch. `--frame-file`
+accepts two packed frames (even/on followed by odd/off), allowing the bounded
+production renderer to feed the same native leased KMS path. It does not
 involve cameras, GPIO, storage, or telemetry.
 
 Build on Debian Trixie with:
@@ -17,7 +19,7 @@ Build on Debian Trixie with:
 make
 ```
 
-The current repository wrapper exposes this as `KmsDisplayBackend`, but the
-backend is not production protocol rendering: `FrameProgram` currently maps to
-the bounded native test-pattern path. Full frame-cache integration, physical
-photodiode validation, and 10,000-frame acceptance remain later gates.
+The repository wrapper exposes this through `KmsDisplayBackend` and
+`ProductionFrameRenderer`. Asset decoding remains caller-owned; the renderer
+keeps only a bounded prepared-frame cache. Physical photodiode validation,
+storage, and integrated acceptance remain later gates.

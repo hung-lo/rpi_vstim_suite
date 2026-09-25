@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from rpi_vstim.core.config import DisplayConfig
@@ -103,3 +105,51 @@ def test_kms_present_failure_closes_backend(monkeypatch):
         display.present_color((0, 0, 0), frames=1)
     assert display.config is None
     assert display.info is None
+
+
+def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {"connector": "HDMI-A-2", "mode": "2x2", "refresh_hz": 59.82},
+            "preview": {"connector": "HDMI-A-1"},
+        },
+    )
+    captured: dict[str, object] = {}
+
+    def fake_probe(config, **kwargs):
+        frame_file = Path(kwargs["frame_file"])
+        captured["frame_path"] = frame_file
+        captured["frame_bytes"] = frame_file.read_bytes()
+        return {
+            "connector": "HDMI-A-2",
+            "selected_mode": "2x2@59.82",
+            "pixel_format": "RGB565",
+            "requested_frame_count": kwargs["frames"],
+            "completed_frame_count": kwargs["frames"],
+            "first_page_flip_monotonic_ns": 100,
+            "last_page_flip_monotonic_ns": 100_000,
+            "first_page_flip_realtime_ns": 200,
+            "mean_vblank_interval_us": 16_683.0,
+            "std_vblank_interval_us": 2.0,
+            "maximum_vblank_interval_us": 16_700.0,
+            "missed_vblank_count": 0,
+            "aborted": False,
+        }
+
+    monkeypatch.setattr("rpi_vstim.display.kms.run_native_probe", fake_probe)
+    display = KmsDisplayBackend()
+    display.open(
+        DisplayConfig(
+            stimulus_connector="HDMI-A-2",
+            preview_connector="HDMI-A-1",
+            width_px=2,
+            height_px=2,
+        )
+    )
+    rgb = bytes((10, 20, 30)) * 4
+    result = display.present_rgb_pair(rgb, rgb, frames=2, sequence_id="renderer")
+    assert result.connector == "HDMI-A-2"
+    assert len(captured["frame_bytes"]) == 2 * 2 * 2 * 2
+    assert not Path(captured["frame_path"]).exists()
+    display.close()

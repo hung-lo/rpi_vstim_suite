@@ -12,7 +12,9 @@ from . import __version__
 from .core.config import ConfigError, load_config
 from .core.runtime import run_simulated_session
 from .display.diagnostics import DisplayProbeError, display_probe
+from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
+from .display.photodiode import PhotodiodePatch
 from .protocols import available_protocols, get_protocol
 
 
@@ -49,6 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
     kms_smoke_command.add_argument("--frames", type=int, default=60)
     kms_smoke_command.add_argument("--lease", action="store_true")
     kms_smoke_command.add_argument("--json", action="store_true", dest="as_json")
+    render_smoke_command = hardware_commands.add_parser(
+        "kms-render-smoke", help="display-only production-renderer smoke test"
+    )
+    render_smoke_command.add_argument("--config", type=Path, help="TOML configuration file")
+    render_smoke_command.add_argument("--binary", type=Path, help="native kms_probe executable")
+    render_smoke_command.add_argument("--frames", type=int, default=300)
+    render_smoke_command.add_argument("--lease", action="store_true")
+    render_smoke_command.add_argument("--json", action="store_true", dest="as_json")
 
     config = commands.add_parser("config", help="validate configuration")
     config_commands = config.add_subparsers(dest="config_command", required=True)
@@ -84,6 +94,17 @@ def _doctor(as_json: bool) -> int:
     return 0
 
 
+def _representative_rgb888(width_px: int, height_px: int, phase: int) -> bytes:
+    frame = bytearray(width_px * height_px * 3)
+    for y in range(height_px):
+        for x in range(width_px):
+            offset = (y * width_px + x) * 3
+            frame[offset] = (x * 255) // max(width_px - 1, 1)
+            frame[offset + 1] = (y * 255) // max(height_px - 1, 1)
+            frame[offset + 2] = (x + y + phase) % 256
+    return bytes(frame)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "list-protocols":
@@ -99,6 +120,37 @@ def main(argv: list[str] | None = None) -> int:
         except (ConfigError, DisplayProbeError, OSError, ValueError) as exc:
             print(f"display probe failed: {exc}", file=sys.stderr)
             return 2
+        return 0
+    if args.command == "hardware" and args.hardware_command == "kms-render-smoke":
+        display = KmsDisplayBackend(
+            native_binary=args.binary,
+            use_lease=args.lease,
+        )
+        try:
+            loaded = load_config(args.config)
+            config = loaded.display
+            display.photodiode = PhotodiodePatch(
+                loaded.photodiode.corner,
+                loaded.photodiode.size_px,
+                loaded.photodiode.on_value,
+                loaded.photodiode.off_value,
+            )
+            display.open(config)
+            display.present_rgb_pair(
+                _representative_rgb888(config.width_px, config.height_px, 0),
+                _representative_rgb888(config.width_px, config.height_px, 37),
+                frames=args.frames,
+                sequence_id="production-renderer-smoke",
+            )
+            payload = display.last_probe_payload
+            if payload is None:
+                raise NativeKmsError("production renderer returned no native result")
+            print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else payload)
+        except (ConfigError, NativeKmsError, OSError, ValueError) as exc:
+            print(f"KMS renderer command failed: {exc}", file=sys.stderr)
+            return 2
+        finally:
+            display.close()
         return 0
     if args.command == "hardware" and args.hardware_command in {"kms-probe", "kms-smoke"}:
         try:

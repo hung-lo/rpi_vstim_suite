@@ -50,6 +50,7 @@ typedef struct {
     bool lease_discover;
     bool color_set;
     unsigned int color[3];
+    const char *frame_file;
 } Options;
 
 typedef struct {
@@ -542,6 +543,40 @@ static void fill_buffer(const Options *options, DumbBuffer *buffer, unsigned int
     }
 }
 
+static int load_frame_file(const Options *options, DumbBuffer buffers[2]) {
+    FILE *file = fopen(options->frame_file, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "cannot open frame file %s: %s\n",
+                options->frame_file, strerror(errno));
+        return -1;
+    }
+    size_t row_bytes = (size_t)options->width * format_bpp(options->format) / 8U;
+    for (unsigned int buffer_index = 0; buffer_index < 2; ++buffer_index) {
+        for (unsigned int row_index = 0; row_index < options->height; ++row_index) {
+            char *destination = (char *)buffers[buffer_index].map +
+                                (size_t)row_index * buffers[buffer_index].pitch;
+            if (fread(destination, 1, row_bytes, file) != row_bytes) {
+                fprintf(stderr, "frame file %s ended before two complete frames\n",
+                        options->frame_file);
+                fclose(file);
+                return -1;
+            }
+            if (buffers[buffer_index].pitch > row_bytes) {
+                memset(destination + row_bytes, 0,
+                       buffers[buffer_index].pitch - row_bytes);
+            }
+        }
+    }
+    if (fgetc(file) != EOF) {
+        fprintf(stderr, "frame file %s contains data after two complete frames\n",
+                options->frame_file);
+        fclose(file);
+        return -1;
+    }
+    fclose(file);
+    return 0;
+}
+
 static void page_flip_handler(
     int fd, unsigned int frame, unsigned int seconds, unsigned int useconds, void *data
 ) {
@@ -900,6 +935,9 @@ static void print_result(
         printf(", \"size_px\": %u, \"on_value\": %u, \"off_value\": %u, "
                "\"frame_state\": \"even=on,odd=off\"},\n",
                options->patch_size, options->patch_on, options->patch_off);
+        printf("  \"frame_source\": ");
+        json_string(options->frame_file == NULL ? "synthetic-alternating" : "external-raw-pair");
+        printf(",\n");
         printf("  \"missed_vblank_count\": %u,\n  \"aborted\": %s,\n  \"restored\": %s,\n",
                flips->missed, aborted ? "true" : "false", restored ? "true" : "false");
         printf("  \"flip_events\": [");
@@ -947,6 +985,7 @@ static void usage(const char *program) {
             "  --patch-on VALUE    photodiode on value (default 255)\n"
             "  --patch-off VALUE   photodiode off value (default 0)\n"
             "  --color R,G,B       hold background color while toggling patch\n"
+            "  --frame-file PATH   two packed frames, even/on then odd/off\n"
             "  --lease             acquire a Wayland DRM lease for the connector\n"
             "  --lease-discover    enumerate lease offers without requesting a lease\n"
             "  --probe-only        enumerate resources without modesetting\n"
@@ -1028,6 +1067,7 @@ int main(int argc, char **argv) {
         {"patch-on", required_argument, NULL, 'a'},
         {"patch-off", required_argument, NULL, 'b'},
         {"color", required_argument, NULL, 'o'},
+        {"frame-file", required_argument, NULL, 'F'},
         {"lease", no_argument, NULL, 'L'},
         {"lease-discover", no_argument, NULL, 'D'},
         {"probe-only", no_argument, NULL, 'P'},
@@ -1035,7 +1075,7 @@ int main(int argc, char **argv) {
         {"help", no_argument, NULL, '?'}
     };
     int option;
-    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:LDPj", long_options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:F:LDPj", long_options, NULL)) != -1) {
         char *end = NULL;
         switch (option) {
         case 'd': options.device = optarg; break;
@@ -1060,6 +1100,7 @@ int main(int argc, char **argv) {
             }
             options.color_set = true;
             break;
+        case 'F': options.frame_file = optarg; break;
         case 'L': options.lease = true; break;
         case 'D': options.lease_discover = true; break;
         case 'P': options.probe_only = true; break;
@@ -1147,8 +1188,12 @@ int main(int argc, char **argv) {
         create_dumb_buffer(&options, &state, &buffers[1]) != 0) {
         goto cleanup;
     }
-    fill_buffer(&options, &buffers[0], 0);
-    fill_buffer(&options, &buffers[1], 1);
+    if (options.frame_file == NULL) {
+        fill_buffer(&options, &buffers[0], 0);
+        fill_buffer(&options, &buffers[1], 1);
+    } else if (load_frame_file(&options, buffers) != 0) {
+        goto cleanup;
+    }
     if (drmModeSetCrtc(state.fd, state.crtc_id, buffers[0].framebuffer, 0, 0,
                        &state.connector->connector_id, 1, &state.mode) != 0) {
         int set_errno = errno;

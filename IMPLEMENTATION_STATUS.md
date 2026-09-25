@@ -111,17 +111,19 @@ storage remain later acceptance work.
 - [x] Validate the first leased HDMI-A-1 modeset and 300 native page flips at
   1024x600 RGB565; collect software vblank timing with zero missed/dropped
   intervals and verify CRTC/lease/compositor recovery.
-- [ ] Validate physical timing, long-duration acceptance, and final CRTC
-  restoration criteria; the active `labwc` DRM owner still requires the lease
-  path for future runs.
-- [ ] Test an HDMI-A-1-only DRM lease, including leased object IDs, page flips,
-  HDMI-A-2 preview continuity, revocation, and recovery; the first supervised
-  probe-only request terminated with a native client segmentation fault before
-  reporting a lease object set. The post-fix acquisition/object/recovery probe
-  and 300-frame native page-flip run passed; revocation, long-duration, and
-  integrated testing remain pending. See
-  `docs/hardware/pi5_phase3_drm_lease_2026-09-25.md`.
-- [ ] Integrate production frame-cache loading and protocol rendering.
+- [x] Complete the corrected HDMI-A-2-only 10,000-frame leased RGB565 run at
+  1024x600; the lease contained connector 42/CRTC 104/primary plane 93 and
+  cursor plane 666, excluded HDMI-A-1/connector 33, and restored labwc.
+- [x] Validate HDMI-A-2 XRGB8888 compatibility with a clean 300-frame leased
+  run; RGB565 remains the default because it uses half the scanout memory with
+  no measured timing disadvantage.
+- [x] Integrate a bounded production frame renderer with reusable scanout
+  buffers, RGB565/XRGB8888 conversion, deterministic frame indexing, and
+  photodiode patch application through the existing leased KMS backend.
+- [x] Run the production-renderer smoke path on real HDMI-A-2 hardware for
+  300 leased page flips with an external prepared frame pair.
+- [ ] Validate physical photodiode timing and long-term optical behavior; the
+  required acquisition hardware/wiring is not documented.
 
 - [x] Verify the physical display roles with a controlled leased pattern:
   `HDMI-A-2` is the visual-stimulus display and `HDMI-A-1` is the
@@ -130,9 +132,11 @@ storage remain later acceptance work.
   physical HDMI1 maps to DRM HDMI-A-2. The mapping remains configurable in
   the Pi 5 rig profile.
 
-The 10,000-frame RGB565 attempt was intentionally interrupted at 9,972
-completed frames after the physical-role mismatch was observed. It is recorded
-as a mapping-discovery run, not as a timing failure or long-duration acceptance.
+The earlier HDMI-A-1 10,000-frame RGB565 attempt was intentionally interrupted
+at 9,972 completed frames after the physical-role mismatch was observed. It is
+recorded as general lease/KMS endurance and mapping-discovery evidence, not as
+stimulus-display acceptance. The corrected HDMI-A-2 run is the authoritative
+stimulus-display endurance result.
 
 The native probe compiled on the Pi with Debian Trixie `libdrm-dev`. Its
 read-only mode returned HDMI-A-1/CRTC 92/primary plane 81 and
@@ -146,13 +150,13 @@ cleanly released the device without submitting a lease. No compositor or
 session configuration was changed. See
 `docs/hardware/pi5_phase3_display_ownership_2026-09-25.md`.
 
-**Canonical Gate 3: not satisfied.** The software implementation, native
-read-only resource proof, live lease capability discovery, offline binding
-preflight, supervised lease/object/recovery probes, the first 300-frame leased
-modeset/page-flip run, and physical connector-role discovery are complete.
-Long-duration timing acceptance, RGB565/XRGB8888 comparison, production
-frame-cache rendering, physical photodiode validation, and integrated hardware
-acceptance remain unverified or deferred.
+**Canonical Gate 3: not satisfied.** DRM leasing, corrected HDMI-A-2
+long-duration software timing, XRGB8888 compatibility, bounded production
+frame preparation, real-Pi production-renderer timing, compositor recovery,
+HDMI-A-1 continuity, and physical connector-role discovery are complete.
+Physical photodiode timing, asset-level natural-image acceptance, storage
+validation, and integrated camera/GPIO/reward acceptance remain unverified or
+deferred.
 
 ## Historical hardware evidence
 

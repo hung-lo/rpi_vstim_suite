@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import tempfile
 from pathlib import Path
 
 from rpi_vstim.core.config import DisplayConfig
@@ -12,6 +13,7 @@ from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
 from .native_probe import display_result_from_probe, run_native_probe
 from .photodiode import PhotodiodePatch
+from .renderer import ProductionFrameRenderer
 
 
 class KmsDisplayBackend:
@@ -29,6 +31,8 @@ class KmsDisplayBackend:
         self.native_binary = native_binary
         self.photodiode = photodiode or PhotodiodePatch("bottom_right", 50, 255, 0)
         self.use_lease = use_lease
+        self.renderer: ProductionFrameRenderer | None = None
+        self.last_probe_payload: dict[str, object] | None = None
 
     def open(self, config: DisplayConfig) -> DisplayInfo:
         result = probe_config(config)
@@ -39,6 +43,12 @@ class KmsDisplayBackend:
             str(selected["connector"]),
             f"{selected['mode']}@{float(selected['refresh_hz']):g}",
             config.pixel_format,
+        )
+        self.renderer = ProductionFrameRenderer(
+            config.width_px,
+            config.height_px,
+            config.pixel_format,
+            photodiode=self.photodiode,
         )
         return self.info
 
@@ -66,12 +76,39 @@ class KmsDisplayBackend:
             raise RuntimeError("display is not open")
         return self._present(frames, sequence_id=f"color:{rgb}", color=rgb)
 
+    def present_rgb_pair(
+        self,
+        rgb888_on: bytes | bytearray | memoryview,
+        rgb888_off: bytes | bytearray | memoryview,
+        *,
+        frames: int,
+        sequence_id: str,
+    ) -> DisplayResult:
+        if self.config is None or self.renderer is None:
+            raise RuntimeError("display is not open")
+        frame_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix="rpi-vstim-frame-pair-", suffix=".raw", delete=False
+            ) as frame_file:
+                frame_path = Path(frame_file.name)
+                frame_file.write(self.renderer.packed_pair(rgb888_on, rgb888_off))
+            return self._present(
+                frames,
+                sequence_id=sequence_id,
+                frame_file=frame_path,
+            )
+        finally:
+            if frame_path is not None:
+                frame_path.unlink(missing_ok=True)
+
     def _present(
         self,
         frames: int,
         *,
         sequence_id: str,
         color: tuple[int, int, int] | None = None,
+        frame_file: Path | None = None,
     ) -> DisplayResult:
         if self.config is None:
             raise RuntimeError("display is not open")
@@ -86,7 +123,9 @@ class KmsDisplayBackend:
                 patch_on=self.photodiode.on_value,
                 patch_off=self.photodiode.off_value,
                 lease=self.use_lease,
+                frame_file=frame_file,
             )
+            self.last_probe_payload = payload
         except Exception:
             self.close()
             raise
@@ -95,3 +134,5 @@ class KmsDisplayBackend:
     def close(self) -> None:
         self.config = None
         self.info = None
+        self.renderer = None
+        self.last_probe_payload = None

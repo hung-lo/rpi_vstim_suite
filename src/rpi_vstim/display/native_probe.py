@@ -41,6 +41,7 @@ def run_native_probe(
     patch_off: int = 0,
     probe_only: bool = False,
     lease: bool = False,
+    frame_file: Path | str | None = None,
 ) -> dict[str, Any]:
     if frames <= 0:
         raise ValueError("frames must be positive")
@@ -81,6 +82,8 @@ def run_native_probe(
         if len(color) != 3 or any(not 0 <= value <= 255 for value in color):
             raise ValueError("color must contain three values from 0 to 255")
         command.extend(("--color", ",".join(str(value) for value in color)))
+    if frame_file is not None:
+        command.extend(("--frame-file", str(frame_file)))
     timeout = max(10.0, frames / max(config.refresh_hz, 1.0) + 5.0)
     try:
         result = subprocess.run(

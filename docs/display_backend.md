@@ -2,9 +2,9 @@
 
 The display contract is backend-neutral. `FakeDisplayBackend` remains the
 backend used by software simulation. The Phase 3 slice adds a native
-libdrm-backed `KmsDisplayBackend` for bounded alternating-pattern/color
-presentation, with explicit timing results and fail-closed connector/mode
-selection.
+libdrm-backed `KmsDisplayBackend` for bounded alternating-pattern/color and
+prepared-frame-pair presentation, with explicit timing results and fail-closed
+connector/mode selection.
 
 ## Configurable display roles
 
@@ -59,18 +59,20 @@ DRM master; diagnose that ownership first.
 ## Timing boundary
 
 The native layer owns dumb-buffer allocation, synchronous page-flip events,
-vblank sequence/timestamps, photodiode-patch writes, abort handling, and
-restoration of the original CRTC state. The current `FrameProgram` bridge
-intentionally presents deterministic native test patterns; frame-cache loading
-and protocol rendering remain later work.
+vblank sequence/timestamps, abort handling, and restoration of the original
+CRTC state. `ProductionFrameRenderer` converts prepared RGB888 frames into
+bounded RGB565 or XRGB8888 scanout buffers, applies the photodiode patch before
+submission, and passes a two-frame packed pair to the same native leased KMS
+path. The pair is prepared outside the page-flip loop; no per-frame Python
+allocation occurs in that timing-critical loop.
 
 Python timing helpers report median, p95, p99, min/max, estimated refresh, and
 intervals outside tolerance, long/short intervals, and estimated dropped
 frames. Software timestamps are not physical photodiode onsets. Native KMS
 errors distinguish readable/enumerable resources from modesetting ownership;
 when labwc owns the DRM master, the result is an ownership block rather than a
-generic display failure. No full display timing acceptance or 10,000-frame
-stress result is claimed.
+generic display failure. The corrected HDMI-A-2 10,000-frame run and the
+real-Pi production-renderer smoke are documented in the hardware report.
 
 On the current Pi, labwc 0.9.2 with wlroots 0.19 exposes
 `wp_drm_lease_device_v1` and offers both HDMI outputs. The ownership and
