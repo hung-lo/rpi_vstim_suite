@@ -172,10 +172,12 @@ The existing bounded in-memory publisher passed on Pi Python 3.13.5:
   false]` without blocking;
 - no frame or pixel payload field entered telemetry.
 
-A real loopback receiver was not run because this checkout’s production
-`TelemetryPublisher` is explicitly a null publisher and no socket/network
-publisher exists. The monitor Pi was not contacted. Network transport,
-slow-receiver behavior, and cumulative network state remain unvalidated.
+A real loopback receiver was not run during this Pi campaign because that
+checkout’s production `TelemetryPublisher` was explicitly a null publisher.
+The monitor Pi was not contacted. Since the campaign, the branch has added a
+hardware-independent AF_UNIX-to-UDP publisher and loopback demo/benchmark;
+production session wiring, slow-receiver behavior on the Pi, and cumulative
+network state remain unvalidated.
 
 ## H — short resource/leak campaign
 
@@ -221,7 +223,8 @@ electrical polarity for the actual harness. No GPIO state was changed.
    off, including startup-safe, shutdown-safe, and SIGINT cleanup behavior.
 5. When the SSD is present, resolve its identity/mount and perform storage
    acceptance before any production recording claim.
-6. Implement the real network telemetry publisher/receiver contract.
+6. Wire the local UDP telemetry boundary into the real session runner and
+   validate it against the monitor receiver.
 7. Integrate the real camera supervisor and display backend into one session
    state writer that persists `COMPLETE`, `FAILED`, `INTERRUPTED`, and partial
    artifacts correctly.

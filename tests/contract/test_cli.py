@@ -13,6 +13,18 @@ def test_doctor_is_non_hardware(capsys):
     assert '"hardware_access": false' in capsys.readouterr().out
 
 
+def test_telemetry_loopback_commands_are_local_only(capsys):
+    assert main(["telemetry", "demo", "--messages", "2", "--json"]) == 0
+    assert '"received": 2' in capsys.readouterr().out
+    assert main(["telemetry", "benchmark", "--messages", "4"]) == 0
+    assert '"messages": 4' in capsys.readouterr().out
+
+
+def test_session_validate_alias_is_read_only(tmp_path, capsys):
+    assert main(["session", "validate", str(tmp_path), "--json"]) == 0
+    assert '"incomplete": true' in capsys.readouterr().out
+
+
 def test_preflight_and_run_dry_run_are_non_hardware(capsys):
     assert main(["preflight", "--protocol", "natural-images", "--json"]) == 0
     assert '"hardware_access": false' in capsys.readouterr().out

@@ -262,7 +262,9 @@ The bounded remote validation report is
   RAM, load, temperature, throttling, and process cleanup remained bounded.
 - [x] Complete the read-only GPIO/reward source audit and Monday checklist in
   `docs/hardware/pi5_gpio_reward_preflight_2026-09-26.md`.
-- [ ] Validate a real telemetry loopback: the current checkout has only a
-  null publisher and bounded in-memory test sink, not a network transport.
+- [ ] Validate a real telemetry loopback against the monitor: the checkout now
+  has a local UDP transport boundary and bounded in-memory test sink, but the
+  production unified session runner is not yet wired to it and the monitor-Pi
+  path remains unvalidated.
 - [ ] Integrate the real display/camera components into a production session
   state writer and preserve interrupted partial artifacts.

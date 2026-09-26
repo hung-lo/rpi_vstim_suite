@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -12,13 +13,16 @@ from . import __version__
 from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
 from .core.runtime import run_simulated_session
-from .core.virtual_rig import run_virtual_session
 from .core.session import inspect_session
+from .core.virtual_rig import run_virtual_session
 from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
 from .display.photodiode import PhotodiodePatch
 from .protocols import available_protocols, get_protocol
+from .telemetry.benchmark import run_benchmark
+from .telemetry.payloads import TelemetryMessage
+from .telemetry.publisher import UdpTelemetryPublisher
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,8 +39,25 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect-session", help="inspect a session without mutating it")
     inspect.add_argument("path", type=Path)
     inspect.add_argument("--json", action="store_true", dest="as_json")
+    session = commands.add_parser("session", help="session artifact operations")
+    session_commands = session.add_subparsers(dest="session_command", required=True)
+    validate_session = session_commands.add_parser(
+        "validate", help="validate a session without mutating it"
+    )
+    validate_session.add_argument("path", type=Path)
+    validate_session.add_argument("--json", action="store_true", dest="as_json")
     doctor = commands.add_parser("doctor", help="show Phase 00 diagnostic status")
     doctor.add_argument("--json", action="store_true", dest="as_json")
+
+    telemetry = commands.add_parser("telemetry", help="local telemetry transport checks")
+    telemetry_commands = telemetry.add_subparsers(dest="telemetry_command", required=True)
+    telemetry_demo = telemetry_commands.add_parser("demo", help="send schema messages to loopback")
+    telemetry_demo.add_argument("--messages", type=int, default=4)
+    telemetry_demo.add_argument("--json", action="store_true", dest="as_json")
+    telemetry_benchmark = telemetry_commands.add_parser(
+        "benchmark", help="measure local telemetry handoff latency"
+    )
+    telemetry_benchmark.add_argument("--messages", type=int, default=1000)
 
     hardware = commands.add_parser("hardware", help="hardware discovery and diagnostics")
     hardware_commands = hardware.add_subparsers(dest="hardware_command", required=True)
@@ -122,6 +143,43 @@ def _doctor(as_json: bool) -> int:
     return 0
 
 
+def _telemetry_demo(messages: int) -> dict[str, object]:
+    if messages < 1:
+        raise ValueError("messages must be positive")
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(1.0)
+    publisher = UdpTelemetryPublisher("127.0.0.1", receiver.getsockname()[1])
+    try:
+        for sequence in range(messages):
+            if not publisher.publish(
+                TelemetryMessage(
+                    "lifecycle",
+                    "telemetry-demo",
+                    "demo",
+                    "TASK",
+                    sequence_number=sequence,
+                )
+            ):
+                raise RuntimeError("local telemetry handoff dropped a demo packet")
+        publisher.close()
+        received = 0
+        while received < messages:
+            receiver.recv(8192)
+            received += 1
+        return {
+            "messages": messages,
+            "received": received,
+            "queued": publisher.queued_count,
+            "sent": publisher.sent_count,
+            "dropped": publisher.dropped_count,
+            "errors": publisher.error_count,
+        }
+    finally:
+        publisher.close()
+        receiver.close()
+
+
 def _representative_rgb888(width_px: int, height_px: int, phase: int) -> bytes:
     frame = bytearray(width_px * height_px * 3)
     for y in range(height_px):
@@ -151,12 +209,30 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_preflight(report))
         return 0
-    if args.command == "inspect-session":
+    if args.command == "inspect-session" or (
+        args.command == "session" and args.session_command == "validate"
+    ):
         report = inspect_session(args.path)
         print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_inspection(report))
         return 1 if report["corrupt_artifacts"] else 0
     if args.command == "doctor":
         return _doctor(args.as_json)
+    if args.command == "telemetry" and args.telemetry_command == "demo":
+        try:
+            payload = _telemetry_demo(args.messages)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"telemetry demo failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(payload, sort_keys=True) if args.as_json else payload)
+        return 0
+    if args.command == "telemetry" and args.telemetry_command == "benchmark":
+        try:
+            payload = run_benchmark(args.messages)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"telemetry benchmark failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(payload, sort_keys=True))
+        return 0
     if args.command == "virtual-run":
         try:
             config = load_config(None)
