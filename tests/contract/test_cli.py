@@ -11,6 +11,13 @@ def test_doctor_is_non_hardware(capsys):
     assert '"hardware_access": false' in capsys.readouterr().out
 
 
+def test_preflight_and_run_dry_run_are_non_hardware(capsys):
+    assert main(["preflight", "--protocol", "natural-images", "--json"]) == 0
+    assert '"hardware_access": false' in capsys.readouterr().out
+    assert main(["run", "natural-images", "--dry-run"]) == 0
+    assert "hardware_access=False" in capsys.readouterr().out
+
+
 def test_every_software_groundwork_protocol_runs_without_hardware(tmp_path, capsys):
     protocols = (
         "natural-images",

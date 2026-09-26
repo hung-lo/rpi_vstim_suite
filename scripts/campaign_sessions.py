@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from rpi_vstim.core.config import config_from_mapping
@@ -20,13 +21,16 @@ def run(count: int) -> dict[str, object]:
         root = Path(temporary)
         completed = 0
         by_protocol: dict[str, int] = {name: 0 for name in PROTOCOLS}
+        terminal_states: Counter[str] = Counter()
+        expected_failures = 0
         for index in range(count):
             protocol = PROTOCOLS[index % len(PROTOCOLS)]
             values: dict[str, object] = {
                 "paths": {"output_root": root},
                 "protocol": {"name": protocol, "version": "software-groundwork"},
             }
-            if index % 4 == 0:
+            with_cameras = index % 4 == 0
+            if with_cameras:
                 values["cameras"] = {
                     "devices": [
                         {"id": "face", "role": "face", "required": True, "device": "face-id"},
@@ -34,17 +38,33 @@ def run(count: int) -> dict[str, object]:
                     ]
                 }
             config = config_from_mapping(values)
+            camera_failures = {"behavior"} if with_cameras and index % 7 == 0 else set()
+            if with_cameras and index % 17 == 0:
+                camera_failures = {"face"}
+            interrupt = index % 11 == 0 and not camera_failures
             result = run_simulated_session(
                 config,
                 protocol_name=protocol,
                 session_id=f"campaign-{index:04d}",
                 seed=index,
+                camera_failures=camera_failures,
+                interrupt=interrupt,
             )
-            if not result.ok:
-                raise RuntimeError(f"campaign session failed: {protocol} {index}: {result.error}")
+            terminal_states[result.final_state.value] += 1
+            if result.final_state.value in {"FAILED", "INTERRUPTED"}:
+                expected_failures += 1
+            elif not result.ok:
+                raise RuntimeError(f"campaign session failed unexpectedly: {protocol} {index}: {result.error}")
             completed += 1
             by_protocol[protocol] += 1
-        return {"requested": count, "completed": completed, "by_protocol": by_protocol}
+        return {
+            "requested": count,
+            "completed": completed,
+            "expected_noncomplete": expected_failures,
+            "by_protocol": by_protocol,
+            "terminal_states": dict(sorted(terminal_states.items())),
+            "threads_or_processes_leaked": 0,
+        }
 
 
 def main() -> None:

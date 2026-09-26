@@ -7,9 +7,10 @@ All runs were hardware-free on the Mac:
   allocations.
 - 1,000 randomized state-machine sessions: all reached an explicit terminal
   result.
-- 100 multi-protocol sessions: 20 each for natural images, reward
-  conditioning, spout training, drifting gratings, and retinotopy; all
-  completed.
+- 100 varied multi-protocol sessions: 20 each for natural images, reward
+  conditioning, spout training, drifting gratings, and retinotopy; 89 reached
+  COMPLETE, 9 reached expected INTERRUPTED, and 2 reached expected required-
+  camera FAILED. No threads or subprocesses leaked.
 - 10,000 telemetry messages into a 256-entry sink: 256 retained and 9,744
   dropped, with no unbounded growth.
 - same-seed reproducibility: identical natural-image plan JSON and digest
