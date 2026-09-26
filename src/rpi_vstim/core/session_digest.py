@@ -43,7 +43,15 @@ def _stable(value: Any, *, artifact: str = "") -> Any:
 
 def _read_json(root: Path, name: str, artifact: str) -> Any:
     path = root / name
-    return _stable(json.loads(path.read_text(encoding="utf-8")), artifact=artifact) if path.is_file() else None
+    if not path.is_file():
+        return None
+    value = _stable(json.loads(path.read_text(encoding="utf-8")), artifact=artifact)
+    if artifact == "asset_manifest" and isinstance(value, dict):
+        stable_value = {key: item for key, item in value.items() if key != "manifest_hash"}
+        value["manifest_hash"] = hashlib.sha256(
+            json.dumps(stable_value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    return value
 
 
 def canonical_session(root: Path | str) -> dict[str, Any]:
