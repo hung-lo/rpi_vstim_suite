@@ -14,6 +14,8 @@ def resolve_source_commit() -> str:
 def collect_provenance(*, source_commit: str | None = None) -> dict[str, object]:
     source_commit = source_commit if source_commit is not None else resolve_source_commit()
     return {
+        "schema_version": 1,
+        "data_format_version": "phase4-v1",
         "created_utc_ns": utc_ns(),
         "python": sys.version,
         "python_executable": sys.executable,

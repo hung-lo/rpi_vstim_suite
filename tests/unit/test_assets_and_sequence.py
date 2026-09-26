@@ -8,6 +8,7 @@ from rpi_vstim.core.assets import (
     AssetNotFoundError,
     AssetPreparer,
     AssetResolver,
+    build_selected_asset_manifest,
 )
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
 from rpi_vstim.display.renderer import ProductionFrameRenderer
@@ -15,6 +16,7 @@ from rpi_vstim.display.sequence import (
     BoundedFrameTransport,
     FrameTransportBackpressure,
     NaturalImageFrameSource,
+    PrefetchCoordinator,
     PreparedSequenceFrame,
     produce_frames,
 )
@@ -55,6 +57,42 @@ def test_manifest_avoids_rehashing_and_reopening_cached_assets(tmp_path, monkeyp
     monkeypatch.setattr(resolver, "resolve", lambda _path: (_ for _ in ()).throw(AssertionError()))
     assert preparer.prepare("a.png") is first
     assert preparer.metrics()["hits"] == 1
+
+
+def test_selected_manifest_counts_occurrences_and_duplicate_content(tmp_path):
+    write_image(tmp_path / "a.png", (1, 2, 3))
+    (tmp_path / "b.png").write_bytes((tmp_path / "a.png").read_bytes())
+    plan = SessionPlan(
+        "natural-images",
+        1,
+        with_frame_offsets(
+            (
+                PlannedEvent("a", "image", 1, metadata={"image": "a.png"}),
+                PlannedEvent("a2", "image", 1, metadata={"image": "a.png"}),
+                PlannedEvent("b", "image", 1, metadata={"image": "b.png"}),
+            )
+        ),
+    )
+    manifest = build_selected_asset_manifest(
+        plan,
+        AssetResolver(tmp_path),
+        target_width_px=2,
+        target_height_px=2,
+        transform="crop",
+    )
+    assert dict(manifest.selected_occurrences) == {"a.png": 2, "b.png": 1}
+    assert manifest.duplicate_content_groups == [["a.png", "b.png"]]
+    assert manifest.prepared_memory_bytes == 12
+    assert manifest.as_dict()["entries"][0]["transform"] == "crop"
+
+
+def test_manifest_detects_source_mutation_before_decode(tmp_path):
+    write_image(tmp_path / "a.png", (1, 2, 3))
+    resolver = AssetResolver(tmp_path)
+    manifest = resolver.build_manifest(("a.png",))
+    (tmp_path / "a.png").write_bytes(b"changed")
+    with pytest.raises(Exception, match="changed during preparation"):
+        AssetPreparer(resolver, 2, 2, manifest=manifest).prepare("a.png")
 
 
 def test_asset_errors_are_explicit(tmp_path):
@@ -181,6 +219,46 @@ def test_frame_transport_blocked_put_wakes_on_abort():
     assert len(result) == 1
     assert isinstance(result[0], RuntimeError)
     assert str(result[0]) == "consumer failed"
+
+
+def test_prefetch_coordinator_is_bounded_ordered_and_reaps_producer():
+    frames = [
+        PreparedSequenceFrame(index, "event", "sequence", "a.png", "asset", "on", bytes([index]))
+        for index in range(20)
+    ]
+    coordinator = PrefetchCoordinator(
+        frames,
+        BoundedFrameTransport(3),
+        low_watermark=1,
+        high_watermark=2,
+    )
+    coordinator.start()
+    received = []
+    while True:
+        frame = coordinator.get(timeout_s=1)
+        if frame is None:
+            break
+        received.append(frame.frame_index)
+    coordinator.stop()
+    assert received == list(range(20))
+    assert coordinator.metrics().peak_occupancy <= 3
+    assert coordinator.metrics().producer_state == "EOF"
+
+
+def test_prefetch_consumer_abort_stops_producer():
+    frame = PreparedSequenceFrame(0, "event", "sequence", "a.png", "asset", "on", b"a")
+
+    def endless_frames():
+        while True:
+            yield frame
+
+    coordinator = PrefetchCoordinator(endless_frames(), BoundedFrameTransport(2))
+    coordinator.start()
+    coordinator.transport.abort("consumer failed")
+    with pytest.raises(RuntimeError, match="consumer failed"):
+        coordinator.get(timeout_s=1)
+    coordinator.stop()
+    assert coordinator.producer_state in {"ABORTED", "STOPPED"}
 
 
 def test_plan_to_transport_replays_deterministically_and_fails_mid_plan(tmp_path):

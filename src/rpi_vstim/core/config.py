@@ -71,6 +71,7 @@ class CameraDeviceConfig:
     required: bool = False
     backend: str = "auto"
     device: str = ""
+    expected_family: str = ""
     requested_width_px: int | None = None
     requested_height_px: int | None = None
     requested_fps: float | None = None

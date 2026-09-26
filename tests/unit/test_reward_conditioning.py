@@ -11,8 +11,12 @@ from rpi_vstim.protocols.reward_conditioning import (
     RewardPhase,
     WaterBudget,
     build_exposure_block,
+    build_exact_role_reward_outcomes,
     build_plan,
     build_reward_outcomes,
+    ALL_ROLES,
+    HIGH_ROLES,
+    MEDIUM_ROLES,
 )
 
 
@@ -57,6 +61,22 @@ def test_exposure_block_has_exact_8_3_1_counts():
     counts = {role: sum(trial.exposure_role == role for trial in block) for role in ("high", "medium", "low")}
     assert counts == {"high": 32, "medium": 12, "low": 6}
     assert all(left.image != right.image for left, right in zip(block, block[1:]))
+
+
+def test_reward_roles_match_frozen_trajectory_metadata_and_exact_schedule():
+    assignment = MouseAssignment.create("m", image_pool(), seed=1)
+    block = build_exposure_block(assignment, seed=2)
+    assert {trial.image_role for trial in block} == set(ALL_ROLES)
+    assert {trial.current_reward_state for trial in block if trial.reward_eligible} == {"R"}
+    trials = block * 10
+    outcomes = build_exact_role_reward_outcomes(
+        trials,
+        phase=RewardPhase.ACQUISITION,
+        seed=8,
+    )
+    for role in ("high_R_to_R", "high_R_to_U", "medium_R_to_R", "medium_R_to_U"):
+        role_outcomes = [outcomes[index] for index, trial in enumerate(trials) if trial.image_role == role]
+        assert sum(role_outcomes) == len(role_outcomes) * 9 // 10
 
 
 def test_reward_outcomes_are_reproducible_and_match_90_percent_count():

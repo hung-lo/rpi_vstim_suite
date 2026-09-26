@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Sequence
 
+from rpi_vstim.camera.identity import ResolvedCamera
 from rpi_vstim.core.camera import CameraState
 from rpi_vstim.core.timestamps import monotonic_ns, utc_ns
 
@@ -61,6 +62,7 @@ class CameraCaptureSpec:
     stop_timeout_s: float = 5.0
     stall_timeout_s: float | None = 30.0
     max_diagnostic_bytes: int = 64 * 1024
+    resolved_camera: ResolvedCamera | None = None
 
 
 @dataclass
@@ -70,6 +72,9 @@ class CameraWorkerStatus:
     stable_device_identifier: str
     backend: str
     required: bool
+    runtime_selector: str = ""
+    topology: str = ""
+    family: str = ""
     requested_width_px: int | None = None
     requested_height_px: int | None = None
     requested_fps: float | None = None
@@ -101,13 +106,18 @@ class CameraWorkerStatus:
 PopenFactory = Callable[..., Any]
 
 
-def build_rpicam_command(spec: CameraCaptureSpec, output_path: Path) -> tuple[str, ...]:
+def build_rpicam_command(
+    spec: CameraCaptureSpec,
+    output_path: Path,
+    *,
+    resolved_camera: ResolvedCamera,
+) -> tuple[str, ...]:
     """Build a future rpicam command after stable identity resolution.
 
     Identity resolution is deliberately separate: this command does not guess
     a transient `/dev/videoN` or camera index.
     """
-    command = ["rpicam-vid", "--output", str(output_path)]
+    command = ["rpicam-vid", "--camera", resolved_camera.runtime_selector, "--output", str(output_path)]
     if spec.requested_width_px is not None:
         command.extend(("--width", str(spec.requested_width_px)))
     if spec.requested_height_px is not None:
@@ -148,6 +158,9 @@ class _CameraWorker:
             stable_device_identifier=spec.stable_device_identifier,
             backend=spec.backend,
             required=spec.required,
+            runtime_selector=(spec.resolved_camera.runtime_selector if spec.resolved_camera else ""),
+            topology=spec.resolved_camera.topology if spec.resolved_camera else "",
+            family=spec.resolved_camera.family if spec.resolved_camera else "",
             requested_width_px=spec.requested_width_px,
             requested_height_px=spec.requested_height_px,
             requested_fps=spec.requested_fps,
@@ -199,6 +212,7 @@ class _CameraWorker:
         ):
             self._fail("camera output did not appear or grow before startup timeout")
             self._terminate(force=True)
+            self._reap(self.spec.stop_timeout_s)
             raise CameraStartupError(self.spec.camera_id)
         self._refresh_bytes()
 
@@ -234,10 +248,11 @@ class _CameraWorker:
             self._stopped = True
             self._write_diagnostic()
             return self.status
+        graceful_exit = False
         if self.status.state == CameraState.RECORDING:
             self._publish("CAMERA_STOP_REQUESTED")
         if self.process.poll() is None:
-            self._terminate(force=False)
+            graceful_exit = self._terminate(force=False)
         if self.process.poll() is None:
             self._terminate(force=True)
         self._reap(self.spec.stop_timeout_s)
@@ -246,9 +261,11 @@ class _CameraWorker:
         elif self.status.exit_status is None:
             self.status.exit_status = int(self.process.poll())
         if self.status.state == CameraState.RECORDING:
-            if self.status.exit_status == 0:
+            if graceful_exit:
                 self.status.state = CameraState.COMPLETED
                 self.status.exit_reason = self.status.exit_reason or "graceful_stop"
+            elif self.status.exit_status == 0:
+                self.status.state = CameraState.COMPLETED
             else:
                 self._fail(f"camera exited with status {self.status.exit_status}")
         self.status.stop_utc_ns = utc_ns()
@@ -260,24 +277,26 @@ class _CameraWorker:
         self._publish("CAMERA_STOPPED")
         return self.status
 
-    def _terminate(self, *, force: bool) -> None:
+    def _terminate(self, *, force: bool) -> bool:
         if self.process is None or self.process.poll() is not None:
-            return
+            return self.process is not None
         if force:
             try:
                 self.process.kill()
             except OSError as exc:
                 self._fail(f"camera kill failed: {exc}")
-                return
+                return False
             self.status.exit_reason = "forced_kill_after_stop_timeout"
-            return
+            return False
         try:
             self.process.terminate()
         except OSError as exc:
             self._fail(f"camera terminate failed: {exc}")
-            return
+            return False
         if not self._reap(self.spec.stop_timeout_s):
             self.status.exit_reason = "stop_timeout"
+            return False
+        return True
 
     def _reap(self, timeout_s: float) -> bool:
         if self.process is None:
@@ -326,7 +345,7 @@ class _CameraWorker:
         )
 
     def _verification_state(self) -> str:
-        if self.status.state == CameraState.COMPLETED and self.status.exit_status == 0:
+        if self.status.state == CameraState.COMPLETED:
             return "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
         if self.status.bytes_written > 0:
             return "output_nonempty_failed"

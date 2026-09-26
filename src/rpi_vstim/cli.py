@@ -10,7 +10,9 @@ from pathlib import Path
 
 from . import __version__
 from .core.config import ConfigError, load_config
+from .core.dry_run import build_dry_run_report
 from .core.runtime import run_simulated_session
+from .core.session import inspect_session
 from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
@@ -24,6 +26,14 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
 
     commands.add_parser("list-protocols", help="list available protocol implementations")
+    preflight = commands.add_parser("preflight", help="report production contracts without hardware")
+    preflight.add_argument("--config", type=Path)
+    preflight.add_argument("--protocol", choices=[p.name for p in available_protocols()])
+    preflight.add_argument("--seed", type=int, default=0)
+    preflight.add_argument("--json", action="store_true", dest="as_json")
+    inspect = commands.add_parser("inspect-session", help="inspect a session without mutating it")
+    inspect.add_argument("path", type=Path)
+    inspect.add_argument("--json", action="store_true", dest="as_json")
     doctor = commands.add_parser("doctor", help="show Phase 00 diagnostic status")
     doctor.add_argument("--json", action="store_true", dest="as_json")
 
@@ -75,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output-root", type=Path, help="simulation session output directory")
     run.add_argument("--session-id", default="simulation")
     run.add_argument("--seed", type=int, default=0)
+    run.add_argument("--dry-run", action="store_true", help="report production contracts without hardware")
+    run.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
 
@@ -110,6 +122,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list-protocols":
         for protocol in available_protocols():
             print(f"{protocol.name}\t{protocol.status}")
+        return 0
+    if args.command == "preflight":
+        try:
+            config = load_config(args.config)
+            if args.protocol:
+                protocol = get_protocol(args.protocol)
+                config = replace(config, protocol=replace(config.protocol, name=args.protocol, version=protocol.version))
+            report = build_dry_run_report(config, protocol_name=args.protocol, seed=args.seed)
+        except (ConfigError, OSError, ValueError) as exc:
+            print(f"preflight invalid: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_preflight(report))
+        return 0
+    if args.command == "inspect-session":
+        report = inspect_session(args.path)
+        print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_inspection(report))
         return 0
     if args.command == "doctor":
         return _doctor(args.as_json)
@@ -184,6 +212,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"valid: {args.path or 'package defaults'}")
         return 0
     if args.command == "run":
+        if args.dry_run:
+            try:
+                config = load_config(args.config)
+                if args.config is None:
+                    protocol = get_protocol(args.protocol)
+                    config = replace(config, protocol=replace(config.protocol, name=args.protocol, version=protocol.version))
+                report = build_dry_run_report(config, protocol_name=args.protocol, seed=args.seed)
+            except (ConfigError, OSError, ValueError) as exc:
+                print(f"dry-run invalid: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_preflight(report))
+            return 0
         if args.simulate:
             try:
                 config = load_config(args.config)
@@ -238,3 +278,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     build_parser().print_help()
     return 0
+
+
+def _format_preflight(report: dict[str, object]) -> str:
+    plan = report["plan"]
+    return (
+        f"protocol={report['protocol']} frames={plan['total_frames']} "
+        f"duration_s={plan['estimated_duration_s']:.3f} assets={report['asset_status']} "
+        "hardware_access=False"
+    )
+
+
+def _format_inspection(report: dict[str, object]) -> str:
+    return f"status={report['status']} incomplete={report['incomplete']} missing={len(report['missing_required_files'])}"

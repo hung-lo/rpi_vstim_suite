@@ -8,8 +8,11 @@ is not a production identity.
 Phase 00 provides the configuration schema. The overnight software boundary
 adds `LocalCameraSupervisor`: one independently supervised local process per
 camera, deterministic `camera/<id>/capture.<extension>` outputs, bounded
-status flow, startup/output-growth deadlines, clean stop with terminate/kill
-fallback, required/optional policy, crash detection, and per-camera manifests.
+status flow, startup/output-growth/stall deadlines, clean stop with
+terminate/kill fallback, required/optional policy, crash detection, bounded
+stderr diagnostics, and per-camera manifests. Camera configuration records
+the stable identity and optional expected sensor family; runtime selectors are
+accepted only after identity resolution.
 The metadata-only fake service remains available for simulation. No SSH camera
 control, cross-Pi transfer, or physical device access occurs.
 

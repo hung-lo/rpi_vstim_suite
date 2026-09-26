@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import os
 import re
 import tempfile
@@ -60,12 +61,17 @@ class SessionOutput:
             "completed_frame_count": 0,
             "incomplete": True,
         }
+        self._incomplete_marker: Path | None = None
 
     def write_initial_outputs(self) -> None:
         self.context.session_root.mkdir(parents=True, exist_ok=True)
+        self._incomplete_marker = self.context.session_root / ".session-incomplete"
+        self._incomplete_marker.write_text("incomplete\n", encoding="utf-8")
         atomic_write_json(self.context.session_root / "resolved_config.json", self.context.resolved_config)
         atomic_write_json(self.context.session_root / "provenance.json", self.context.host_provenance)
         self._manifest = {
+            "schema_version": 2,
+            "data_format_version": "phase4-v1",
             "session_id": self.context.session_id,
             "protocol": self.context.protocol_name,
             "protocol_version": self.context.protocol_version,
@@ -76,6 +82,7 @@ class SessionOutput:
             "lifecycle": "CREATED",
             "phase": "00",
             "degraded": [],
+            "incomplete": True,
         }
         self._write_manifest()
         self._events = EventLogger(self.context.session_root / "events.csv")
@@ -172,6 +179,9 @@ class SessionOutput:
     ) -> None:
         if not self._manifest:
             raise RuntimeError("session outputs are not initialized")
+        if status == "COMPLETE" and self._manifest.get("cleanup_errors"):
+            status = "CLEANUP_FAILED"
+            error = error or "cleanup failed"
         self._manifest["status"] = status
         if lifecycle is not None:
             self._manifest["lifecycle"] = lifecycle
@@ -199,6 +209,14 @@ class SessionOutput:
         if self._events is not None:
             self._events.close()
             self._events = None
+        if self._manifest:
+            self._manifest["outputs_finalized"] = True
+            self._manifest["incomplete"] = False
+            self._write_manifest()
+            atomic_write_json(self.context.session_root / "final_status.json", self._manifest)
+            if self._incomplete_marker is not None:
+                self._incomplete_marker.unlink(missing_ok=True)
+                self._incomplete_marker = None
 
 
 def new_session(
@@ -239,3 +257,47 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     return value
+
+
+def inspect_session(root: Path | str) -> dict[str, object]:
+    """Inspect session state without changing any file."""
+    session_root = Path(root).resolve()
+    manifest_path = session_root / "session_manifest.json"
+    final_path = session_root / "final_status.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+    final_status = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else manifest
+    required = (
+        "session_manifest.json",
+        "resolved_config.json",
+        "provenance.json",
+        "plan.json",
+        "events.csv",
+        "final_status.json",
+        "display_results.jsonl",
+        "display_results.json",
+    )
+    missing = [name for name in required if not (session_root / name).is_file()]
+    last_event = None
+    events_path = session_root / "events.csv"
+    if events_path.is_file():
+        with events_path.open(encoding="utf-8", newline="") as handle:
+            last_event = next(reversed(list(csv.DictReader(handle))), None)
+    camera_manifest = session_root / "camera_manifest.json"
+    cameras = []
+    if camera_manifest.is_file():
+        cameras = json.loads(camera_manifest.read_text(encoding="utf-8")).get("cameras", [])
+    terminal = final_status.get("status") in {"COMPLETE", "FAILED", "INTERRUPTED", "CLEANUP_FAILED"}
+    return {
+        "session_root": str(session_root),
+        "status": final_status.get("status", "UNKNOWN"),
+        "lifecycle": final_status.get("lifecycle", "UNKNOWN"),
+        "last_event": last_event,
+        "required_files_present": not missing,
+        "missing_required_files": missing,
+        "camera_outcomes": cameras,
+        "incomplete": bool(
+            (session_root / ".session-incomplete").exists()
+            or manifest.get("incomplete", True)
+            or not terminal
+        ),
+    }

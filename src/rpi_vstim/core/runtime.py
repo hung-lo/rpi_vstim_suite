@@ -40,6 +40,29 @@ class TelemetryRequiredError(RuntimeError):
     pass
 
 
+class FaultInjectingDisplay:
+    def __init__(self, fault: str | None) -> None:
+        self.backend = FakeDisplayBackend()
+        self.fault = fault
+        self.present_count = 0
+
+    def open(self, config):
+        if self.fault == "display_consumer_start":
+            raise RuntimeError("injected display consumer startup failure")
+        return self.backend.open(config)
+
+    def present_color(self, rgb, *, frames):
+        if self.fault == "display_consumer_mid" and self.present_count >= 1:
+            raise RuntimeError("injected display consumer mid-session failure")
+        self.present_count += 1
+        return self.backend.present_color(rgb, frames=frames)
+
+    def close(self):
+        self.backend.close()
+        if self.fault == "cleanup":
+            raise RuntimeError("injected display cleanup failure")
+
+
 @dataclass
 class SimulationResult:
     session: SessionOutput
@@ -59,9 +82,10 @@ def build_simulated_services(
     camera_failures: Iterable[str] = (),
     telemetry_failure: bool = False,
     telemetry_fail_after: int | None = None,
+    fault: str | None = None,
 ) -> RuntimeServices:
     return RuntimeServices(
-        display=FakeDisplayBackend(),
+        display=FaultInjectingDisplay(fault) if fault else FakeDisplayBackend(),
         hardware=SimulatedHardwareWorker(),
         cameras=FakeLocalCameraService(config.cameras, fail_ids=set(camera_failures)),
         telemetry=InMemoryTelemetryPublisher(
@@ -180,6 +204,7 @@ def run_simulated_session(
     protocol_failure: bool = False,
     telemetry_fail_after: int | None = None,
     services: RuntimeServices | None = None,
+    fault: str | None = None,
 ) -> SimulationResult:
     selected_protocol = protocol_name or config.protocol.name
     if selected_protocol != config.protocol.name:
@@ -200,6 +225,7 @@ def run_simulated_session(
         camera_failures=camera_failures,
         telemetry_failure=telemetry_failure,
         telemetry_fail_after=telemetry_fail_after,
+        fault=fault,
     )
     session = new_session(config, protocol_name=selected_protocol, session_id=session_id, seed=seed)
     session.write_initial_outputs()
@@ -255,8 +281,12 @@ def run_simulated_session(
 
     try:
         session.write_plan(plan)
+        if fault == "session_metadata_write":
+            raise RuntimeError("injected session metadata failure")
         transition(LifecycleState.CONFIGURED)
         transition(LifecycleState.PREFLIGHT)
+        if fault == "storage_low_space":
+            raise RuntimeError("injected storage low-space signal")
         services.display.open(config.display)
         services.hardware.start()
         try:
@@ -266,12 +296,16 @@ def run_simulated_session(
         if services.cameras.degraded:
             degraded.append("camera")
         transition(LifecycleState.PREPARING)
+        if fault in {"asset_manifest_creation", "producer_start"}:
+            raise RuntimeError(f"injected {fault} failure")
         transition(LifecycleState.PRE)
         if interrupt:
             raise SimulationInterrupted("simulated interruption")
         if protocol_failure:
             raise RuntimeError("simulated protocol failure")
         for event in plan.events:
+            if fault == "producer_mid" and sequence_number > 2:
+                raise RuntimeError("injected producer mid-session failure")
             target_lifecycle = LifecycleState(event.phase)
             if lifecycle.state != target_lifecycle:
                 transition(target_lifecycle)
@@ -299,6 +333,8 @@ def run_simulated_session(
                 cameras=services.cameras.manifest(),
                 degraded=list(degraded),
             ))
+        if fault == "finalization":
+            raise RuntimeError("injected finalization failure")
         transition(LifecycleState.FINALIZING)
         transition(LifecycleState.COMPLETE)
     except SimulationInterrupted as exc:

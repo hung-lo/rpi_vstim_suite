@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass
-from threading import Condition
+from threading import Condition, Event, Thread
 from typing import Iterable, Iterator
 
 from rpi_vstim.core.assets import AssetPreparer
@@ -47,6 +47,30 @@ class FrameTransportAborted(FrameTransportClosed):
 
 class FrameTransportBackpressure(TimeoutError):
     pass
+
+
+@dataclass(frozen=True)
+class PrefetchMetrics:
+    capacity: int
+    low_watermark: int
+    high_watermark: int
+    produced: int
+    consumed: int
+    peak_occupancy: int
+    underruns: int
+    producer_state: str
+
+    def as_dict(self) -> dict[str, int | str]:
+        return {
+            "capacity": self.capacity,
+            "low_watermark": self.low_watermark,
+            "high_watermark": self.high_watermark,
+            "produced": self.produced,
+            "consumed": self.consumed,
+            "peak_occupancy": self.peak_occupancy,
+            "underruns": self.underruns,
+            "producer_state": self.producer_state,
+        }
 
 
 class BoundedFrameTransport:
@@ -112,6 +136,20 @@ class BoundedFrameTransport:
         with self._condition:
             return len(self._queue)
 
+    def wait_below(self, limit: int, *, timeout_s: float | None = None) -> bool:
+        if not 0 < limit <= self.capacity:
+            raise ValueError("limit must be between one and transport capacity")
+        deadline = self._deadline(timeout_s)
+        with self._condition:
+            while len(self._queue) >= limit:
+                self._raise_if_closed()
+                remaining = self._remaining(deadline)
+                if remaining == 0:
+                    return False
+                self._condition.wait(remaining)
+            self._raise_if_closed()
+            return True
+
     @staticmethod
     def _deadline(timeout_s: float | None) -> float | None:
         if timeout_s is not None and timeout_s < 0:
@@ -136,6 +174,95 @@ class BoundedFrameTransport:
             if frame is None:
                 return
             yield frame
+
+
+class PrefetchCoordinator:
+    """Run one bounded producer with explicit watermarks and shutdown."""
+
+    def __init__(
+        self,
+        frames: Iterable[PreparedSequenceFrame],
+        transport: BoundedFrameTransport,
+        *,
+        low_watermark: int = 1,
+        high_watermark: int | None = None,
+    ) -> None:
+        high = transport.capacity if high_watermark is None else high_watermark
+        if not 0 <= low_watermark < high <= transport.capacity:
+            raise ValueError("watermarks must satisfy 0 <= low < high <= capacity")
+        self.frames = iter(frames)
+        self.transport = transport
+        self.low_watermark = low_watermark
+        self.high_watermark = high
+        self.produced = 0
+        self.consumed = 0
+        self.peak_occupancy = 0
+        self.underruns = 0
+        self.producer_state = "CREATED"
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            raise RuntimeError("prefetch coordinator already started")
+        self.producer_state = "RUNNING"
+        self._thread = Thread(target=self._produce, name="rpi-vstim-prefetch", daemon=True)
+        self._thread.start()
+
+    def get(self, *, timeout_s: float | None = None) -> PreparedSequenceFrame | None:
+        if self._thread is None:
+            raise RuntimeError("prefetch coordinator is not started")
+        try:
+            frame = self.transport.get(timeout_s=timeout_s)
+        except TimeoutError:
+            if len(self.transport) <= self.low_watermark:
+                self.underruns += 1
+            raise
+        if frame is None:
+            return None
+        self.consumed += 1
+        return frame
+
+    def stop(self, reason: str = "prefetch stopped") -> None:
+        if self._thread is None:
+            return
+        self._stop.set()
+        self.transport.abort(reason)
+        self._thread.join(timeout=1.0)
+        if self._thread.is_alive():
+            self.producer_state = "FAILED"
+            raise RuntimeError("prefetch producer did not stop")
+        if self.producer_state == "RUNNING":
+            self.producer_state = "STOPPED"
+
+    def metrics(self) -> PrefetchMetrics:
+        return PrefetchMetrics(
+            self.transport.capacity,
+            self.low_watermark,
+            self.high_watermark,
+            self.produced,
+            self.consumed,
+            self.peak_occupancy,
+            self.underruns,
+            self.producer_state,
+        )
+
+    def _produce(self) -> None:
+        try:
+            for frame in self.frames:
+                if self._stop.is_set():
+                    return
+                self.transport.wait_below(self.high_watermark)
+                self.transport.put(frame)
+                self.produced += 1
+                self.peak_occupancy = max(self.peak_occupancy, len(self.transport))
+            self.transport.finish()
+            self.producer_state = "EOF"
+        except FrameTransportAborted:
+            self.producer_state = "ABORTED"
+        except BaseException as exc:
+            self.producer_state = "FAILED"
+            self.transport.abort(str(exc))
 
 
 class NaturalImageFrameSource:

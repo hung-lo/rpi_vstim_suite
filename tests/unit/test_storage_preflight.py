@@ -2,7 +2,12 @@ import shutil
 
 import pytest
 
-from rpi_vstim.core.storage import preflight_storage
+from rpi_vstim.core.storage import (
+    StorageMonitor,
+    finalize_storage_session,
+    open_storage_session,
+    preflight_storage,
+)
 
 
 def test_storage_preflight_can_use_an_explicit_test_directory(tmp_path):
@@ -65,3 +70,25 @@ def test_storage_preflight_write_probe_is_bounded_and_serializable(tmp_path):
     )
     assert result.passed
     assert result.as_dict()["path"] == str(tmp_path.resolve())
+
+
+def test_storage_session_keeps_incomplete_marker_until_required_outputs_exist(tmp_path):
+    preflight = preflight_storage(tmp_path, require_mount=False, allow_test_path=True)
+    session = open_storage_session(preflight, "session-1")
+    assert session.marker_path.exists()
+    incomplete = finalize_storage_session(
+        session,
+        required_files=("plan.json",),
+        success=True,
+    )
+    assert not incomplete.complete
+    assert incomplete.marker_retained
+    (session.session_root / "plan.json").write_text("{}\n")
+    complete = finalize_storage_session(
+        session,
+        required_files=("plan.json",),
+        success=True,
+    )
+    assert complete.complete
+    assert not session.marker_path.exists()
+    assert StorageMonitor(tmp_path, minimum_free_bytes=1).check()["passed"]

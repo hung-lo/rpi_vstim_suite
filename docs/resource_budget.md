@@ -35,7 +35,9 @@ inputs explicit rather than pretending to predict the whole Pi:
 - display dimensions and RGB565/XRGB8888 bytes per pixel;
 - prepared-frame and natural-source cache entry limits;
 - per-camera bounded queue bytes and requested bitrate;
-- telemetry packet count/size and log buffer bytes.
+- telemetry packet count/size and log buffer bytes;
+- bounded display transport slots, selected-asset manifest entries, and camera
+  status records.
 
 It reports scanout, cache, queue, telemetry, total estimated RAM, and camera
 storage bytes per second. The estimate is a bound for configured software
