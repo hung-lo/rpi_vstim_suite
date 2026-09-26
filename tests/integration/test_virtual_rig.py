@@ -63,3 +63,14 @@ def test_virtual_rig_force_kill_of_required_camera_is_not_complete(tmp_path):
     )
     assert result.final_state.value == "CLEANUP_FAILED"
     assert inspect_session(result.session.context.session_root)["status"] == "CLEANUP_FAILED"
+
+
+def test_virtual_rig_seeded_camera_failure_is_reproducible(tmp_path):
+    result = run_virtual_session(
+        virtual_config(tmp_path),
+        protocol_name="natural-images",
+        session_id="seeded-camera-failure",
+        seed=1,
+        camera_mode="seeded-failure",
+    )
+    assert result.final_state.value == "FAILED"

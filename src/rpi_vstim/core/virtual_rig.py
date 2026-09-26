@@ -75,9 +75,17 @@ class VirtualDisplayBackend(FakeDisplayBackend):
 class VirtualCameraService:
     """Real subprocess fake-camera service behind the runtime camera boundary."""
 
-    def __init__(self, config: Config, *, mode: str = "normal", fail_ids: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        *,
+        mode: str = "normal",
+        seed: int = 0,
+        fail_ids: set[str] | None = None,
+    ) -> None:
         self.config = config
         self.mode = mode
+        self.seed = seed
         self.fail_ids = fail_ids or set()
         self.supervisor: LocalCameraSupervisor | None = None
         self._started = False
@@ -109,6 +117,8 @@ class VirtualCameraService:
                         str(output),
                         "--mode",
                         mode,
+                        "--seed",
+                        str(self.seed),
                     ),
                     output_extension=device.output_extension,
                     startup_timeout_s=device.startup_timeout_s,
@@ -154,7 +164,9 @@ def run_virtual_session(
     asset_root = config.paths.asset_root
     _write_virtual_assets(asset_root, protocol_name)
     display = VirtualDisplayBackend(fault=fault)
-    cameras = VirtualCameraService(config, mode=camera_mode, fail_ids=camera_failures)
+    cameras = VirtualCameraService(
+        config, mode=camera_mode, seed=seed, fail_ids=camera_failures
+    )
     services = RuntimeServices(
         display=display,
         hardware=SimulatedHardwareWorker(),
