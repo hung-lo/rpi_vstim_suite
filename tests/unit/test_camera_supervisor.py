@@ -144,6 +144,8 @@ def test_rpicam_command_does_not_guess_transient_video_nodes(tmp_path):
     assert command[0] == "rpicam-vid"
     assert "/dev/video0" not in command
     assert command[1:3] == ("--camera", "0")
+    assert "--no-raw" in command and "--nopreview" in command
+    assert str(tmp_path / "capture.h264") in command
     assert "--width" in command and "1280" in command
 
 

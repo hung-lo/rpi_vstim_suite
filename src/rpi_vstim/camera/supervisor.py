@@ -117,7 +117,15 @@ def build_rpicam_command(
     Identity resolution is deliberately separate: this command does not guess
     a transient `/dev/videoN` or camera index.
     """
-    command = ["rpicam-vid", "--camera", resolved_camera.runtime_selector, "--output", str(output_path)]
+    command = [
+        "rpicam-vid",
+        "--camera",
+        resolved_camera.runtime_selector,
+        "--no-raw",
+        "--nopreview",
+        "--output",
+        str(output_path),
+    ]
     if spec.requested_width_px is not None:
         command.extend(("--width", str(spec.requested_width_px)))
     if spec.requested_height_px is not None:

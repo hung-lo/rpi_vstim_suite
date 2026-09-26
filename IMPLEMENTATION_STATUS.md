@@ -242,3 +242,27 @@ The bounded remote validation report is
   write probe, endurance test, or SD-card fallback was used.
 - [ ] Accept physical/optical display timing, GPIO/reward/lick behavior, or a
   behavioral session; these remain deferred until physical presence.
+
+### Remote integration follow-up — 2026-09-26
+
+- [x] Validate a clean local package install in an isolated Pi Python 3.13.5
+  venv without `PYTHONPATH` dependence; validate the CLI, config, preflight,
+  dry-run, five simulations, and session inspection.
+- [x] Validate the production KMS renderer on real HDMI-A-2/connector 42 for
+  420 synthetic frames covering gray, distinct assets, repeats, transitions,
+  and final gray; no visual acceptance is claimed.
+- [x] Exercise six bounded real `LocalCameraSupervisor` dual-camera cycles
+  with RAM-backed output growth, manifests, stop/reap, and no residual workers.
+- [x] Exercise one controlled required-camera failure and one SIGINT cleanup
+  at the real display/camera component boundary; required-camera failure and
+  interruption were not promoted to unified-runtime acceptance.
+- [x] Exercise ten short HDMI-A-2 lease/release iterations with restoration,
+  HDMI-A-1 continuity, and labwc/process checks.
+- [x] Exercise twenty short composed display-plus-camera resource sessions;
+  RAM, load, temperature, throttling, and process cleanup remained bounded.
+- [x] Complete the read-only GPIO/reward source audit and Monday checklist in
+  `docs/hardware/pi5_gpio_reward_preflight_2026-09-26.md`.
+- [ ] Validate a real telemetry loopback: the current checkout has only a
+  null publisher and bounded in-memory test sink, not a network transport.
+- [ ] Integrate the real display/camera components into a production session
+  state writer and preserve interrupted partial artifacts.
