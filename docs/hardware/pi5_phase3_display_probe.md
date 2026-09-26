@@ -1,19 +1,20 @@
 # Scoped Phase 3 display-only work
 
-Status: software-only and discovery-level hardware validation. Full Gate 2 is
-incomplete because production storage is deferred until the experiment SSD is
-attached. No final integrated display/GPIO/camera acceptance is claimed.
+Status: software implementation with discovery and scoped hardware validation.
+Production storage is deferred until the experiment SSD is attached. No final
+integrated display/GPIO/camera acceptance is claimed.
 
 ## Roles
 
-The user-authorized provisional roles are configurable as:
+The current physically verified roles are configurable as:
 
 ```text
-HDMI-A-1 = stimulus display
-HDMI-A-2 = camera-preview display
+HDMI-A-2 = stimulus display, connector 42
+HDMI-A-1 = camera-preview display, connector 33
 ```
 
-These are provisional assumptions, not a new physical cable verification.
+The final stimulus screen may change later; the rig profile must be updated and
+revalidated if it does.
 
 ## Implemented
 
@@ -26,7 +27,8 @@ These are provisional assumptions, not a new physical cable verification.
   a mode or presenting frames.
 - The standalone native probe and Python KMS wrapper provide bounded
   alternating-pattern/color page-flip presentation with timing fields and
-  CRTC restoration.
+  CRTC restoration. Real leased page-flip runs, including the corrected
+  HDMI-A-2 run, are recorded in the dated hardware reports.
 - Unit fixtures cover dual connected HDMI outputs, disabled preview,
   disconnected/missing outputs, unsupported modes, exact/nearest refresh,
   reordered connectors, and role separation.
@@ -34,9 +36,7 @@ These are provisional assumptions, not a new physical cable verification.
 ## Hardware work still blocked or deferred
 
 The native code compiled and its read-only resource path passed on both real
-outputs. A modeset/page-flip smoke test could not start because `labwc` owns
-DRM master on `/dev/dri/card1`; no compositor changes were made. Real
-page-flip intervals, physical photodiode timing, CRTC restoration under
-ownership, and 10,000-frame acceptance remain unverified. No long stimulus,
-reward/water/suction hardware, GPIO, dual-camera load, or integrated acceptance
-test belongs in this scoped work.
+outputs. Later supervised DRM-lease runs validated leased page flips and
+recovery, including the combined display/two-camera trace. Physical photodiode
+timing, SSD-backed storage, final-screen optical acceptance, GPIO, reward, and
+production camera-supervisor acceptance remain deferred hardware validation.

@@ -37,3 +37,21 @@ production-storage acceptance.
 Production storage and concurrent camera-write measurements remain deferred
 until the experiment SSD is attached. Temporary test directories must not be
 used as evidence for the future experiment SSD or as a fallback recording root.
+
+## SSD-backed validation preparation
+
+The next storage gate is hardware-only and must be run on the Pi after the SSD
+is physically connected:
+
+1. record the device, filesystem UUID, intended mount point, and existing
+   `/etc/fstab` intent;
+2. verify the mounted filesystem is the SSD, writable, and has sufficient free
+   space; do not accept `/` or the SD card as a substitute;
+3. run a bounded write/read throughput check in a disposable SSD test path;
+4. record sustained output growth from both camera workers; and
+5. repeat leased display + dual-camera + SSD-write load while recording RAM,
+   CPU/load, temperature, throttling, page-flip timing, cleanup, and free space.
+
+The current combined display/two-camera resource log is a no-SSD baseline only:
+about 1.2 GiB minimum available RAM, load up to 1.38, 45.0 °C peak, and
+`throttled=0x0`. It is not SSD or production-storage acceptance.

@@ -74,6 +74,10 @@ when labwc owns the DRM master, the result is an ownership block rather than a
 generic display failure. The corrected HDMI-A-2 10,000-frame run and the
 real-Pi production-renderer smoke are documented in the hardware report.
 
+The combined display/two-camera trace has a separate software-timestamp
+analysis in `docs/hardware/pi5_phase3_timing_analysis_2026-09-25.md`; its
+compensating long/short intervals are not optical acceptance.
+
 On the current Pi, labwc 0.9.2 with wlroots 0.19 exposes
 `wp_drm_lease_device_v1` and offers both HDMI outputs. The ownership and
 physical-role validation are documented in

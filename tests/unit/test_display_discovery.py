@@ -72,7 +72,13 @@ def test_reordered_connectors_and_empty_modes_fail_closed():
 
 def test_disconnected_or_missing_connector_does_not_fallback():
     inventory = parse_modetest_connectors(FIXTURE.replace("connected\tHDMI-A-1", "disconnected\tHDMI-A-1"))
-    config = DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82)
+    config = DisplayConfig(
+        stimulus_connector="HDMI-A-1",
+        preview_connector="HDMI-A-2",
+        width_px=1024,
+        height_px=600,
+        refresh_hz=59.82,
+    )
     with pytest.raises(DisplaySelectionError, match="not connected"):
         select_display(inventory, config)
     with pytest.raises(DisplaySelectionError, match="missing"):

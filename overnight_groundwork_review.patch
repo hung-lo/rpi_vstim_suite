@@ -1,0 +1,2571 @@
+From 20acaa41dd8ae40f2139be9578c54c05a29ff6ae Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 20:58:58 -0400
+Subject: [PATCH 01/10] Add simulated runtime orchestration
+
+---
+ src/rpi_vstim/cli.py                 |  25 +++++
+ src/rpi_vstim/core/camera.py         |  85 ++++++++++++++-
+ src/rpi_vstim/core/runtime.py        | 148 +++++++++++++++++++++++++++
+ src/rpi_vstim/core/session.py        |  88 +++++++++++++---
+ src/rpi_vstim/protocols/__init__.py  |   7 ++
+ src/rpi_vstim/telemetry/publisher.py |  25 +++++
+ tests/unit/test_runtime.py           |  75 ++++++++++++++
+ 7 files changed, 440 insertions(+), 13 deletions(-)
+ create mode 100644 src/rpi_vstim/core/runtime.py
+ create mode 100644 tests/unit/test_runtime.py
+
+diff --git a/src/rpi_vstim/cli.py b/src/rpi_vstim/cli.py
+index db72214..11011c0 100644
+--- a/src/rpi_vstim/cli.py
++++ b/src/rpi_vstim/cli.py
+@@ -6,9 +6,11 @@ import argparse
+ import json
+ import sys
+ from pathlib import Path
++from dataclasses import replace
+ 
+ from . import __version__
+ from .core.config import ConfigError, load_config
++from .core.runtime import run_simulated_session
+ from .protocols import available_protocols
+ 
+ 
+@@ -31,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
+     run.add_argument("protocol", choices=[p.name for p in available_protocols()])
+     run.add_argument("--camera", action="store_true", help="enable configured local cameras")
+     run.add_argument("--cameras", help="comma-separated configured local camera IDs or 'all'")
++    run.add_argument("--simulate", action="store_true", help="run the hardware-independent simulation")
++    run.add_argument("--config", type=Path, help="TOML configuration file")
++    run.add_argument("--output-root", type=Path, help="simulation session output directory")
++    run.add_argument("--session-id", default="simulation")
++    run.add_argument("--seed", type=int, default=0)
+ 
+     return parser
+ 
+@@ -74,6 +81,24 @@ def main(argv: list[str] | None = None) -> int:
+         print(f"valid: {args.path or 'package defaults'}")
+         return 0
+     if args.command == "run":
++        if args.simulate:
++            try:
++                config = load_config(args.config)
++                if args.output_root is not None:
++                    config = replace(config, paths=replace(config.paths, output_root=args.output_root))
++                result = run_simulated_session(
++                    config,
++                    protocol_name=args.protocol,
++                    session_id=args.session_id,
++                    seed=args.seed,
++                )
++            except (ConfigError, OSError, ValueError) as exc:
++                print(f"simulation invalid: {exc}", file=sys.stderr)
++                return 2
++            print(f"{result.final_state.value}: {result.session.context.session_root}")
++            if result.degraded:
++                print(f"degraded: {', '.join(result.degraded)}")
++            return 0 if result.ok else 1
+         print(
+             f"protocol '{args.protocol}' is a Phase 00 placeholder; no experiment was started",
+             file=sys.stderr,
+diff --git a/src/rpi_vstim/core/camera.py b/src/rpi_vstim/core/camera.py
+index 882ccac..8ea2aa2 100644
+--- a/src/rpi_vstim/core/camera.py
++++ b/src/rpi_vstim/core/camera.py
+@@ -1,5 +1,89 @@
+ from __future__ import annotations
+ 
++from dataclasses import asdict, dataclass
++from enum import StrEnum
++from pathlib import Path
++from typing import Any
++
++from .config import CamerasConfig
++
++
++class CameraState(StrEnum):
++    CONFIGURED = "CONFIGURED"
++    READY = "READY"
++    RECORDING = "RECORDING"
++    COMPLETED = "COMPLETED"
++    FAILED = "FAILED"
++    DEGRADED = "DEGRADED"
++
++
++class CameraStartupError(RuntimeError):
++    pass
++
++
++@dataclass
++class FakeCameraStatus:
++    camera_id: str
++    role: str
++    stable_device_identifier: str
++    required: bool
++    state: CameraState = CameraState.CONFIGURED
++    output_path: str = ""
++    bytes_written: int = 0
++    error: str | None = None
++
++
++class FakeLocalCameraService:
++    """Metadata-only local camera service; it never opens a device or writes frames."""
++
++    def __init__(self, config: CamerasConfig, *, fail_ids: set[str] | None = None) -> None:
++        self.config = config
++        self.fail_ids = fail_ids or set()
++        self.statuses = {
++            device.id: FakeCameraStatus(
++                device.id,
++                device.role,
++                device.stable_device_identifier,
++                device.required,
++            )
++            for device in config.devices
++        }
++        self.session_root: Path | None = None
++
++    @property
++    def degraded(self) -> bool:
++        return any(status.state == CameraState.DEGRADED for status in self.statuses.values())
++
++    def start(self, session_root: Path) -> None:
++        self.session_root = session_root
++        for status in self.statuses.values():
++            status.output_path = f"camera/{status.camera_id}/capture.fake.json"
++            if status.camera_id in self.fail_ids:
++                status.state = CameraState.FAILED if status.required else CameraState.DEGRADED
++                status.error = "simulated camera startup failure"
++                if status.required:
++                    self._write_manifest()
++                    raise CameraStartupError(status.camera_id)
++                continue
++            status.state = CameraState.READY
++            status.state = CameraState.RECORDING
++        self._write_manifest()
++
++    def stop(self) -> None:
++        for status in self.statuses.values():
++            if status.state == CameraState.RECORDING:
++                status.state = CameraState.COMPLETED
++        self._write_manifest()
++
++    def manifest(self) -> list[dict[str, Any]]:
++        return [asdict(status) | {"state": status.state.value} for status in self.statuses.values()]
++
++    def _write_manifest(self) -> None:
++        if self.session_root is None:
++            return
++        from .session import atomic_write_json
++
++        atomic_write_json(self.session_root / "camera_manifest.json", {"cameras": self.manifest()})
+ 
+ class CameraBackend:
+     """Import-safe camera boundary; acquisition is intentionally not implemented."""
+@@ -9,4 +93,3 @@ class CameraBackend:
+ 
+     def stop(self) -> None:
+         raise NotImplementedError("camera acquisition starts in a later phase")
+-
+diff --git a/src/rpi_vstim/core/runtime.py b/src/rpi_vstim/core/runtime.py
+new file mode 100644
+index 0000000..dd96efb
+--- /dev/null
++++ b/src/rpi_vstim/core/runtime.py
+@@ -0,0 +1,148 @@
++from __future__ import annotations
++
++from dataclasses import dataclass, replace
++from pathlib import Path
++from typing import Any, Iterable
++
++from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
++from rpi_vstim.core.config import Config
++from rpi_vstim.core.lifecycle import Lifecycle, LifecycleState, RuntimeServices
++from rpi_vstim.core.session import SessionOutput, new_session
++from rpi_vstim.display.fake import FakeDisplayBackend
++from rpi_vstim.hardware.worker import SimulatedHardwareWorker
++from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher
++
++
++class SimulationInterrupted(RuntimeError):
++    pass
++
++
++class TelemetryRequiredError(RuntimeError):
++    pass
++
++
++@dataclass
++class SimulationResult:
++    session: SessionOutput
++    services: RuntimeServices
++    final_state: LifecycleState
++    degraded: list[str]
++    error: str | None = None
++
++    @property
++    def ok(self) -> bool:
++        return self.final_state == LifecycleState.COMPLETE
++
++
++def build_simulated_services(
++    config: Config,
++    *,
++    camera_failures: Iterable[str] = (),
++    telemetry_failure: bool = False,
++) -> RuntimeServices:
++    return RuntimeServices(
++        display=FakeDisplayBackend(),
++        hardware=SimulatedHardwareWorker(),
++        cameras=FakeLocalCameraService(config.cameras, fail_ids=set(camera_failures)),
++        telemetry=InMemoryTelemetryPublisher(fail=telemetry_failure),
++    )
++
++
++def run_simulated_session(
++    config: Config,
++    *,
++    protocol_name: str | None = None,
++    session_id: str = "simulation",
++    seed: int = 0,
++    plan: Any = None,
++    camera_failures: Iterable[str] = (),
++    telemetry_failure: bool = False,
++    interrupt: bool = False,
++    protocol_failure: bool = False,
++) -> SimulationResult:
++    simulation_session = replace(
++        config.session,
++        experimental=False,
++        simulation=True,
++    )
++    simulation_display = replace(config.display, backend="fake")
++    config = replace(config, session=simulation_session, display=simulation_display)
++    session = new_session(config, protocol_name=protocol_name, session_id=session_id, seed=seed)
++    session.write_initial_outputs()
++    if plan is not None:
++        session.write_plan(plan)
++    services = build_simulated_services(
++        config,
++        camera_failures=camera_failures,
++        telemetry_failure=telemetry_failure,
++    )
++    lifecycle = services.lifecycle
++    degraded: list[str] = []
++    error: str | None = None
++
++    def transition(state: LifecycleState) -> None:
++        lifecycle.transition(state)
++        session.update_status(state.value, lifecycle=state.value, degraded=degraded)
++        session.record_event(state.value, lifecycle=state.value)
++        if not services.telemetry.publish(
++            {"event": "lifecycle", "state": state.value, "session_id": session.context.session_id}
++        ):
++            if config.telemetry.required:
++                raise TelemetryRequiredError("required telemetry publisher failed")
++            if "telemetry" not in degraded:
++                degraded.append("telemetry")
++
++    try:
++        transition(LifecycleState.CONFIGURED)
++        transition(LifecycleState.PREFLIGHT)
++        services.display.open(config.display)
++        services.hardware.start()
++        try:
++            services.cameras.start(session.context.session_root)
++        except CameraStartupError:
++            raise
++        if services.cameras.degraded:
++            degraded.append("camera")
++        transition(LifecycleState.PREPARING)
++        transition(LifecycleState.PRE)
++        services.display.present_color((0, 0, 0), frames=1)
++        if interrupt:
++            raise SimulationInterrupted("simulated interruption")
++        if protocol_failure:
++            raise RuntimeError("simulated protocol failure")
++        transition(LifecycleState.TASK)
++        services.display.present_color((128, 128, 128), frames=1)
++        session.record_event("TASK_PRESENTED", lifecycle=LifecycleState.TASK.value, sequence_id="simulation-0")
++        transition(LifecycleState.POST)
++        services.display.present_color((0, 0, 0), frames=1)
++        transition(LifecycleState.FINALIZING)
++        transition(LifecycleState.COMPLETE)
++    except SimulationInterrupted as exc:
++        error = str(exc)
++        lifecycle.state = LifecycleState.INTERRUPTED
++    except Exception as exc:
++        error = str(exc)
++        lifecycle.state = LifecycleState.FAILED
++    finally:
++        try:
++            services.hardware.backend.safe()
++            services.hardware.backend.stop()
++            services.cameras.stop()
++            services.display.close()
++            services.telemetry.close()
++        except Exception as cleanup_error:
++            error = str(cleanup_error)
++            lifecycle.state = LifecycleState.CLEANUP_FAILED
++        session.update_status(
++            lifecycle.state.value,
++            lifecycle=lifecycle.state.value,
++            error=error,
++            degraded=degraded,
++        )
++        session.record_event(
++            "SESSION_FINISHED",
++            lifecycle=lifecycle.state.value,
++            detail=error or "",
++        )
++        session.close()
++    return SimulationResult(session, services, lifecycle.state, degraded, error)
+diff --git a/src/rpi_vstim/core/session.py b/src/rpi_vstim/core/session.py
+index b9fb15e..0d41d93 100644
+--- a/src/rpi_vstim/core/session.py
++++ b/src/rpi_vstim/core/session.py
+@@ -9,6 +9,7 @@ from pathlib import Path
+ from typing import Any
+ 
+ from .config import Config
++from .event_log import EventLogger
+ from .provenance import collect_provenance, resolve_source_commit
+ from .timestamps import monotonic_ns, utc_ns
+ 
+@@ -47,27 +48,90 @@ class SessionContext:
+ class SessionOutput:
+     def __init__(self, context: SessionContext) -> None:
+         self.context = context
++        self._manifest: dict[str, Any] = {}
++        self._events: EventLogger | None = None
+ 
+     def write_initial_outputs(self) -> None:
+         self.context.session_root.mkdir(parents=True, exist_ok=True)
+         atomic_write_json(self.context.session_root / "resolved_config.json", self.context.resolved_config)
+         atomic_write_json(self.context.session_root / "provenance.json", self.context.host_provenance)
+-        atomic_write_json(
+-            self.context.session_root / "session_manifest.json",
++        self._manifest = {
++            "session_id": self.context.session_id,
++            "protocol": self.context.protocol_name,
++            "protocol_version": self.context.protocol_version,
++            "created_utc_ns": self.context.created_utc_ns,
++            "random_seeds": self.context.random_seeds,
++            "source_commit": self.context.source_commit,
++            "status": "CREATED",
++            "lifecycle": "CREATED",
++            "phase": "00",
++            "degraded": [],
++        }
++        self._write_manifest()
++        self._events = EventLogger(self.context.session_root / "events.csv")
++        self._events.open(["event", "lifecycle", "sequence_id", "timestamp_utc_ns", "detail"])
++        self.record_event("SESSION_CREATED", lifecycle="CREATED")
++
++    def _write_manifest(self) -> None:
++        atomic_write_json(self.context.session_root / "session_manifest.json", self._manifest)
++
++    def write_plan(self, plan: Any) -> None:
++        value = plan.as_dict() if hasattr(plan, "as_dict") else plan
++        atomic_write_json(self.context.session_root / "plan.json", value)
++
++    def record_event(
++        self,
++        event: str,
++        *,
++        lifecycle: str = "",
++        sequence_id: str = "",
++        detail: str = "",
++    ) -> None:
++        if self._events is None:
++            raise RuntimeError("session outputs are not initialized")
++        self._events.write(
+             {
+-                "session_id": self.context.session_id,
+-                "protocol": self.context.protocol_name,
+-                "protocol_version": self.context.protocol_version,
+-                "created_utc_ns": self.context.created_utc_ns,
+-                "random_seeds": self.context.random_seeds,
+-                "source_commit": self.context.source_commit,
+-                "status": "CREATED",
+-                "phase": "00",
+-            },
++                "event": event,
++                "lifecycle": lifecycle,
++                "sequence_id": sequence_id,
++                "timestamp_utc_ns": utc_ns(),
++                "detail": detail,
++            }
+         )
+ 
++    def update_status(
++        self,
++        status: str,
++        *,
++        lifecycle: str | None = None,
++        error: str | None = None,
++        degraded: list[str] | None = None,
++    ) -> None:
++        if not self._manifest:
++            raise RuntimeError("session outputs are not initialized")
++        self._manifest["status"] = status
++        if lifecycle is not None:
++            self._manifest["lifecycle"] = lifecycle
++        if error is not None:
++            self._manifest["error"] = error
++        if degraded is not None:
++            self._manifest["degraded"] = sorted(set(degraded))
++        self._manifest["updated_utc_ns"] = utc_ns()
++        self._write_manifest()
++
++    def close(self) -> None:
++        if self._events is not None:
++            self._events.close()
++            self._events = None
++
+ 
+-def new_session(config: Config, *, protocol_name: str | None = None, session_id: str = "phase00-simulation", seed: int = 0) -> SessionOutput:
++def new_session(
++    config: Config,
++    *,
++    protocol_name: str | None = None,
++    session_id: str = "phase00-simulation",
++    seed: int = 0,
++) -> SessionOutput:
+     if not _SESSION_ID.fullmatch(session_id):
+         raise ValueError("session_id contains unsupported characters")
+     protocol = protocol_name or config.protocol.name
+diff --git a/src/rpi_vstim/protocols/__init__.py b/src/rpi_vstim/protocols/__init__.py
+index 2becdb8..170d7b1 100644
+--- a/src/rpi_vstim/protocols/__init__.py
++++ b/src/rpi_vstim/protocols/__init__.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
++from importlib import import_module
+ 
+ 
+ @dataclass(frozen=True)
+@@ -22,3 +23,9 @@ _PROTOCOLS = (
+ def available_protocols() -> tuple[ProtocolInfo, ...]:
+     return _PROTOCOLS
+ 
++
++def get_protocol(name: str):
++    for info in _PROTOCOLS:
++        if info.name == name:
++            return getattr(import_module(info.module), "protocol")
++    raise KeyError(f"unknown protocol: {name}")
+diff --git a/src/rpi_vstim/telemetry/publisher.py b/src/rpi_vstim/telemetry/publisher.py
+index 7371291..17b3d49 100644
+--- a/src/rpi_vstim/telemetry/publisher.py
++++ b/src/rpi_vstim/telemetry/publisher.py
+@@ -1,5 +1,8 @@
+ from __future__ import annotations
+ 
++from collections import deque
++from dataclasses import asdict, is_dataclass
++from typing import Any
+ 
+ class TelemetryPublisher:
+     """Phase 00 null publisher: no socket is opened and no packet is sent."""
+@@ -14,3 +17,25 @@ class TelemetryPublisher:
+     def close(self) -> None:
+         return None
+ 
++
++class InMemoryTelemetryPublisher(TelemetryPublisher):
++    """Bounded telemetry sink for simulated sessions and integration tests."""
++
++    def __init__(self, *, fail: bool = False, max_messages: int = 256) -> None:
++        self.fail = fail
++        self.messages: deque[dict[str, Any]] = deque(maxlen=max_messages)
++        self.dropped_count = 0
++        self.failed = False
++
++    def publish(self, payload: object) -> bool:
++        if self.fail:
++            self.failed = True
++            return False
++        if len(self.messages) == self.messages.maxlen:
++            self.dropped_count += 1
++        if is_dataclass(payload):
++            payload = asdict(payload)
++        elif not isinstance(payload, dict):
++            payload = {"payload": payload}
++        self.messages.append(payload)
++        return True
+diff --git a/tests/unit/test_runtime.py b/tests/unit/test_runtime.py
+new file mode 100644
+index 0000000..b1910e5
+--- /dev/null
++++ b/tests/unit/test_runtime.py
+@@ -0,0 +1,75 @@
++import json
++from dataclasses import replace
++
++from rpi_vstim.core.config import Config, config_from_mapping
++from rpi_vstim.core.lifecycle import LifecycleState
++from rpi_vstim.core.runtime import run_simulated_session
++
++
++def simulation_config(tmp_path, *, cameras=True):
++    values = {"paths": {"output_root": tmp_path}}
++    if cameras:
++        values["cameras"] = {
++            "devices": [
++                {"id": "face", "role": "face", "required": True, "device": "face-serial"},
++                {"id": "behavior", "role": "behavior", "device": "behavior-serial"},
++            ]
++        }
++    return config_from_mapping(values)
++
++
++def test_simulated_session_completes_and_writes_events(tmp_path):
++    result = run_simulated_session(simulation_config(tmp_path), session_id="complete", seed=7)
++
++    assert result.ok
++    root = tmp_path / "complete"
++    manifest = json.loads((root / "session_manifest.json").read_text())
++    assert manifest["status"] == "COMPLETE"
++    assert manifest["random_seeds"] == {"protocol": 7}
++    assert (root / "events.csv").read_text().count("SESSION_FINISHED") == 1
++    cameras = json.loads((root / "camera_manifest.json").read_text())
++    assert {camera["state"] for camera in cameras["cameras"]} == {"COMPLETED"}
++
++
++def test_interruption_and_protocol_failure_are_terminal_and_safe(tmp_path):
++    interrupted = run_simulated_session(
++        simulation_config(tmp_path), session_id="interrupted", interrupt=True
++    )
++    failed = run_simulated_session(
++        simulation_config(tmp_path), session_id="failed", protocol_failure=True
++    )
++
++    assert interrupted.final_state == LifecycleState.INTERRUPTED
++    assert failed.final_state == LifecycleState.FAILED
++    assert interrupted.services.hardware.backend.outputs_safe
++    assert failed.services.hardware.backend.outputs_safe
++
++
++def test_required_camera_failure_fails_without_touching_stimulus_outputs(tmp_path):
++    result = run_simulated_session(
++        simulation_config(tmp_path), session_id="camera-failed", camera_failures={"face"}
++    )
++
++    assert result.final_state == LifecycleState.FAILED
++    assert (tmp_path / "camera-failed" / "session_manifest.json").is_file()
++    assert (tmp_path / "camera-failed" / "resolved_config.json").is_file()
++    assert result.services.hardware.backend.outputs_safe
++
++
++def test_optional_camera_and_telemetry_failures_degrade(tmp_path):
++    result = run_simulated_session(
++        simulation_config(tmp_path),
++        session_id="degraded",
++        camera_failures={"behavior"},
++        telemetry_failure=True,
++    )
++
++    assert result.ok
++    assert set(result.degraded) == {"camera", "telemetry"}
++
++
++def test_simulated_session_without_cameras(tmp_path):
++    result = run_simulated_session(
++        simulation_config(tmp_path, cameras=False), session_id="no-cameras"
++    )
++    assert result.ok
+-- 
+2.39.3 (Apple Git-146)
+
+
+From 9ed5f24a6589cb7b70d493975756cd7f7a132e44 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:03:23 -0400
+Subject: [PATCH 02/10] Add deterministic software planning primitives
+
+---
+ src/rpi_vstim/core/duration.py |   3 +-
+ src/rpi_vstim/core/plan.py     | 105 +++++++++++++++++++++++++++++++++
+ tests/unit/test_plan.py        |  48 +++++++++++++++
+ 3 files changed, 155 insertions(+), 1 deletion(-)
+ create mode 100644 src/rpi_vstim/core/plan.py
+ create mode 100644 tests/unit/test_plan.py
+
+diff --git a/src/rpi_vstim/core/duration.py b/src/rpi_vstim/core/duration.py
+index 7a475f1..6b77598 100644
+--- a/src/rpi_vstim/core/duration.py
++++ b/src/rpi_vstim/core/duration.py
+@@ -1,7 +1,8 @@
+ def seconds_to_frames(seconds: float, refresh_hz: float) -> int:
++    if seconds < 0 or refresh_hz <= 0:
++        raise ValueError("seconds must be non-negative and refresh_hz must be positive")
+     frames = seconds * refresh_hz
+     rounded = round(frames)
+     if abs(frames - rounded) > 1e-9:
+         raise ValueError(f"duration is not an integer number of frames: {seconds}s at {refresh_hz}Hz")
+     return rounded
+-
+diff --git a/src/rpi_vstim/core/plan.py b/src/rpi_vstim/core/plan.py
+new file mode 100644
+index 0000000..2116744
+--- /dev/null
++++ b/src/rpi_vstim/core/plan.py
+@@ -0,0 +1,105 @@
++"""Small deterministic plan primitives shared by simulated protocols."""
++
++from __future__ import annotations
++
++import json
++import random
++from dataclasses import dataclass, field, replace
++from typing import Any, Iterable
++
++
++@dataclass(frozen=True)
++class PlannedEvent:
++    event_id: str
++    kind: str
++    frame_count: int
++    phase: str = "TASK"
++    trial_id: str | None = None
++    sequence_id: str | None = None
++    photodiode: str = "off"
++    planned_start_frame: int = 0
++    planned_utc_ns: int | None = None
++    observed_utc_ns: int | None = None
++    metadata: dict[str, Any] = field(default_factory=dict)
++
++    def __post_init__(self) -> None:
++        if self.frame_count < 0:
++            raise ValueError("frame_count must be non-negative")
++        if self.planned_start_frame < 0:
++            raise ValueError("planned_start_frame must be non-negative")
++        if self.photodiode not in {"on", "off"}:
++            raise ValueError("photodiode must be 'on' or 'off'")
++
++    def as_dict(self) -> dict[str, Any]:
++        return {
++            "event_id": self.event_id,
++            "kind": self.kind,
++            "frame_count": self.frame_count,
++            "phase": self.phase,
++            "trial_id": self.trial_id,
++            "sequence_id": self.sequence_id,
++            "photodiode": self.photodiode,
++            "planned_start_frame": self.planned_start_frame,
++            "planned_utc_ns": self.planned_utc_ns,
++            "observed_utc_ns": self.observed_utc_ns,
++            "metadata": self.metadata,
++        }
++
++
++@dataclass(frozen=True)
++class SessionPlan:
++    protocol: str
++    seed: int
++    events: tuple[PlannedEvent, ...]
++    metadata: dict[str, Any] = field(default_factory=dict)
++
++    @property
++    def total_frames(self) -> int:
++        return sum(event.frame_count for event in self.events)
++
++    def as_dict(self) -> dict[str, Any]:
++        return {
++            "protocol": self.protocol,
++            "seed": self.seed,
++            "total_frames": self.total_frames,
++            "metadata": self.metadata,
++            "events": [event.as_dict() for event in self.events],
++        }
++
++    def stable_json(self) -> str:
++        return json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":"))
++
++
++def with_frame_offsets(events: Iterable[PlannedEvent]) -> tuple[PlannedEvent, ...]:
++    offset = 0
++    planned: list[PlannedEvent] = []
++    for event in events:
++        planned.append(replace(event, planned_start_frame=offset))
++        offset += event.frame_count
++    return tuple(planned)
++
++
++def no_adjacent_repeat(items: Iterable[str], count: int, *, seed: int) -> tuple[str, ...]:
++    values = tuple(items)
++    if count < 0:
++        raise ValueError("count must be non-negative")
++    if count and not values:
++        raise ValueError("cannot schedule items from an empty collection")
++    if len(values) == 1:
++        return values * count
++    rng = random.Random(seed)
++    result: list[str] = []
++    for _ in range(count):
++        choices = [value for value in values if not result or value != result[-1]]
++        result.append(rng.choice(choices))
++    return tuple(result)
++
++
++def seeded_choices(values: Iterable[int], count: int, *, seed: int) -> tuple[int, ...]:
++    values = tuple(values)
++    if count < 0:
++        raise ValueError("count must be non-negative")
++    if count and not values:
++        raise ValueError("cannot choose from an empty collection")
++    rng = random.Random(seed)
++    return tuple(rng.choice(values) for _ in range(count))
+diff --git a/tests/unit/test_plan.py b/tests/unit/test_plan.py
+new file mode 100644
+index 0000000..553ab74
+--- /dev/null
++++ b/tests/unit/test_plan.py
+@@ -0,0 +1,48 @@
++import json
++import random
++
++import pytest
++
++from rpi_vstim.core.duration import seconds_to_frames
++from rpi_vstim.core.plan import (
++    PlannedEvent,
++    SessionPlan,
++    no_adjacent_repeat,
++    seeded_choices,
++    with_frame_offsets,
++)
++
++
++def test_plan_replays_deterministically_and_does_not_touch_global_rng():
++    random.seed(91)
++    expected_next = random.random()
++    random.seed(91)
++    first = no_adjacent_repeat(("a", "b", "c"), 12, seed=3)
++    actual_next = random.random()
++
++    assert first == no_adjacent_repeat(("a", "b", "c"), 12, seed=3)
++    assert actual_next == expected_next
++    assert all(left != right for left, right in zip(first, first[1:]))
++
++
++def test_frame_durations_and_seeded_choices_cover_edges():
++    assert seconds_to_frames(0.5, 60.0) == 30
++    assert seconds_to_frames(0.0, 60.0) == 0
++    assert seeded_choices((30, 60), 4, seed=5) == seeded_choices((30, 60), 4, seed=5)
++    assert no_adjacent_repeat(("only",), 3, seed=1) == ("only",) * 3
++    assert no_adjacent_repeat((), 0, seed=1) == ()
++    with pytest.raises(ValueError):
++        no_adjacent_repeat((), 1, seed=1)
++
++
++def test_plan_serialization_is_stable_and_offsets_are_explicit():
++    events = (
++        PlannedEvent("pre", "gray", 2, phase="PRE"),
++        PlannedEvent("trial-1", "image", 3, trial_id="1", photodiode="on"),
++    )
++    plan = SessionPlan("natural-images", 7, with_frame_offsets(events))
++    payload = json.loads(plan.stable_json())
++
++    assert payload["total_frames"] == 5
++    assert payload["events"][0]["planned_start_frame"] == 0
++    assert payload["events"][1]["planned_start_frame"] == 2
+-- 
+2.39.3 (Apple Git-146)
+
+
+From cf266d584966c5c68671e41e6c53d0f2b6de5068 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:03:39 -0400
+Subject: [PATCH 03/10] Add natural image planning groundwork
+
+---
+ .../protocols/natural_images/__init__.py      | 115 +++++++++++++++++-
+ tests/unit/test_natural_images.py             |  54 ++++++++
+ 2 files changed, 167 insertions(+), 2 deletions(-)
+ create mode 100644 tests/unit/test_natural_images.py
+
+diff --git a/src/rpi_vstim/protocols/natural_images/__init__.py b/src/rpi_vstim/protocols/natural_images/__init__.py
+index 49c3d2e..4812aab 100644
+--- a/src/rpi_vstim/protocols/natural_images/__init__.py
++++ b/src/rpi_vstim/protocols/natural_images/__init__.py
+@@ -1,4 +1,115 @@
+-from rpi_vstim.protocols.placeholder import ProtocolPlaceholder
++from __future__ import annotations
+ 
+-protocol = ProtocolPlaceholder("natural-images")
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Iterable
+ 
++from rpi_vstim.core.duration import seconds_to_frames
++from rpi_vstim.core.plan import (
++    PlannedEvent,
++    SessionPlan,
++    no_adjacent_repeat,
++    seeded_choices,
++    with_frame_offsets,
++)
++
++IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"})
++FINAL_ITI_BY_PROFILE = {
++    "natural_legacy_plain": True,
++    "natural_legacy_camera": False,
++}
++
++
++@dataclass(frozen=True)
++class NaturalImageSettings:
++    images: tuple[str, ...]
++    seed: int = 0
++    trial_count: int | None = None
++    refresh_hz: float = 60.0
++    image_duration_s: float = 0.5
++    iti_frames: tuple[int, ...] = (30, 60)
++    initial_gray_frames: int = 60
++    final_gray_frames: int = 60
++    compatibility_profile: str = "natural_legacy_plain"
++    camera_ids: tuple[str, ...] = ()
++
++
++def discover_images(root: Path) -> tuple[str, ...]:
++    """Return sorted relative image paths without opening or decoding assets."""
++    if not root.is_dir():
++        raise FileNotFoundError(root)
++    return tuple(
++        str(path.relative_to(root))
++        for path in sorted(root.rglob("*"))
++        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
++    )
++
++
++def select_images(images: Iterable[str], *, count: int | None, seed: int) -> tuple[str, ...]:
++    values = tuple(images)
++    return no_adjacent_repeat(values, len(values) if count is None else count, seed=seed)
++
++
++def build_plan(settings: NaturalImageSettings) -> SessionPlan:
++    if settings.compatibility_profile not in FINAL_ITI_BY_PROFILE:
++        raise ValueError(
++            f"unsupported natural-image compatibility profile: {settings.compatibility_profile}"
++        )
++    selected = select_images(settings.images, count=settings.trial_count, seed=settings.seed)
++    image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
++    itis = seeded_choices(settings.iti_frames, len(selected), seed=settings.seed + 1)
++    events: list[PlannedEvent] = [
++        PlannedEvent(
++            "initial-gray",
++            "gray",
++            settings.initial_gray_frames,
++            phase="PRE",
++            photodiode="off",
++        )
++    ]
++    for index, image in enumerate(selected):
++        events.append(
++            PlannedEvent(
++                f"image-{index + 1}",
++                "image",
++                image_frames,
++                trial_id=str(index + 1),
++                sequence_id=f"image-{index + 1}",
++                photodiode="on",
++                metadata={"image": image},
++            )
++        )
++        if index < len(selected) - 1 or FINAL_ITI_BY_PROFILE[settings.compatibility_profile]:
++            events.append(
++                PlannedEvent(
++                    f"iti-{index + 1}",
++                    "iti",
++                    itis[index],
++                    trial_id=str(index + 1),
++                    photodiode="off",
++                )
++            )
++    events.append(
++        PlannedEvent("final-gray", "gray", settings.final_gray_frames, phase="POST", photodiode="off")
++    )
++    return SessionPlan(
++        "natural-images",
++        settings.seed,
++        with_frame_offsets(events),
++        metadata={
++            "selected_images": list(selected),
++            "compatibility_profile": settings.compatibility_profile,
++            "camera_ids": list(settings.camera_ids),
++        },
++    )
++
++
++class NaturalImagesProtocol:
++    name = "natural-images"
++    version = "software-groundwork"
++
++    def build_plan(self, settings: NaturalImageSettings) -> SessionPlan:
++        return build_plan(settings)
++
++
++protocol = NaturalImagesProtocol()
+diff --git a/tests/unit/test_natural_images.py b/tests/unit/test_natural_images.py
+new file mode 100644
+index 0000000..67d5327
+--- /dev/null
++++ b/tests/unit/test_natural_images.py
+@@ -0,0 +1,54 @@
++from pathlib import Path
++
++import pytest
++
++from rpi_vstim.protocols.natural_images import (
++    NaturalImageSettings,
++    build_plan,
++    discover_images,
++)
++
++
++def test_image_discovery_is_sorted_and_does_not_decode_assets(tmp_path):
++    (tmp_path / "b.png").write_bytes(b"not decoded")
++    (tmp_path / "a.JPG").write_bytes(b"not decoded")
++    (tmp_path / "ignore.txt").write_text("ignore")
++
++    assert discover_images(tmp_path) == ("a.JPG", "b.png")
++
++
++def test_natural_plan_is_reproducible_and_keeps_profile_metadata():
++    settings = NaturalImageSettings(
++        images=("a.png", "b.png", "c.png"),
++        seed=11,
++        trial_count=6,
++        iti_frames=(2, 4),
++        initial_gray_frames=1,
++        final_gray_frames=1,
++        camera_ids=("face", "behavior"),
++    )
++    first = build_plan(settings)
++    second = build_plan(settings)
++
++    assert first.stable_json() == second.stable_json()
++    selected = first.metadata["selected_images"]
++    assert all(left != right for left, right in zip(selected, selected[1:]))
++    assert first.metadata["camera_ids"] == ["face", "behavior"]
++    assert first.total_frames == sum(event.frame_count for event in first.events)
++
++
++def test_natural_profiles_have_explicit_final_iti_behavior():
++    plain = build_plan(
++        NaturalImageSettings(images=("a",), iti_frames=(3,), compatibility_profile="natural_legacy_plain")
++    )
++    camera = build_plan(
++        NaturalImageSettings(images=("a",), iti_frames=(3,), compatibility_profile="natural_legacy_camera")
++    )
++
++    assert [event.kind for event in plain.events].count("iti") == 1
++    assert [event.kind for event in camera.events].count("iti") == 0
++
++
++def test_discover_images_rejects_missing_root(tmp_path):
++    with pytest.raises(FileNotFoundError):
++        discover_images(Path(tmp_path / "missing"))
+-- 
+2.39.3 (Apple Git-146)
+
+
+From c706a747594e96d67c08225b460af968cad16970 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:03:48 -0400
+Subject: [PATCH 04/10] Add reward conditioning pure logic
+
+---
+ .../protocols/reward_conditioning/__init__.py | 217 +++++++++++++++++-
+ tests/unit/test_reward_conditioning.py        |  63 +++++
+ 2 files changed, 278 insertions(+), 2 deletions(-)
+ create mode 100644 tests/unit/test_reward_conditioning.py
+
+diff --git a/src/rpi_vstim/protocols/reward_conditioning/__init__.py b/src/rpi_vstim/protocols/reward_conditioning/__init__.py
+index 67d5e83..0888fb8 100644
+--- a/src/rpi_vstim/protocols/reward_conditioning/__init__.py
++++ b/src/rpi_vstim/protocols/reward_conditioning/__init__.py
+@@ -1,4 +1,217 @@
+-from rpi_vstim.protocols.placeholder import ProtocolPlaceholder
++from __future__ import annotations
+ 
+-protocol = ProtocolPlaceholder("reward-conditioning")
++import random
++from dataclasses import dataclass
++from enum import StrEnum
++from pathlib import Path
++from typing import Iterable
+ 
++from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
++from rpi_vstim.core.session import atomic_write_json
++
++
++class RewardPhase(StrEnum):
++    ACQUISITION = "acquisition"
++    REVERSAL = "reversal"
++
++
++@dataclass(frozen=True)
++class MouseAssignment:
++    mouse_id: str
++    high_exposure: tuple[str, ...]
++    medium_exposure: tuple[str, ...]
++    low_exposure: tuple[str, ...]
++
++    @property
++    def all_images(self) -> tuple[str, ...]:
++        return self.high_exposure + self.medium_exposure + self.low_exposure
++
++    @classmethod
++    def create(cls, mouse_id: str, image_pool: Iterable[str], *, seed: int) -> "MouseAssignment":
++        images = tuple(image_pool)
++        if len(images) < 14:
++            raise ValueError("reward conditioning requires at least 14 images")
++        rng = random.Random(seed)
++        selected = list(images)
++        rng.shuffle(selected)
++        return cls(mouse_id, tuple(selected[:4]), tuple(selected[4:8]), tuple(selected[8:14]))
++
++    def as_dict(self) -> dict[str, object]:
++        return {
++            "mouse_id": self.mouse_id,
++            "high_exposure": list(self.high_exposure),
++            "medium_exposure": list(self.medium_exposure),
++            "low_exposure": list(self.low_exposure),
++        }
++
++    @classmethod
++    def from_dict(cls, value: dict[str, object]) -> "MouseAssignment":
++        assignment = cls(
++            str(value["mouse_id"]),
++            tuple(value["high_exposure"]),
++            tuple(value["medium_exposure"]),
++            tuple(value["low_exposure"]),
++        )
++        if len(assignment.all_images) != 14 or len(set(assignment.all_images)) != 14:
++            raise ValueError("stored mouse assignment must contain 14 unique images")
++        return assignment
++
++
++class AssignmentStore:
++    def __init__(self, root: Path) -> None:
++        self.root = root
++
++    def path_for(self, mouse_id: str) -> Path:
++        if not mouse_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in mouse_id):
++            raise ValueError("mouse_id contains unsupported characters")
++        return self.root / f"{mouse_id}.json"
++
++    def load(self, mouse_id: str) -> MouseAssignment | None:
++        path = self.path_for(mouse_id)
++        if not path.is_file():
++            return None
++        import json
++
++        return MouseAssignment.from_dict(json.loads(path.read_text(encoding="utf-8")))
++
++    def save(self, assignment: MouseAssignment) -> None:
++        atomic_write_json(self.path_for(assignment.mouse_id), assignment.as_dict())
++
++    def load_or_create(self, mouse_id: str, image_pool: Iterable[str], *, seed: int) -> MouseAssignment:
++        existing = self.load(mouse_id)
++        if existing is not None:
++            return existing
++        assignment = MouseAssignment.create(mouse_id, image_pool, seed=seed)
++        self.save(assignment)
++        return assignment
++
++
++@dataclass(frozen=True)
++class RewardTrial:
++    trial_id: str
++    image: str
++    exposure_role: str
++    reward_scheduled: bool
++    lick_count: int = 0
++
++    @property
++    def reward_delivered(self) -> bool:
++        return self.reward_scheduled
++
++    def as_dict(self) -> dict[str, object]:
++        return {
++            "trial_id": self.trial_id,
++            "image": self.image,
++            "exposure_role": self.exposure_role,
++            "reward_scheduled": self.reward_scheduled,
++            "reward_delivered": self.reward_delivered,
++            "lick_count": self.lick_count,
++        }
++
++
++def build_exposure_block(assignment: MouseAssignment, *, seed: int) -> tuple[RewardTrial, ...]:
++    """Build one exact 8:3:1 exposure block without hardware effects."""
++    roles = (
++        [("high", assignment.high_exposure)] * 8
++        + [("medium", assignment.medium_exposure)] * 3
++        + [("low", assignment.low_exposure)]
++    )
++    rng = random.Random(seed)
++    rng.shuffle(roles)
++    return tuple(
++        RewardTrial(str(index + 1), rng.choice(images), role, reward_scheduled=False)
++        for index, (role, images) in enumerate(roles)
++    )
++
++
++def build_reward_outcomes(
++    count: int = 220,
++    *,
++    seed: int = 0,
++    reward_probability: float = 0.9,
++) -> tuple[bool, ...]:
++    if count < 0 or not 0.0 <= reward_probability <= 1.0:
++        raise ValueError("invalid reward schedule settings")
++    rewarded = round(count * reward_probability)
++    outcomes = [True] * rewarded + [False] * (count - rewarded)
++    random.Random(seed).shuffle(outcomes)
++    return tuple(outcomes)
++
++
++@dataclass
++class WaterBudget:
++    maximum_ul: int
++    delivered_ul: int = 0
++
++    def record_delivery(self, volume_ul: int) -> None:
++        if volume_ul < 0 or self.delivered_ul + volume_ul > self.maximum_ul:
++            raise ValueError("water safeguard limit exceeded")
++        self.delivered_ul += volume_ul
++
++
++@dataclass
++class PhaseState:
++    phase: RewardPhase = RewardPhase.ACQUISITION
++
++    def begin_reversal(self, *, manual: bool) -> None:
++        if not manual:
++            raise ValueError("reversal requires an explicit manual selection")
++        self.phase = RewardPhase.REVERSAL
++
++
++@dataclass(frozen=True)
++class RewardConditioningSettings:
++    mouse_id: str
++    image_pool: tuple[str, ...]
++    seed: int = 0
++    blocks: int = 1
++    refresh_hz: float = 60.0
++    trial_frames: int = 90
++    reward_boundary_frames: int = 60
++
++
++def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
++    if settings.blocks < 0:
++        raise ValueError("blocks must be non-negative")
++    assignment = MouseAssignment.create(settings.mouse_id, settings.image_pool, seed=settings.seed)
++    outcomes = build_reward_outcomes(settings.blocks * 12, seed=settings.seed + 1)
++    events: list[PlannedEvent] = []
++    index = 0
++    for block in range(settings.blocks):
++        block_trials = build_exposure_block(assignment, seed=settings.seed + block)
++        for trial in block_trials:
++            scheduled = outcomes[index]
++            index += 1
++            events.append(
++                PlannedEvent(
++                    f"trial-{index}",
++                    "rewarded-image",
++                    settings.trial_frames,
++                    trial_id=str(index),
++                    sequence_id=f"block-{block + 1}",
++                    photodiode="on",
++                    metadata={
++                        "image": trial.image,
++                        "exposure_role": trial.exposure_role,
++                        "reward_scheduled": scheduled,
++                        "reward_boundary_frames": settings.reward_boundary_frames,
++                    },
++                )
++            )
++    return SessionPlan(
++        "reward-conditioning",
++        settings.seed,
++        with_frame_offsets(events),
++        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks},
++    )
++
++
++class RewardConditioningProtocol:
++    name = "reward-conditioning"
++    version = "software-groundwork"
++
++    def build_plan(self, settings: RewardConditioningSettings) -> SessionPlan:
++        return build_plan(settings)
++
++
++protocol = RewardConditioningProtocol()
+diff --git a/tests/unit/test_reward_conditioning.py b/tests/unit/test_reward_conditioning.py
+new file mode 100644
+index 0000000..fa2522f
+--- /dev/null
++++ b/tests/unit/test_reward_conditioning.py
+@@ -0,0 +1,63 @@
++import json
++
++import pytest
++
++from rpi_vstim.protocols.reward_conditioning import (
++    AssignmentStore,
++    MouseAssignment,
++    PhaseState,
++    RewardConditioningSettings,
++    RewardPhase,
++    WaterBudget,
++    build_exposure_block,
++    build_plan,
++    build_reward_outcomes,
++)
++
++
++def image_pool():
++    return tuple(f"image-{index:02d}.png" for index in range(14))
++
++
++def test_assignment_is_permanent_and_uses_temporary_state(tmp_path):
++    store = AssignmentStore(tmp_path)
++    first = store.load_or_create("mouse-1", image_pool(), seed=4)
++    second = store.load_or_create("mouse-1", tuple(reversed(image_pool())), seed=99)
++
++    assert first == second
++    assert json.loads(store.path_for("mouse-1").read_text())["mouse_id"] == "mouse-1"
++
++
++def test_exposure_block_has_exact_8_3_1_counts():
++    block = build_exposure_block(MouseAssignment.create("m", image_pool(), seed=1), seed=2)
++    counts = {role: sum(trial.exposure_role == role for trial in block) for role in ("high", "medium", "low")}
++    assert counts == {"high": 8, "medium": 3, "low": 1}
++
++
++def test_reward_outcomes_are_reproducible_and_match_90_percent_count():
++    outcomes = build_reward_outcomes(seed=8)
++    assert outcomes == build_reward_outcomes(seed=8)
++    assert sum(outcomes) == 198
++    assert len(outcomes) - sum(outcomes) == 22
++
++
++def test_phase_reversal_requires_manual_selection_and_water_is_guarded():
++    phase = PhaseState()
++    with pytest.raises(ValueError):
++        phase.begin_reversal(manual=False)
++    phase.begin_reversal(manual=True)
++    assert phase.phase == RewardPhase.REVERSAL
++
++    budget = WaterBudget(maximum_ul=10)
++    budget.record_delivery(10)
++    with pytest.raises(ValueError):
++        budget.record_delivery(1)
++
++
++def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
++    settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=2)
++    first = build_plan(settings)
++    second = build_plan(settings)
++    assert first.stable_json() == second.stable_json()
++    assert len(first.events) == 24
++    assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)
+-- 
+2.39.3 (Apple Git-146)
+
+
+From fe5d39dcaa3f068fddc0b338ebc5e64d7f28ca03 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:04:43 -0400
+Subject: [PATCH 05/10] Add protocol neutral telemetry contract
+
+---
+ docs/telemetry_protocol.md           |  9 ++++-
+ src/rpi_vstim/telemetry/payloads.py  | 60 ++++++++++++++++++++++++++++
+ src/rpi_vstim/telemetry/publisher.py |  4 +-
+ src/rpi_vstim/telemetry/schema.py    |  3 +-
+ tests/unit/test_telemetry.py         | 41 +++++++++++++++++++
+ 5 files changed, 113 insertions(+), 4 deletions(-)
+ create mode 100644 tests/unit/test_telemetry.py
+
+diff --git a/docs/telemetry_protocol.md b/docs/telemetry_protocol.md
+index 6bd0d16..b1a6395 100644
+--- a/docs/telemetry_protocol.md
++++ b/docs/telemetry_protocol.md
+@@ -1,6 +1,11 @@
+ # Telemetry protocol
+ 
+ The experiment-side boundary reserves outer schema version 1 and telemetry
+-payload schema version 3 for the separate `rpi_rig_monitor` consumer. Phase 00
+-uses a null publisher: it opens no socket and sends no packets.
++payload schema version 3 for the separate `rpi_rig_monitor` consumer. The
++software-groundwork message includes message type, session/protocol identity,
++lifecycle, sequence number, optional trial/stimulus fields, counters, camera
++status, and degraded/error state.
+ 
++Phase 00 and overnight simulation use null or bounded in-memory publishers:
++they open no socket and send no packets. Monitor loss remains non-fatal unless
++configuration explicitly marks telemetry as required.
+diff --git a/src/rpi_vstim/telemetry/payloads.py b/src/rpi_vstim/telemetry/payloads.py
+index 60feddd..9e7ba08 100644
+--- a/src/rpi_vstim/telemetry/payloads.py
++++ b/src/rpi_vstim/telemetry/payloads.py
+@@ -1,6 +1,10 @@
+ from __future__ import annotations
+ 
++import json
+ from dataclasses import dataclass
++from typing import Any
++
++from .schema import PAYLOAD_SCHEMA_VERSION
+ 
+ 
+ @dataclass(frozen=True)
+@@ -10,3 +14,59 @@ class TelemetryPayload:
+     session_id: str
+     sequence_number: int = 0
+ 
++
++@dataclass(frozen=True)
++class TelemetryMessage:
++    """Protocol-neutral, JSON-safe message for the separate monitor consumer."""
++
++    message_type: str
++    session_id: str
++    protocol: str
++    lifecycle: str
++    sequence_number: int = 0
++    trial_id: str | None = None
++    stimulus: str | None = None
++    counters: dict[str, int] | None = None
++    cameras: list[dict[str, Any]] | None = None
++    error: str | None = None
++    degraded: list[str] | None = None
++
++    def as_dict(self) -> dict[str, Any]:
++        value: dict[str, Any] = {
++            "schema_version": PAYLOAD_SCHEMA_VERSION,
++            "message_type": self.message_type,
++            "session_id": self.session_id,
++            "protocol": self.protocol,
++            "lifecycle": self.lifecycle,
++            "sequence_number": self.sequence_number,
++        }
++        for name in ("trial_id", "stimulus", "counters", "cameras", "error", "degraded"):
++            item = getattr(self, name)
++            if item is not None:
++                value[name] = item
++        return value
++
++    def to_json(self) -> str:
++        return json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":"))
++
++    @classmethod
++    def from_json(cls, payload: str) -> "TelemetryMessage":
++        value = json.loads(payload)
++        if value.get("schema_version") != PAYLOAD_SCHEMA_VERSION:
++            raise ValueError("unsupported telemetry schema version")
++        required = ("message_type", "session_id", "protocol", "lifecycle", "sequence_number")
++        if any(name not in value for name in required):
++            raise ValueError("telemetry message is missing required fields")
++        return cls(
++            message_type=value["message_type"],
++            session_id=value["session_id"],
++            protocol=value["protocol"],
++            lifecycle=value["lifecycle"],
++            sequence_number=value["sequence_number"],
++            trial_id=value.get("trial_id"),
++            stimulus=value.get("stimulus"),
++            counters=value.get("counters"),
++            cameras=value.get("cameras"),
++            error=value.get("error"),
++            degraded=value.get("degraded"),
++        )
+diff --git a/src/rpi_vstim/telemetry/publisher.py b/src/rpi_vstim/telemetry/publisher.py
+index 17b3d49..d43555a 100644
+--- a/src/rpi_vstim/telemetry/publisher.py
++++ b/src/rpi_vstim/telemetry/publisher.py
+@@ -33,7 +33,9 @@ class InMemoryTelemetryPublisher(TelemetryPublisher):
+             return False
+         if len(self.messages) == self.messages.maxlen:
+             self.dropped_count += 1
+-        if is_dataclass(payload):
++        if hasattr(payload, "as_dict"):
++            payload = payload.as_dict()
++        elif is_dataclass(payload):
+             payload = asdict(payload)
+         elif not isinstance(payload, dict):
+             payload = {"payload": payload}
+diff --git a/src/rpi_vstim/telemetry/schema.py b/src/rpi_vstim/telemetry/schema.py
+index f24ddd1..3b82dcd 100644
+--- a/src/rpi_vstim/telemetry/schema.py
++++ b/src/rpi_vstim/telemetry/schema.py
+@@ -1,3 +1,4 @@
+ SCHEMA_VERSION = 1
+ TELEMETRY_SCHEMA_VERSION = 3
+-
++OUTER_SCHEMA_VERSION = SCHEMA_VERSION
++PAYLOAD_SCHEMA_VERSION = TELEMETRY_SCHEMA_VERSION
+diff --git a/tests/unit/test_telemetry.py b/tests/unit/test_telemetry.py
+new file mode 100644
+index 0000000..c7695ce
+--- /dev/null
++++ b/tests/unit/test_telemetry.py
+@@ -0,0 +1,41 @@
++import json
++
++import pytest
++
++from rpi_vstim.telemetry.payloads import TelemetryMessage
++from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher, TelemetryPublisher
++
++
++def test_telemetry_message_round_trips_with_optional_fields():
++    message = TelemetryMessage(
++        "trial",
++        "session-1",
++        "natural-images",
++        "TASK",
++        sequence_number=4,
++        trial_id="7",
++        stimulus="image-7",
++        counters={"licks": 2, "rewards": 1},
++        cameras=[{"camera_id": "face", "state": "RECORDING"}],
++        degraded=["telemetry"],
++    )
++
++    restored = TelemetryMessage.from_json(message.to_json())
++    assert restored == message
++    assert json.loads(message.to_json())["schema_version"] == 3
++
++
++def test_telemetry_message_rejects_wrong_version_or_missing_fields():
++    with pytest.raises(ValueError, match="version"):
++        TelemetryMessage.from_json('{"schema_version": 2}')
++    with pytest.raises(ValueError, match="required"):
++        TelemetryMessage.from_json('{"schema_version": 3}')
++
++
++def test_in_memory_publisher_is_bounded_and_null_publisher_has_no_socket():
++    publisher = InMemoryTelemetryPublisher(max_messages=2)
++    for index in range(3):
++        assert publisher.publish({"sequence_number": index})
++    assert len(publisher.messages) == 2
++    assert publisher.dropped_count == 1
++    assert not TelemetryPublisher().publish({"ignored": True})
+-- 
+2.39.3 (Apple Git-146)
+
+
+From 7baec0f895e633fbdf8c7461329e8a58203c45b4 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:08:07 -0400
+Subject: [PATCH 06/10] Model fake local camera supervision
+
+---
+ src/rpi_vstim/core/camera.py |  4 ++++
+ tests/unit/test_camera.py    | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+)
+ create mode 100644 tests/unit/test_camera.py
+
+diff --git a/src/rpi_vstim/core/camera.py b/src/rpi_vstim/core/camera.py
+index 8ea2aa2..a8dba8d 100644
+--- a/src/rpi_vstim/core/camera.py
++++ b/src/rpi_vstim/core/camera.py
+@@ -27,6 +27,8 @@ class FakeCameraStatus:
+     role: str
+     stable_device_identifier: str
+     required: bool
++    requested_start: bool = False
++    requested_stop: bool = False
+     state: CameraState = CameraState.CONFIGURED
+     output_path: str = ""
+     bytes_written: int = 0
+@@ -57,6 +59,7 @@ class FakeLocalCameraService:
+     def start(self, session_root: Path) -> None:
+         self.session_root = session_root
+         for status in self.statuses.values():
++            status.requested_start = True
+             status.output_path = f"camera/{status.camera_id}/capture.fake.json"
+             if status.camera_id in self.fail_ids:
+                 status.state = CameraState.FAILED if status.required else CameraState.DEGRADED
+@@ -71,6 +74,7 @@ class FakeLocalCameraService:
+ 
+     def stop(self) -> None:
+         for status in self.statuses.values():
++            status.requested_stop = True
+             if status.state == CameraState.RECORDING:
+                 status.state = CameraState.COMPLETED
+         self._write_manifest()
+diff --git a/tests/unit/test_camera.py b/tests/unit/test_camera.py
+new file mode 100644
+index 0000000..16b8044
+--- /dev/null
++++ b/tests/unit/test_camera.py
+@@ -0,0 +1,28 @@
++import json
++
++from rpi_vstim.core.camera import CameraState, FakeLocalCameraService
++from rpi_vstim.core.config import config_from_mapping
++
++
++def test_fake_cameras_have_independent_bounded_metadata_state(tmp_path):
++    config = config_from_mapping(
++        {
++            "cameras": {
++                "devices": [
++                    {"id": "face", "role": "face", "required": True, "device": "face-id"},
++                    {"id": "behavior", "role": "behavior", "device": "behavior-id"},
++                ]
++            }
++        }
++    )
++    service = FakeLocalCameraService(config.cameras, fail_ids={"behavior"})
++    service.start(tmp_path)
++    service.stop()
++
++    manifest = json.loads((tmp_path / "camera_manifest.json").read_text())
++    by_id = {camera["camera_id"]: camera for camera in manifest["cameras"]}
++    assert by_id["face"]["state"] == CameraState.COMPLETED
++    assert by_id["behavior"]["state"] == CameraState.DEGRADED
++    assert by_id["face"]["requested_start"] is True
++    assert by_id["face"]["requested_stop"] is True
++    assert "/dev/video" not in json.dumps(manifest)
+-- 
+2.39.3 (Apple Git-146)
+
+
+From bae2f4b2f7551a838aba0982daab12dac7788b17 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:10:30 -0400
+Subject: [PATCH 07/10] Align protocol planners with frozen behavior
+
+---
+ .../protocols/natural_images/__init__.py      | 56 +++++++++++--
+ .../protocols/reward_conditioning/__init__.py | 78 +++++++++++++++----
+ tests/unit/test_reward_conditioning.py        |  9 ++-
+ 3 files changed, 118 insertions(+), 25 deletions(-)
+
+diff --git a/src/rpi_vstim/protocols/natural_images/__init__.py b/src/rpi_vstim/protocols/natural_images/__init__.py
+index 4812aab..8f8d4e2 100644
+--- a/src/rpi_vstim/protocols/natural_images/__init__.py
++++ b/src/rpi_vstim/protocols/natural_images/__init__.py
+@@ -2,6 +2,8 @@ from __future__ import annotations
+ 
+ from dataclasses import dataclass
+ from pathlib import Path
++from collections import Counter
++import random
+ from typing import Iterable
+ 
+ from rpi_vstim.core.duration import seconds_to_frames
+@@ -25,11 +27,14 @@ class NaturalImageSettings:
+     images: tuple[str, ...]
+     seed: int = 0
+     trial_count: int | None = None
++    image_count: int | None = None
++    repeat_count: int = 1
++    selection_seed: int = 777
+     refresh_hz: float = 60.0
+     image_duration_s: float = 0.5
+-    iti_frames: tuple[int, ...] = (30, 60)
+-    initial_gray_frames: int = 60
+-    final_gray_frames: int = 60
++    iti_frames: tuple[int, ...] = (42, 60)
++    initial_gray_frames: int = 180
++    final_gray_frames: int = 180
+     compatibility_profile: str = "natural_legacy_plain"
+     camera_ids: tuple[str, ...] = ()
+ 
+@@ -47,7 +52,36 @@ def discover_images(root: Path) -> tuple[str, ...]:
+ 
+ def select_images(images: Iterable[str], *, count: int | None, seed: int) -> tuple[str, ...]:
+     values = tuple(images)
+-    return no_adjacent_repeat(values, len(values) if count is None else count, seed=seed)
++    if count is None:
++        return values
++    if count > len(values):
++        raise ValueError("image selection count exceeds available images")
++    return tuple(sorted(random.Random(seed).sample(values, count)))
++
++
++def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> tuple[str, ...]:
++    values = tuple(images)
++    if repeats < 1:
++        raise ValueError("repeat_count must be at least 1")
++    counts = Counter(value for value in values for _ in range(repeats))
++    if not counts:
++        return ()
++    if max(counts.values()) > (sum(counts.values()) + 1) // 2:
++        raise ValueError("cannot avoid adjacent repeated images")
++    rng = random.Random(seed)
++    result: list[str] = []
++    previous = None
++    while counts:
++        candidates = [value for value in counts if value != previous]
++        rng.shuffle(candidates)
++        candidates.sort(key=lambda value: counts[value], reverse=True)
++        value = candidates[0]
++        counts[value] -= 1
++        if not counts[value]:
++            del counts[value]
++        result.append(value)
++        previous = value
++    return tuple(result)
+ 
+ 
+ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
+@@ -55,7 +89,19 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
+         raise ValueError(
+             f"unsupported natural-image compatibility profile: {settings.compatibility_profile}"
+         )
+-    selected = select_images(settings.images, count=settings.trial_count, seed=settings.seed)
++    if settings.trial_count is not None:
++        selected = no_adjacent_repeat(settings.images, settings.trial_count, seed=settings.seed)
++    else:
++        selected_images = select_images(
++            settings.images,
++            count=settings.image_count,
++            seed=settings.selection_seed,
++        )
++        selected = _shuffle_repetitions(
++            selected_images,
++            settings.repeat_count,
++            seed=settings.seed,
++        )
+     image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
+     itis = seeded_choices(settings.iti_frames, len(selected), seed=settings.seed + 1)
+     events: list[PlannedEvent] = [
+diff --git a/src/rpi_vstim/protocols/reward_conditioning/__init__.py b/src/rpi_vstim/protocols/reward_conditioning/__init__.py
+index 0888fb8..18cc9fd 100644
+--- a/src/rpi_vstim/protocols/reward_conditioning/__init__.py
++++ b/src/rpi_vstim/protocols/reward_conditioning/__init__.py
+@@ -26,6 +26,18 @@ class MouseAssignment:
+     def all_images(self) -> tuple[str, ...]:
+         return self.high_exposure + self.medium_exposure + self.low_exposure
+ 
++    def reward_images(self, phase: RewardPhase) -> frozenset[str]:
++        if phase == RewardPhase.ACQUISITION:
++            indexes = (0, 1)
++        elif phase == RewardPhase.REVERSAL:
++            indexes = (0, 2)
++        else:
++            raise ValueError(f"unsupported reward phase: {phase}")
++        return frozenset(
++            [self.high_exposure[index] for index in indexes]
++            + [self.medium_exposure[index] for index in indexes]
++        )
++
+     @classmethod
+     def create(cls, mouse_id: str, image_pool: Iterable[str], *, seed: int) -> "MouseAssignment":
+         images = tuple(image_pool)
+@@ -92,6 +104,8 @@ class RewardTrial:
+     image: str
+     exposure_role: str
+     reward_scheduled: bool
++    reward_eligible: bool = False
++    suction_scheduled: bool = False
+     lick_count: int = 0
+ 
+     @property
+@@ -104,23 +118,43 @@ class RewardTrial:
+             "image": self.image,
+             "exposure_role": self.exposure_role,
+             "reward_scheduled": self.reward_scheduled,
++            "reward_eligible": self.reward_eligible,
++            "suction_scheduled": self.suction_scheduled,
+             "reward_delivered": self.reward_delivered,
+             "lick_count": self.lick_count,
+         }
+ 
+ 
+-def build_exposure_block(assignment: MouseAssignment, *, seed: int) -> tuple[RewardTrial, ...]:
+-    """Build one exact 8:3:1 exposure block without hardware effects."""
+-    roles = (
+-        [("high", assignment.high_exposure)] * 8
+-        + [("medium", assignment.medium_exposure)] * 3
+-        + [("low", assignment.low_exposure)]
++def build_exposure_block(
++    assignment: MouseAssignment,
++    *,
++    seed: int,
++    phase: RewardPhase = RewardPhase.ACQUISITION,
++) -> tuple[RewardTrial, ...]:
++    """Build one frozen 50-trial block: 8:3:1 per image exposure tier."""
++    rows = (
++        [("high", image) for image in assignment.high_exposure for _ in range(8)]
++        + [("medium", image) for image in assignment.medium_exposure for _ in range(3)]
++        + [("low", image) for image in assignment.low_exposure]
+     )
+     rng = random.Random(seed)
+-    rng.shuffle(roles)
++    reward_images = assignment.reward_images(phase)
++    for _ in range(1000):
++        rng.shuffle(rows)
++        if all(left[1] != right[1] for left, right in zip(rows, rows[1:])):
++            break
++    else:
++        raise RuntimeError("could not construct a non-repeating exposure block")
+     return tuple(
+-        RewardTrial(str(index + 1), rng.choice(images), role, reward_scheduled=False)
+-        for index, (role, images) in enumerate(roles)
++        RewardTrial(
++            str(index + 1),
++            image,
++            role,
++            reward_scheduled=False,
++            reward_eligible=image in reward_images,
++            suction_scheduled=image in reward_images,
++        )
++        for index, (role, image) in enumerate(rows)
+     )
+ 
+ 
+@@ -164,24 +198,32 @@ class RewardConditioningSettings:
+     mouse_id: str
+     image_pool: tuple[str, ...]
+     seed: int = 0
+-    blocks: int = 1
++    blocks: int = 10
+     refresh_hz: float = 60.0
+     trial_frames: int = 90
+     reward_boundary_frames: int = 60
++    phase: RewardPhase = RewardPhase.ACQUISITION
+ 
+ 
+ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
+-    if settings.blocks < 0:
+-        raise ValueError("blocks must be non-negative")
++    if settings.blocks < 1 or settings.blocks % 10:
++        raise ValueError("blocks must be a positive multiple of 10")
+     assignment = MouseAssignment.create(settings.mouse_id, settings.image_pool, seed=settings.seed)
+-    outcomes = build_reward_outcomes(settings.blocks * 12, seed=settings.seed + 1)
++    blocks = [
++        build_exposure_block(assignment, seed=settings.seed + block, phase=settings.phase)
++        for block in range(settings.blocks)
++    ]
++    eligible_count = sum(trial.reward_eligible for block in blocks for trial in block)
++    outcomes = iter(build_reward_outcomes(eligible_count, seed=settings.seed + 1))
+     events: list[PlannedEvent] = []
+     index = 0
+-    for block in range(settings.blocks):
+-        block_trials = build_exposure_block(assignment, seed=settings.seed + block)
++    for block, block_trials in enumerate(blocks):
+         for trial in block_trials:
+-            scheduled = outcomes[index]
+             index += 1
++            if trial.reward_eligible:
++                scheduled = next(outcomes)
++            else:
++                scheduled = False
+             events.append(
+                 PlannedEvent(
+                     f"trial-{index}",
+@@ -193,7 +235,9 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
+                     metadata={
+                         "image": trial.image,
+                         "exposure_role": trial.exposure_role,
++                        "reward_eligible": trial.reward_eligible,
+                         "reward_scheduled": scheduled,
++                        "suction_scheduled": trial.suction_scheduled,
+                         "reward_boundary_frames": settings.reward_boundary_frames,
+                     },
+                 )
+@@ -202,7 +246,7 @@ def build_plan(settings: RewardConditioningSettings) -> SessionPlan:
+         "reward-conditioning",
+         settings.seed,
+         with_frame_offsets(events),
+-        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks},
++        metadata={"mouse_id": settings.mouse_id, "blocks": settings.blocks, "phase": settings.phase.value},
+     )
+ 
+ 
+diff --git a/tests/unit/test_reward_conditioning.py b/tests/unit/test_reward_conditioning.py
+index fa2522f..c56959c 100644
+--- a/tests/unit/test_reward_conditioning.py
++++ b/tests/unit/test_reward_conditioning.py
+@@ -31,7 +31,8 @@ def test_assignment_is_permanent_and_uses_temporary_state(tmp_path):
+ def test_exposure_block_has_exact_8_3_1_counts():
+     block = build_exposure_block(MouseAssignment.create("m", image_pool(), seed=1), seed=2)
+     counts = {role: sum(trial.exposure_role == role for trial in block) for role in ("high", "medium", "low")}
+-    assert counts == {"high": 8, "medium": 3, "low": 1}
++    assert counts == {"high": 32, "medium": 12, "low": 6}
++    assert all(left.image != right.image for left, right in zip(block, block[1:]))
+ 
+ 
+ def test_reward_outcomes_are_reproducible_and_match_90_percent_count():
+@@ -55,9 +56,11 @@ def test_phase_reversal_requires_manual_selection_and_water_is_guarded():
+ 
+ 
+ def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
+-    settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=2)
++    settings = RewardConditioningSettings("mouse-1", image_pool(), seed=2, blocks=10)
+     first = build_plan(settings)
+     second = build_plan(settings)
+     assert first.stable_json() == second.stable_json()
+-    assert len(first.events) == 24
++    assert len(first.events) == 500
++    assert sum(event.metadata["reward_scheduled"] for event in first.events) == 198
++    assert sum(event.metadata["reward_eligible"] for event in first.events) == 220
+     assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)
+-- 
+2.39.3 (Apple Git-146)
+
+
+From 2f62895ab04495dd2e12f9b39180eb7be42cbe18 Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:14:20 -0400
+Subject: [PATCH 08/10] Add simulated protocol acceptance groundwork
+
+---
+ IMPLEMENTATION_STATUS.md                      |  23 +++-
+ README.md                                     |  11 +-
+ config/protocols/natural_images.example.toml  |   6 +-
+ .../reward_conditioning.example.toml          |   4 +-
+ config/system.example.toml                    |   2 +-
+ docs/architecture.md                          |  11 +-
+ docs/camera_workflow.md                       |  10 +-
+ docs/data_format.md                           |  18 +--
+ docs/reward_timing.md                         |  10 +-
+ src/rpi_vstim/cli.py                          |  21 +++-
+ src/rpi_vstim/core/camera.py                  |   2 +-
+ src/rpi_vstim/core/runtime.py                 |  96 ++++++++++++++--
+ src/rpi_vstim/protocols/__init__.py           |   4 +-
+ .../integration/test_simulated_acceptance.py  | 103 ++++++++++++++++++
+ 14 files changed, 274 insertions(+), 47 deletions(-)
+ create mode 100644 tests/integration/test_simulated_acceptance.py
+
+diff --git a/IMPLEMENTATION_STATUS.md b/IMPLEMENTATION_STATUS.md
+index 5298a34..82e6fb6 100644
+--- a/IMPLEMENTATION_STATUS.md
++++ b/IMPLEMENTATION_STATUS.md
+@@ -12,6 +12,7 @@
+ - [x] Add read-only Pi 5 audit report.
+ - [x] Apply Phase 00 validation/reproducibility review fixes.
+ - [x] Define two local camera identities in the Phase 00 schema.
++- [x] Merge Phase 00 into the overnight branch without starting Phase 01.
+ - [ ] Authenticate a future deployment workflow with a stored, approved SSH key.
+ 
+ ### Target inventory findings
+@@ -23,8 +24,22 @@ files were accessed and no target files or services were changed.
+ 
+ ## Explicitly deferred
+ 
+-No experiment execution, real GPIO, DRM/KMS, camera acquisition, UDP send,
+-asset conversion, reward logic, protocol scheduling, or Pi modification is
+-implemented in Phase 00. The expanded audit script has not been rerun because
+-the Pi is not reachable from this Mac; that is deferred hardware validation.
++## Overnight software groundwork
++
++- [x] Simulated lifecycle orchestration with manifests, events, failure paths,
++  deterministic seeds, and safe cleanup.
++- [x] Deterministic frame plans with phase, trial/sequence IDs, photodiode
++  intent, and stable serialization.
++- [x] Natural-image selection and scheduling with explicit plain/camera
++  compatibility profiles.
++- [x] Reward-conditioning assignment, acquisition/reversal state, 8:3:1
++  blocks, exact production 198/22 reward outcomes, and water safeguards.
++- [x] Protocol-neutral bounded telemetry contract.
++- [x] Independent metadata-only fake local camera state for two cameras.
++- [x] End-to-end simulated acceptance tests.
++
++Real experiment execution, GPIO, DRM/KMS, camera acquisition, UDP send, asset
++conversion, reward actuation, and Pi modification remain deferred. The
++expanded audit script has not been rerun because the Pi is not reachable from
++this Mac; that is deferred hardware validation.
+ Phase 01 has not started.
+diff --git a/README.md b/README.md
+index de6e43f..68cdd5c 100644
+--- a/README.md
++++ b/README.md
+@@ -2,10 +2,11 @@
+ 
+ Phase 00 bootstrap for a Raspberry Pi 5 visual-stimulus suite.
+ 
+-The package is a hardware-safe Phase 00 skeleton: configuration, CLI wiring,
+-fake display, simulated GPIO, session metadata, and protocol placeholders are
+-present, while display, camera capture, GPIO, telemetry, and experiment
+-execution remain deferred.
++The package is a hardware-safe Phase 00 and overnight software-groundwork
++implementation. It provides deterministic natural-image and reward-planning
++logic, a fake display, simulated hardware, bounded telemetry, session
++manifests, and metadata-only dual-local-camera supervision. Real display,
++camera capture, GPIO, network telemetry, and reward actuation remain deferred.
+ 
+ The production architecture is one Raspberry Pi 5 for stimulus presentation,
+ GPIO/lick/reward control, logging, telemetry, and two independently configured
+@@ -16,6 +17,8 @@ python -m pip install -e '.[dev]'
+ rpi-vstim --help
+ rpi-vstim list-protocols
+ rpi-vstim config validate config/system.example.toml
++rpi-vstim run natural-images --simulate --output-root /tmp/rpi-vstim-sim
++rpi-vstim run reward-conditioning --simulate --output-root /tmp/rpi-vstim-sim
+ ```
+ 
+ The old repositories and `rpi_rig_monitor` remain separate reference
+diff --git a/config/protocols/natural_images.example.toml b/config/protocols/natural_images.example.toml
+index 938d187..2f9d866 100644
+--- a/config/protocols/natural_images.example.toml
++++ b/config/protocols/natural_images.example.toml
+@@ -1,5 +1,7 @@
+ [protocol]
+ name = "natural-images"
+-version = "placeholder"
++version = "software-groundwork"
+ compatibility_profile = "natural_legacy_plain"
+-
++image_count = 5
++repeat_count = 2
++selection_seed = 777
+diff --git a/config/protocols/reward_conditioning.example.toml b/config/protocols/reward_conditioning.example.toml
+index cc84287..061b48b 100644
+--- a/config/protocols/reward_conditioning.example.toml
++++ b/config/protocols/reward_conditioning.example.toml
+@@ -1,5 +1,5 @@
+ [protocol]
+ name = "reward-conditioning"
+-version = "placeholder"
++version = "software-groundwork"
+ mode = "simulation-only"
+-
++blocks = 10
+diff --git a/config/system.example.toml b/config/system.example.toml
+index 597c374..9b9cc9a 100644
+--- a/config/system.example.toml
++++ b/config/system.example.toml
+@@ -62,4 +62,4 @@ simulation = true
+ 
+ [protocol]
+ name = "natural-images"
+-version = "placeholder"
++version = "software-groundwork"
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 3efe70a..f686122 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,14 +1,17 @@
+ # Architecture
+ 
+-The package is split into core session services, protocol placeholders,
++The package is split into core session services, software-groundwork protocol
++planners,
+ display, hardware, local camera, and telemetry boundaries. The production
+ experiment runtime is one Raspberry Pi 5 owning stimulus presentation,
+ GPIO/lick/reward control, session logging, telemetry, and two local cameras.
+ `rpi_rig_monitor` remains a separate monitor Pi and repository.
+ 
+-Phase 00 uses only the fake display, simulated hardware, and null telemetry
+-publisher on a desktop. Its schema represents cameras as independent local
+-devices with stable identities; it does not capture frames or open devices.
++Phase 00 and overnight simulation use only the fake display, simulated
++hardware, and null or bounded in-memory telemetry publisher on a desktop. The
++schema represents cameras as independent local devices with stable identities;
++the fake service records start/stop intent and state but never captures frames
++or opens devices.
+ 
+ Future timing-sensitive work must keep display and GPIO workers separate from
+ disk, terminal, camera, and network operations. Each camera will eventually
+diff --git a/docs/camera_workflow.md b/docs/camera_workflow.md
+index 734b7f5..e6f478e 100644
+--- a/docs/camera_workflow.md
++++ b/docs/camera_workflow.md
+@@ -5,7 +5,9 @@ that presents stimuli and controls behavior hardware. Each camera is selected
+ by a logical ID/role and stable device identity; `/dev/videoN` numbering alone
+ is not a production identity.
+ 
+-Phase 00 provides only the import-safe boundary and configuration schema. No
+-SSH camera control, cross-Pi transfer, recording, conversion, or device access
+-occurs. Future capture uses one independently supervised worker per camera,
+-bounded buffering, direct-to-session storage, and post-session verification.
++Phase 00 provides the configuration schema. Overnight groundwork adds a
++metadata-only fake service that exercises independent per-camera start/stop,
++required/optional failure, degraded state, and session manifests. No SSH camera
++control, cross-Pi transfer, recording, conversion, or device access occurs.
++Future capture uses one independently supervised worker per camera, bounded
++buffering, direct-to-session storage, and post-session verification.
+diff --git a/docs/data_format.md b/docs/data_format.md
+index 1b714a9..99922bc 100644
+--- a/docs/data_format.md
++++ b/docs/data_format.md
+@@ -1,10 +1,14 @@
+ # Session data format
+ 
+-Phase 00 writes `session_manifest.json`, `resolved_config.json`, and
+-`provenance.json` when a session output is explicitly created. The manifest
+-includes the protocol seed and source commit used for reproducibility.
++Phase 00 and simulation write `session_manifest.json`,
++`resolved_config.json`, `provenance.json`, `events.csv`, and `plan.json` when a
++session output is created. The manifest includes the protocol seed and source
++commit used for reproducibility. Sessions with configured fake cameras also
++write a bounded `camera_manifest.json`.
+ 
+-Protocol event, plan, reward, lick, camera, and QC files are reserved for later
+-phases. Camera outputs will be local per-camera session artifacts; they must
+-not depend on a second camera Pi or SSH transfer and must retain the legacy
+-names documented in the implementation plan where compatibility requires it.
++Simulation plans include stable event IDs, frame offsets, phase, trial and
++sequence IDs, photodiode intent, and protocol metadata. Hardware event, lick,
++camera media, and QC files remain reserved for later phases. Camera outputs
++will be local per-camera session artifacts; they must not depend on a second
++camera Pi or SSH transfer and must retain the legacy names documented in the
++implementation plan where compatibility requires it.
+diff --git a/docs/reward_timing.md b/docs/reward_timing.md
+index 69a84e1..ac3a1a4 100644
+--- a/docs/reward_timing.md
++++ b/docs/reward_timing.md
+@@ -1,6 +1,8 @@
+ # Reward timing
+ 
+-No reward scheduling exists in Phase 00. The legacy Box151 calibration is
+-stored as reference-only metadata; it is not a Pi 5 default and must not be
+-used for experimental runs.
+-
++Overnight groundwork contains hardware-free reward planning only: permanent
++14-image assignment groups, explicit acquisition/reversal state, 50-trial
++8:3:1 blocks, and the frozen 10-block production schedule of 220 eligible
++cues, 198 scheduled rewards, and 22 scheduled omissions. It does not actuate
++water, suction, or lick hardware. The legacy Box151 calibration is reference
++only and is not a Pi 5 default.
+diff --git a/src/rpi_vstim/cli.py b/src/rpi_vstim/cli.py
+index 11011c0..8b7ce7f 100644
+--- a/src/rpi_vstim/cli.py
++++ b/src/rpi_vstim/cli.py
+@@ -5,8 +5,8 @@ from __future__ import annotations
+ import argparse
+ import json
+ import sys
+-from pathlib import Path
+ from dataclasses import replace
++from pathlib import Path
+ 
+ from . import __version__
+ from .core.config import ConfigError, load_config
+@@ -84,6 +84,25 @@ def main(argv: list[str] | None = None) -> int:
+         if args.simulate:
+             try:
+                 config = load_config(args.config)
++                if args.cameras or args.camera:
++                    if args.cameras in (None, "all"):
++                        selected_ids = {device.id for device in config.cameras.devices}
++                    else:
++                        selected_ids = {item.strip() for item in args.cameras.split(",") if item.strip()}
++                    unknown_ids = selected_ids - {device.id for device in config.cameras.devices}
++                    if unknown_ids:
++                        raise ConfigError(f"unknown camera ID(s): {', '.join(sorted(unknown_ids))}")
++                    config = replace(
++                        config,
++                        cameras=replace(
++                            config.cameras,
++                            devices=tuple(
++                                device for device in config.cameras.devices if device.id in selected_ids
++                            ),
++                        ),
++                    )
++                else:
++                    config = replace(config, cameras=replace(config.cameras, devices=()))
+                 if args.output_root is not None:
+                     config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+                 result = run_simulated_session(
+diff --git a/src/rpi_vstim/core/camera.py b/src/rpi_vstim/core/camera.py
+index a8dba8d..5aa1bc4 100644
+--- a/src/rpi_vstim/core/camera.py
++++ b/src/rpi_vstim/core/camera.py
+@@ -83,7 +83,7 @@ class FakeLocalCameraService:
+         return [asdict(status) | {"state": status.state.value} for status in self.statuses.values()]
+ 
+     def _write_manifest(self) -> None:
+-        if self.session_root is None:
++        if self.session_root is None or not self.statuses:
+             return
+         from .session import atomic_write_json
+ 
+diff --git a/src/rpi_vstim/core/runtime.py b/src/rpi_vstim/core/runtime.py
+index dd96efb..9fec3a1 100644
+--- a/src/rpi_vstim/core/runtime.py
++++ b/src/rpi_vstim/core/runtime.py
+@@ -10,6 +10,13 @@ from rpi_vstim.core.lifecycle import Lifecycle, LifecycleState, RuntimeServices
+ from rpi_vstim.core.session import SessionOutput, new_session
+ from rpi_vstim.display.fake import FakeDisplayBackend
+ from rpi_vstim.hardware.worker import SimulatedHardwareWorker
++from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan as build_natural_plan
++from rpi_vstim.protocols.reward_conditioning import (
++    RewardConditioningSettings,
++    RewardPhase,
++    build_plan as build_reward_plan,
++)
++from rpi_vstim.telemetry.payloads import TelemetryMessage
+ from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher
+ 
+ 
+@@ -48,6 +55,43 @@ def build_simulated_services(
+     )
+ 
+ 
++def build_simulation_plan(config: Config, *, protocol_name: str | None, seed: int):
++    """Build a bounded virtual plan without requiring assets or hardware."""
++    name = protocol_name or config.protocol.name
++    parameters = config.protocol.parameters
++    if name == "natural-images":
++        images = tuple(parameters.get("images", (f"natural_image_{index:04d}.png" for index in range(14))))
++        settings = NaturalImageSettings(
++            images=images,
++            seed=seed,
++            trial_count=parameters.get("trial_count"),
++            image_count=parameters.get("image_count", 5),
++            repeat_count=parameters.get("repeat_count", 2),
++            selection_seed=parameters.get("selection_seed", 777),
++            refresh_hz=config.display.refresh_hz,
++            image_duration_s=parameters.get("image_duration_s", 0.5),
++            iti_frames=tuple(parameters.get("iti_frames", (42, 60))),
++            initial_gray_frames=parameters.get("initial_gray_frames", 180),
++            final_gray_frames=parameters.get("final_gray_frames", 180),
++            compatibility_profile=parameters.get("compatibility_profile", "natural_legacy_plain"),
++            camera_ids=tuple(device.id for device in config.cameras.devices),
++        )
++        return build_natural_plan(settings)
++    if name == "reward-conditioning":
++        images = tuple(parameters.get("images", (f"reward_image_{index:02d}.png" for index in range(14))))
++        settings = RewardConditioningSettings(
++            mouse_id=str(parameters.get("mouse_id", "simulation-mouse")),
++            image_pool=images,
++            seed=seed,
++            blocks=int(parameters.get("blocks", 10)),
++            trial_frames=int(parameters.get("trial_frames", 90)),
++            reward_boundary_frames=int(parameters.get("reward_boundary_frames", 60)),
++            phase=RewardPhase(parameters.get("phase", "acquisition")),
++        )
++        return build_reward_plan(settings)
++    raise ValueError(f"simulation is not implemented for protocol: {name}")
++
++
+ def run_simulated_session(
+     config: Config,
+     *,
+@@ -69,8 +113,8 @@ def run_simulated_session(
+     config = replace(config, session=simulation_session, display=simulation_display)
+     session = new_session(config, protocol_name=protocol_name, session_id=session_id, seed=seed)
+     session.write_initial_outputs()
+-    if plan is not None:
+-        session.write_plan(plan)
++    plan = plan or build_simulation_plan(config, protocol_name=protocol_name, seed=seed)
++    session.write_plan(plan)
+     services = build_simulated_services(
+         config,
+         camera_failures=camera_failures,
+@@ -79,14 +123,22 @@ def run_simulated_session(
+     lifecycle = services.lifecycle
+     degraded: list[str] = []
+     error: str | None = None
++    sequence_number = 0
+ 
+     def transition(state: LifecycleState) -> None:
++        nonlocal sequence_number
+         lifecycle.transition(state)
+         session.update_status(state.value, lifecycle=state.value, degraded=degraded)
+         session.record_event(state.value, lifecycle=state.value)
+-        if not services.telemetry.publish(
+-            {"event": "lifecycle", "state": state.value, "session_id": session.context.session_id}
+-        ):
++        sequence_number += 1
++        if not services.telemetry.publish(TelemetryMessage(
++            message_type="lifecycle",
++            session_id=session.context.session_id,
++            protocol=session.context.protocol_name,
++            lifecycle=state.value,
++            sequence_number=sequence_number,
++            degraded=list(degraded),
++        )):
+             if config.telemetry.required:
+                 raise TelemetryRequiredError("required telemetry publisher failed")
+             if "telemetry" not in degraded:
+@@ -105,16 +157,38 @@ def run_simulated_session(
+             degraded.append("camera")
+         transition(LifecycleState.PREPARING)
+         transition(LifecycleState.PRE)
+-        services.display.present_color((0, 0, 0), frames=1)
+         if interrupt:
+             raise SimulationInterrupted("simulated interruption")
+         if protocol_failure:
+             raise RuntimeError("simulated protocol failure")
+-        transition(LifecycleState.TASK)
+-        services.display.present_color((128, 128, 128), frames=1)
+-        session.record_event("TASK_PRESENTED", lifecycle=LifecycleState.TASK.value, sequence_id="simulation-0")
+-        transition(LifecycleState.POST)
+-        services.display.present_color((0, 0, 0), frames=1)
++        for event in plan.events:
++            target_lifecycle = {
++                "PRE": LifecycleState.PRE,
++                "TASK": LifecycleState.TASK,
++                "POST": LifecycleState.POST,
++            }.get(event.phase, LifecycleState.TASK)
++            if lifecycle.state != target_lifecycle:
++                transition(target_lifecycle)
++            color = (255, 255, 255) if event.photodiode == "on" else (127, 127, 127)
++            services.display.present_color(color, frames=max(1, event.frame_count))
++            session.record_event(
++                "PLAN_EVENT",
++                lifecycle=target_lifecycle.value,
++                sequence_id=event.sequence_id or event.event_id,
++                detail=event.kind,
++            )
++            sequence_number += 1
++            services.telemetry.publish(TelemetryMessage(
++                message_type="trial" if event.trial_id else "state",
++                session_id=session.context.session_id,
++                protocol=session.context.protocol_name,
++                lifecycle=target_lifecycle.value,
++                sequence_number=sequence_number,
++                trial_id=event.trial_id,
++                stimulus=event.metadata.get("image"),
++                cameras=services.cameras.manifest(),
++                degraded=list(degraded),
++            ))
+         transition(LifecycleState.FINALIZING)
+         transition(LifecycleState.COMPLETE)
+     except SimulationInterrupted as exc:
+diff --git a/src/rpi_vstim/protocols/__init__.py b/src/rpi_vstim/protocols/__init__.py
+index 170d7b1..d94b7db 100644
+--- a/src/rpi_vstim/protocols/__init__.py
++++ b/src/rpi_vstim/protocols/__init__.py
+@@ -12,8 +12,8 @@ class ProtocolInfo:
+ 
+ 
+ _PROTOCOLS = (
+-    ProtocolInfo("natural-images", "rpi_vstim.protocols.natural_images"),
+-    ProtocolInfo("reward-conditioning", "rpi_vstim.protocols.reward_conditioning"),
++    ProtocolInfo("natural-images", "rpi_vstim.protocols.natural_images", "software-groundwork"),
++    ProtocolInfo("reward-conditioning", "rpi_vstim.protocols.reward_conditioning", "software-groundwork"),
+     ProtocolInfo("spout-training", "rpi_vstim.protocols.spout_training"),
+     ProtocolInfo("drifting-gratings", "rpi_vstim.protocols.drifting_gratings"),
+     ProtocolInfo("retinotopy", "rpi_vstim.protocols.retinotopy"),
+diff --git a/tests/integration/test_simulated_acceptance.py b/tests/integration/test_simulated_acceptance.py
+new file mode 100644
+index 0000000..885fcd6
+--- /dev/null
++++ b/tests/integration/test_simulated_acceptance.py
+@@ -0,0 +1,103 @@
++import json
++
++from rpi_vstim.core.config import config_from_mapping
++from rpi_vstim.core.lifecycle import LifecycleState
++from rpi_vstim.core.runtime import run_simulated_session
++
++
++def simulation_config(tmp_path, *, cameras=False, telemetry_required=False):
++    values = {"paths": {"output_root": tmp_path}}
++    if cameras:
++        values["cameras"] = {
++            "devices": [
++                {"id": "face", "role": "face", "required": True, "device": "face-id"},
++                {"id": "behavior", "role": "behavior", "device": "behavior-id"},
++            ]
++        }
++    if telemetry_required:
++        values["telemetry"] = {"enabled": True, "required": True, "host": "monitor"}
++    return config_from_mapping(values)
++
++
++def load_json(root, name):
++    return json.loads((root / name).read_text(encoding="utf-8"))
++
++
++def test_natural_simulation_covers_no_camera_and_two_local_cameras(tmp_path):
++    plain = run_simulated_session(
++        simulation_config(tmp_path), protocol_name="natural-images", session_id="plain", seed=17
++    )
++    with_cameras = run_simulated_session(
++        simulation_config(tmp_path, cameras=True),
++        protocol_name="natural-images",
++        session_id="with-cameras",
++        seed=17,
++    )
++
++    assert plain.ok and with_cameras.ok
++    assert "camera_manifest.json" not in {path.name for path in plain.session.context.session_root.iterdir()}
++    manifest = load_json(with_cameras.session.context.session_root, "camera_manifest.json")
++    assert {camera["state"] for camera in manifest["cameras"]} == {"COMPLETED"}
++    assert all("/dev/video" not in json.dumps(camera) for camera in manifest["cameras"])
++
++
++def test_reward_simulation_replays_the_frozen_production_schedule(tmp_path):
++    result = run_simulated_session(
++        simulation_config(tmp_path),
++        protocol_name="reward-conditioning",
++        session_id="reward",
++        seed=23,
++    )
++    plan = load_json(result.session.context.session_root, "plan.json")
++
++    assert result.ok
++    assert len(plan["events"]) == 500
++    assert sum(event["metadata"]["reward_eligible"] for event in plan["events"]) == 220
++    assert sum(event["metadata"]["reward_scheduled"] for event in plan["events"]) == 198
++
++
++def test_simulation_failures_are_terminal_and_cleanup_is_safe(tmp_path):
++    interrupted = run_simulated_session(
++        simulation_config(tmp_path), session_id="interrupted", interrupt=True
++    )
++    required_camera = run_simulated_session(
++        simulation_config(tmp_path, cameras=True),
++        session_id="required-camera",
++        camera_failures={"face"},
++    )
++    degraded = run_simulated_session(
++        simulation_config(tmp_path, cameras=True),
++        session_id="degraded",
++        camera_failures={"behavior"},
++        telemetry_failure=True,
++    )
++    required_telemetry = run_simulated_session(
++        simulation_config(tmp_path, telemetry_required=True),
++        session_id="required-telemetry",
++        telemetry_failure=True,
++    )
++
++    assert interrupted.final_state == LifecycleState.INTERRUPTED
++    assert required_camera.final_state == LifecycleState.FAILED
++    assert required_telemetry.final_state == LifecycleState.FAILED
++    assert degraded.ok and set(degraded.degraded) == {"camera", "telemetry"}
++    for result in (interrupted, required_camera, degraded, required_telemetry):
++        assert result.services.hardware.backend.outputs_safe
++        assert result.services.display.config is None
++
++
++def test_same_seed_replays_plan_and_telemetry_stays_bounded(tmp_path):
++    first = run_simulated_session(
++        simulation_config(tmp_path), session_id="replay-a", protocol_name="natural-images", seed=99
++    )
++    second = run_simulated_session(
++        simulation_config(tmp_path), session_id="replay-b", protocol_name="natural-images", seed=99
++    )
++    first_root = first.session.context.session_root
++    second_root = second.session.context.session_root
++
++    assert (first_root / "plan.json").read_bytes() == (second_root / "plan.json").read_bytes()
++    assert load_json(first_root, "session_manifest.json")["random_seeds"] == {"protocol": 99}
++    assert load_json(first_root, "provenance.json")["repository_commit"]
++    assert first.services.telemetry.messages.maxlen == 256
++    assert len(first.services.telemetry.messages) <= 256
+-- 
+2.39.3 (Apple Git-146)
+
+
+From 3831203dba982a870ce21df5d85ea4ea4047c55e Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:17:18 -0400
+Subject: [PATCH 09/10] Fix deterministic repetition feasibility
+
+---
+ IMPLEMENTATION_STATUS.md                      |  4 +--
+ src/rpi_vstim/core/runtime.py                 |  3 +--
+ .../protocols/natural_images/__init__.py      | 25 +++++++++++++------
+ tests/unit/test_runtime.py                    |  3 +--
+ 4 files changed, 22 insertions(+), 13 deletions(-)
+
+diff --git a/IMPLEMENTATION_STATUS.md b/IMPLEMENTATION_STATUS.md
+index 82e6fb6..52b65a0 100644
+--- a/IMPLEMENTATION_STATUS.md
++++ b/IMPLEMENTATION_STATUS.md
+@@ -22,8 +22,6 @@ thermal inventory checks. `/mnt/hd` is not mounted, and the connected HDMI
+ mode/connector choice still needs physical confirmation. No assignment/state
+ files were accessed and no target files or services were changed.
+ 
+-## Explicitly deferred
+-
+ ## Overnight software groundwork
+ 
+ - [x] Simulated lifecycle orchestration with manifests, events, failure paths,
+@@ -38,6 +36,8 @@ files were accessed and no target files or services were changed.
+ - [x] Independent metadata-only fake local camera state for two cameras.
+ - [x] End-to-end simulated acceptance tests.
+ 
++## Explicitly deferred
++
+ Real experiment execution, GPIO, DRM/KMS, camera acquisition, UDP send, asset
+ conversion, reward actuation, and Pi modification remain deferred. The
+ expanded audit script has not been rerun because the Pi is not reachable from
+diff --git a/src/rpi_vstim/core/runtime.py b/src/rpi_vstim/core/runtime.py
+index 9fec3a1..07ec487 100644
+--- a/src/rpi_vstim/core/runtime.py
++++ b/src/rpi_vstim/core/runtime.py
+@@ -1,12 +1,11 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass, replace
+-from pathlib import Path
+ from typing import Any, Iterable
+ 
+ from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
+ from rpi_vstim.core.config import Config
+-from rpi_vstim.core.lifecycle import Lifecycle, LifecycleState, RuntimeServices
++from rpi_vstim.core.lifecycle import LifecycleState, RuntimeServices
+ from rpi_vstim.core.session import SessionOutput, new_session
+ from rpi_vstim.display.fake import FakeDisplayBackend
+ from rpi_vstim.hardware.worker import SimulatedHardwareWorker
+diff --git a/src/rpi_vstim/protocols/natural_images/__init__.py b/src/rpi_vstim/protocols/natural_images/__init__.py
+index 8f8d4e2..3a5d309 100644
+--- a/src/rpi_vstim/protocols/natural_images/__init__.py
++++ b/src/rpi_vstim/protocols/natural_images/__init__.py
+@@ -66,18 +66,29 @@ def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> t
+     counts = Counter(value for value in values for _ in range(repeats))
+     if not counts:
+         return ()
+-    if max(counts.values()) > (sum(counts.values()) + 1) // 2:
+-        raise ValueError("cannot avoid adjacent repeated images")
+     rng = random.Random(seed)
+     result: list[str] = []
+     previous = None
+     while counts:
+-        candidates = [value for value in counts if value != previous]
+-        rng.shuffle(candidates)
+-        candidates.sort(key=lambda value: counts[value], reverse=True)
+-        value = candidates[0]
++        candidates = []
++        for value in counts:
++            if value == previous:
++                continue
++            remaining = counts.copy()
++            remaining[value] -= 1
++            if not remaining[value]:
++                del remaining[value]
++            total = sum(remaining.values())
++            feasible = not remaining or max(remaining.values()) <= (total + 1) // 2
++            if value in remaining:
++                feasible = feasible and remaining[value] <= total - remaining[value]
++            if feasible:
++                candidates.extend([value] * counts[value])
++        if not candidates:
++            raise ValueError("cannot avoid adjacent repeated images")
++        value = rng.choice(candidates)
+         counts[value] -= 1
+-        if not counts[value]:
++        if counts[value] == 0:
+             del counts[value]
+         result.append(value)
+         previous = value
+diff --git a/tests/unit/test_runtime.py b/tests/unit/test_runtime.py
+index b1910e5..df868b0 100644
+--- a/tests/unit/test_runtime.py
++++ b/tests/unit/test_runtime.py
+@@ -1,7 +1,6 @@
+ import json
+-from dataclasses import replace
+ 
+-from rpi_vstim.core.config import Config, config_from_mapping
++from rpi_vstim.core.config import config_from_mapping
+ from rpi_vstim.core.lifecycle import LifecycleState
+ from rpi_vstim.core.runtime import run_simulated_session
+ 
+-- 
+2.39.3 (Apple Git-146)
+
+
+From d4a0517732761507321845d3e6ba99abfc6add3d Mon Sep 17 00:00:00 2001
+From: hung-lo <hung.lo.ecn@gmail.com>
+Date: Thu, 24 Sep 2026 21:18:17 -0400
+Subject: [PATCH 10/10] Document overnight software groundwork
+
+---
+ OVERNIGHT_REPORT.md | 80 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 80 insertions(+)
+ create mode 100644 OVERNIGHT_REPORT.md
+
+diff --git a/OVERNIGHT_REPORT.md b/OVERNIGHT_REPORT.md
+new file mode 100644
+index 0000000..40ab46a
+--- /dev/null
++++ b/OVERNIGHT_REPORT.md
+@@ -0,0 +1,80 @@
++# Overnight software groundwork report
++
++Date: 2026-09-24
++Branch: `codex/overnight-software-groundwork`
++
++## Completed
++
++- Simulated session lifecycle with deterministic seeds, manifests, event logs,
++  provenance, plans, interruption/failure handling, and safe cleanup.
++- Deterministic frame/event plans with phase, trial/sequence IDs, photodiode
++  intent, frame offsets, and stable JSON serialization.
++- Natural-image discovery, deterministic subset/repetition scheduling, integer
++  frame ITIs, and explicit `natural_legacy_plain` and
++  `natural_legacy_camera` profiles.
++- Hardware-free reward conditioning with persistent assignment helper,
++  acquisition/reversal state, frozen 50-trial 8:3:1 blocks, water limits, and
++  the 500-trial production schedule of 198 rewards and 22 omissions.
++- Versioned protocol-neutral telemetry messages and bounded in-memory/null
++  publishers.
++- Independent metadata-only fake supervision for two local cameras, including
++  required/optional failure and degraded states. No device nodes or frame data
++  are accessed.
++- CLI simulation paths, configuration examples, session-format docs, camera
++  workflow docs, reward-timing docs, and acceptance tests.
++
++## Milestone commits
++
++| Milestone | Commit |
++| --- | --- |
++| A — simulated runtime | `20acaa4` |
++| B — deterministic planning | `9ed5f24` |
++| C — natural-image planning | `cf266d5` |
++| D — reward-conditioning logic | `c706a74` |
++| E — telemetry contract | `fe5d39d` |
++| F — fake local cameras | `7baec0f` |
++| C/D source-alignment correction | `bae2f4b` |
++| G — simulated acceptance groundwork | `2f62895` |
++| final planner/status correction | `3831203` |
++
++The required final report commit is the commit containing this file.
++
++## Validation
++
++- `python -m pytest -q`: **55 passed in 0.24s**.
++- `python -m compileall -q src tests`: passed.
++- `bash -n scripts/*.sh`: passed.
++- `git diff --check`: passed.
++- Ruff: **unavailable** in the active environment; not claimed as passed.
++- CLI smoke with `PYTHONPATH=src python -m rpi_vstim`: version, protocol list,
++  config validation, natural simulation, and reward simulation all passed.
++- Experimental validation regression rejected the non-experimental example with
++  exit code **2**, as required.
++- Acceptance tests cover no-camera natural simulation, two fake local cameras,
++  reward scheduling, interruption, protocol/camera/telemetry failure,
++  degradation, deterministic replay, bounded telemetry, output manifests, and
++  cleanup safety.
++
++## Scope and deferrals
++
++- Phase 01 was not started.
++- `main` was not changed and commit `2a17339` was not squashed.
++- No Pi access, real display/KMS, GPIO, camera capture, reward delivery,
++  suction, lick capture, UDP telemetry, SSH camera control, cross-Pi transfer,
++  or system-service changes were performed.
++- The reusable Pi audit script is updated in the inherited Phase 00 history,
++  but the expanded audit was not rerun because the Pi is unavailable from this
++  Mac. That is deferred hardware validation, not a software failure.
++- The four reference repositories were read-only inputs. Their existing
++  untracked patch files were preserved and not edited.
++
++## Reference baselines read
++
++- `rpi_rig_monitor`: `70b80f25c12ac64d087ebeb78a22a091a0d03511`
++- `rpi_visual_stimuli`: `6e1b2776e59c89127f9a6b56854096eb726990da`
++- `vstim_natural`: `8a5f368c20344e25500cdfa6b272eccb673cad4a`
++- `vstim_natural_img_reward`: `f64b56d0562b5c35aa64ffba34c29b1d7416bec1`
++
++Known user-provided untracked files in this checkout—
++`OVERNIGHT_SOFTWARE_GROUNDWORK_CODEX_DESKTOP.md` and
++`phase00_cleanup_98b9006.patch`—were preserved untouched.
+-- 
+2.39.3 (Apple Git-146)
+

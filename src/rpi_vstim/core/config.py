@@ -25,8 +25,8 @@ class PathsConfig:
 @dataclass(frozen=True)
 class DisplayConfig:
     backend: str = "fake"
-    stimulus_connector: str = "HDMI-A-1"
-    preview_connector: str | None = "HDMI-A-2"
+    stimulus_connector: str = "HDMI-A-2"
+    preview_connector: str | None = "HDMI-A-1"
     width_px: int = 1280
     height_px: int = 720
     refresh_hz: float = 60.0

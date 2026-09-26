@@ -63,7 +63,15 @@ def test_kms_open_uses_selected_probe_and_presents_native_result(monkeypatch):
         },
     )
     display = KmsDisplayBackend()
-    info = display.open(DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82))
+    info = display.open(
+        DisplayConfig(
+            stimulus_connector="HDMI-A-1",
+            preview_connector="HDMI-A-2",
+            width_px=1024,
+            height_px=600,
+            refresh_hz=59.82,
+        )
+    )
     assert info.connector == "HDMI-A-1"
     result = display.present_color((255, 255, 255), frames=2)
     assert result.completed_frame_count == 2

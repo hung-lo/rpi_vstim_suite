@@ -11,9 +11,16 @@ from rpi_vstim.core.config import Config, ConfigError, config_from_mapping, load
 def test_example_toml_loads_and_preserves_sections():
     config = load_config(Path("config/system.example.toml"))
     assert config.display.backend == "kms"
+    assert config.display.stimulus_connector == "HDMI-A-2"
+    assert config.display.preview_connector == "HDMI-A-1"
     assert config.hardware.reward_pin_bcm == 19
     assert config.telemetry.port == 5055
     assert config.protocol.name == "natural-images"
+
+
+def test_default_display_matches_current_pi_role_mapping():
+    assert Config().display.stimulus_connector == "HDMI-A-2"
+    assert Config().display.preview_connector == "HDMI-A-1"
 
 
 def test_duplicate_gpio_pins_are_rejected():

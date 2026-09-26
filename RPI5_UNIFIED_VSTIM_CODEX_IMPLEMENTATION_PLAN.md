@@ -615,7 +615,9 @@ reward_state_root = "/mnt/hd/vstim_reward_assignments"
 
 [display]
 backend = "kms"
-connector = "HDMI-A-1"
+# Current verified Pi 5 mapping; revalidate if the final stimulus screen changes.
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
 width_px = 1280
 height_px = 720
 refresh_hz = 60.0

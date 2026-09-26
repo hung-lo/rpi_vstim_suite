@@ -132,6 +132,11 @@ storage remain later acceptance work.
   trace and resource samples are in
   `docs/hardware/pi5_phase3_combined_display_camera_2026-09-25.json` and
   `docs/hardware/pi5_phase3_combined_resources_2026-09-25.log`.
+- [x] Analyze the combined trace without changing the authoritative hardware
+  result: all 105 long intervals are immediately compensated by a following
+  below-nominal interval, all 105 short intervals have a preceding
+  above-nominal interval, and frame/kernel sequences remain contiguous. See
+  `docs/hardware/pi5_phase3_timing_analysis_2026-09-25.md`.
 - [x] Exercise one controlled combined interruption/recovery path; no orphan
   camera/KMS processes remained and both stable cameras re-enumerated.
 - [ ] Validate physical photodiode timing and long-term optical behavior; the
@@ -177,11 +182,12 @@ The eventual stimulus display may change, including to the OL7 used on the 2P
 setup. If it changes, re-audit EDID/mode/refresh, rerun leased page-flip and
 production-renderer timing, and perform photodiode validation only when the
 final screen and acquisition hardware are available. The combined smoke is
-readiness evidence only; its 105 long and 105 short out-of-tolerance intervals
-require later adjacent-pair, magnitude/distribution, and possible-visible-
-flicker analysis. User observation reported generally normal stimulus output
-with a few possible brief flashes, stable camera-monitor output, and normal
-recovery; this is not visual acceptance.
+readiness evidence only. Its 105 long and 105 short intervals form adjacent
+compensating software-timestamp excursions, but the possible brief flashes
+still require physical photodiode validation. User observation reported
+generally normal stimulus output with a few possible brief flashes,
+stable camera-monitor output, and normal recovery; this is not visual
+acceptance.
 
 ## Historical hardware evidence
 

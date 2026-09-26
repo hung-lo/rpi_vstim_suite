@@ -187,7 +187,11 @@ def test_native_result_preserves_timing_and_patch_diagnostics():
         "missed_vblank_count": 0,
         "aborted": False,
     }
-    result = display_result_from_probe(payload, DisplayConfig(), sequence_id="test")
+    result = display_result_from_probe(
+        payload,
+        DisplayConfig(stimulus_connector="HDMI-A-1", preview_connector="HDMI-A-2"),
+        sequence_id="test",
+    )
     assert result.intervals_outside_tolerance == 1
     assert result.estimated_dropped_frame_count == 1
     assert result.photodiode_state == "even=on,odd=off"
