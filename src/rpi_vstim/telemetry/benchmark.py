@@ -32,10 +32,8 @@ def run_benchmark(messages: int = 1000) -> dict[str, object]:
     try:
         for sequence in range(messages):
             started = time.perf_counter_ns()
-            accepted = publisher.publish({"type": "state", "sequence_number": sequence})
+            publisher.publish({"type": "state", "sequence_number": sequence})
             samples_ns.append(time.perf_counter_ns() - started)
-            if not accepted:
-                break
     finally:
         publisher.close()
         stop_reader.set()
