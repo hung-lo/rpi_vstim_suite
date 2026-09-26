@@ -61,6 +61,8 @@ def build_dry_run_report(
     config_digest = hashlib.sha256(
         json.dumps(config.as_dict(), sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    asset_manifest_value = manifest.as_dict() if manifest else None
+    asset_manifest_digest = manifest.manifest_hash if manifest else None
     return {
         "schema_version": 1,
         "hardware_access": False,
@@ -74,7 +76,8 @@ def build_dry_run_report(
             "selected_image_occurrences": len(selected),
         },
         "asset_status": asset_status,
-        "asset_manifest": manifest.as_dict() if manifest else None,
+        "asset_manifest": asset_manifest_value,
+        "asset_manifest_digest": asset_manifest_digest,
         "resource_budget": budget.as_dict(),
         "storage": storage.as_dict(),
         "camera_requirements": [
@@ -88,6 +91,11 @@ def build_dry_run_report(
             for camera in config.cameras.devices
         ],
         "display_requirement": config.as_dict()["display"],
+        "production_root_requirement": {
+            "path": str(config.paths.output_root),
+            "mount_required_for_hardware": True,
+            "sd_card_is_not_accepted": True,
+        },
         "hardware_gates_not_exercised": [
             "DRM/KMS acquisition",
             "camera capture and identity negotiation",

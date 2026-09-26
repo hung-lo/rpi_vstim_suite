@@ -102,7 +102,10 @@ class FakeLocalCameraService:
             return
         from .session import atomic_write_json
 
-        atomic_write_json(self.session_root / "camera_manifest.json", {"cameras": self.manifest()})
+        atomic_write_json(
+            self.session_root / "camera_manifest.json",
+            {"cameras": self.manifest(), "schema_version": 1},
+        )
 
 class CameraBackend:
     """Import-safe camera boundary; acquisition is intentionally not implemented."""

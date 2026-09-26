@@ -9,9 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
-from .core.config import ConfigError, load_config
+from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
 from .core.runtime import run_simulated_session
+from .core.virtual_rig import run_virtual_session
 from .core.session import inspect_session
 from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
@@ -88,6 +89,21 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true", help="report production contracts without hardware")
     run.add_argument("--json", action="store_true", dest="as_json")
 
+    virtual = commands.add_parser("virtual-run", help="run a production-shaped virtual rig")
+    virtual.add_argument("protocol", choices=[p.name for p in available_protocols()])
+    virtual.add_argument("--output-root", type=Path, required=True)
+    virtual.add_argument("--session-id", default="virtual-session")
+    virtual.add_argument("--seed", type=int, default=0)
+    virtual.add_argument("--camera-mode", default="normal")
+    virtual.add_argument("--fail-camera", default="")
+    virtual.add_argument("--interrupt", action="store_true")
+    virtual.add_argument("--fault", choices=(
+        "session_metadata_write", "storage_low_space", "asset_manifest_creation",
+        "producer_start", "producer_mid", "display_consumer_start", "display_consumer_mid",
+        "finalization", "cleanup",
+    ))
+    virtual.add_argument("--json", action="store_true", dest="as_json")
+
     return parser
 
 
@@ -138,9 +154,58 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inspect-session":
         report = inspect_session(args.path)
         print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_inspection(report))
-        return 0
+        return 1 if report["corrupt_artifacts"] else 0
     if args.command == "doctor":
         return _doctor(args.as_json)
+    if args.command == "virtual-run":
+        try:
+            config = load_config(None)
+            protocol = get_protocol(args.protocol)
+            cameras = config.cameras
+            if not cameras.devices:
+                cameras = replace(
+                    cameras,
+                    devices=(
+                        CameraDeviceConfig("face", "face", required=True, device="virtual-face"),
+                        CameraDeviceConfig("behavior", "behavior", device="virtual-behavior"),
+                    ),
+                )
+            config = replace(
+                config,
+                paths=replace(config.paths, output_root=args.output_root),
+                protocol=replace(config.protocol, name=args.protocol, version=protocol.version),
+                cameras=cameras,
+            )
+            failures = {item.strip() for item in args.fail_camera.split(",") if item.strip()}
+            result = run_virtual_session(
+                config,
+                protocol_name=args.protocol,
+                session_id=args.session_id,
+                seed=args.seed,
+                camera_mode=args.camera_mode,
+                camera_failures=failures,
+                interrupt=args.interrupt,
+                fault=args.fault,
+            )
+            payload = {
+                "final_state": result.final_state.value,
+                "ok": result.ok,
+                "error": result.error,
+                "session_root": str(result.session.context.session_root),
+                "degraded": result.degraded,
+                "camera_manifest": result.services.cameras.manifest(),
+                "display_metrics": result.services.display.sequence.metrics(),
+                "telemetry": {
+                    "published": result.services.telemetry.publish_count,
+                    "retained": len(result.services.telemetry.messages),
+                    "dropped": result.services.telemetry.dropped_count,
+                },
+            }
+        except (ConfigError, OSError, ValueError, RuntimeError) as exc:
+            print(f"virtual-run invalid: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else f"{payload['final_state']}: {payload['session_root']}")
+        return 0 if result.ok else 1
     if args.command == "hardware" and args.hardware_command == "display-probe":
         try:
             config = load_config(args.config).display
@@ -282,12 +347,25 @@ def main(argv: list[str] | None = None) -> int:
 
 def _format_preflight(report: dict[str, object]) -> str:
     plan = report["plan"]
+    cameras = report["camera_requirements"]
+    camera_text = ", ".join(
+        f"{camera['role']}={camera['stable_identity'] or '<unresolved>'}"
+        for camera in cameras
+    ) or "none"
+    budget = report["resource_budget"]
+    storage = report["storage"]
     return (
         f"protocol={report['protocol']} frames={plan['total_frames']} "
         f"duration_s={plan['estimated_duration_s']:.3f} assets={report['asset_status']} "
-        "hardware_access=False"
+        f"asset_digest={report['asset_manifest_digest'] or '<deferred>'} "
+        f"ram_bytes={budget['estimated_ram_bytes']} storage_bytes={storage['estimated_required_bytes']} "
+        f"cameras={camera_text} hardware_access=False"
     )
 
 
 def _format_inspection(report: dict[str, object]) -> str:
-    return f"status={report['status']} incomplete={report['incomplete']} missing={len(report['missing_required_files'])}"
+    return (
+        f"status={report['status']} incomplete={report['incomplete']} "
+        f"missing={len(report['missing_required_files'])} "
+        f"corrupt={len(report['corrupt_artifacts'])}"
+    )

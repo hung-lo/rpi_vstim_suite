@@ -14,6 +14,8 @@ from typing import Any, TextIO
 from .config import Config
 from .event_log import EventLogger
 from .provenance import collect_provenance, resolve_source_commit
+from .schema import validate as validate_schema
+from .schema import versioned
 from .timestamps import monotonic_ns, utc_ns
 
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -67,7 +69,10 @@ class SessionOutput:
         self.context.session_root.mkdir(parents=True, exist_ok=True)
         self._incomplete_marker = self.context.session_root / ".session-incomplete"
         self._incomplete_marker.write_text("incomplete\n", encoding="utf-8")
-        atomic_write_json(self.context.session_root / "resolved_config.json", self.context.resolved_config)
+        atomic_write_json(
+            self.context.session_root / "resolved_config.json",
+            versioned(self.context.resolved_config, "config"),
+        )
         atomic_write_json(self.context.session_root / "provenance.json", self.context.host_provenance)
         self._manifest = {
             "schema_version": 2,
@@ -101,7 +106,7 @@ class SessionOutput:
 
     def write_plan(self, plan: Any) -> None:
         value = plan.as_dict() if hasattr(plan, "as_dict") else plan
-        atomic_write_json(self.context.session_root / "plan.json", value)
+        atomic_write_json(self.context.session_root / "plan.json", versioned(value, "plan"))
         if isinstance(value, dict) and value.get("metadata", {}).get("selected_images"):
             atomic_write_json(
                 self.context.session_root / "selected_image_table.json",
@@ -115,20 +120,30 @@ class SessionOutput:
 
     def write_preflight_report(self, report: Any) -> None:
         value = asdict(report) if is_dataclass(report) else report
-        atomic_write_json(self.context.session_root / "preflight_report.json", value)
+        atomic_write_json(
+            self.context.session_root / "preflight_report.json",
+            versioned(value, "preflight"),
+        )
 
     def write_cache_manifest(self, value: Any) -> None:
         value = asdict(value) if is_dataclass(value) else value
-        atomic_write_json(self.context.session_root / "cache_manifest.json", value)
+        atomic_write_json(
+            self.context.session_root / "cache_manifest.json",
+            versioned(value, "cache_manifest"),
+        )
 
     def write_asset_manifest(self, value: Any) -> None:
         value = value.as_dict() if hasattr(value, "as_dict") else value
-        atomic_write_json(self.context.session_root / "asset_manifest.json", value)
+        atomic_write_json(
+            self.context.session_root / "asset_manifest.json",
+            versioned(value, "asset_manifest"),
+        )
 
     def write_display_result(self, result: Any) -> None:
         if self._display_stream is None:
             raise RuntimeError("session outputs are not initialized")
         value = asdict(result) if is_dataclass(result) else result
+        value = versioned(value, "display_result")
         self._display_stream.write(json.dumps(_jsonable(value), sort_keys=True) + "\n")
         self._display_stream.flush()
         self._display_summary["record_count"] += 1
@@ -146,7 +161,10 @@ class SessionOutput:
 
     def write_resource_summary(self, value: Any) -> None:
         value = asdict(value) if is_dataclass(value) else value
-        atomic_write_json(self.context.session_root / "resource_summary.json", value)
+        atomic_write_json(
+            self.context.session_root / "resource_summary.json",
+            versioned(value, "resource_summary"),
+        )
 
     def record_event(
         self,
@@ -264,8 +282,26 @@ def inspect_session(root: Path | str) -> dict[str, object]:
     session_root = Path(root).resolve()
     manifest_path = session_root / "session_manifest.json"
     final_path = session_root / "final_status.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
-    final_status = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else manifest
+    corrupt_artifacts: list[str] = []
+    schema_errors: list[str] = []
+
+    def read_json(path: Path, artifact: str) -> dict[str, Any]:
+        if not path.is_file():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            corrupt_artifacts.append(path.name)
+            schema_errors.append(f"{path.name}: invalid JSON: {exc}")
+            return {}
+        error = validate_schema(value, artifact)
+        if error is not None:
+            corrupt_artifacts.append(path.name)
+            schema_errors.append(f"{path.name}: {error}")
+        return value if isinstance(value, dict) else {}
+
+    manifest = read_json(manifest_path, "session_manifest")
+    final_status = read_json(final_path, "session_manifest") if final_path.is_file() else manifest
     required = (
         "session_manifest.json",
         "resolved_config.json",
@@ -283,18 +319,80 @@ def inspect_session(root: Path | str) -> dict[str, object]:
         with events_path.open(encoding="utf-8", newline="") as handle:
             last_event = next(reversed(list(csv.DictReader(handle))), None)
     camera_manifest = session_root / "camera_manifest.json"
-    cameras = []
-    if camera_manifest.is_file():
-        cameras = json.loads(camera_manifest.read_text(encoding="utf-8")).get("cameras", [])
+    cameras = read_json(camera_manifest, "camera_manifest").get("cameras", [])
+    for name, artifact in (
+        ("provenance.json", "provenance"),
+        ("resolved_config.json", "config"),
+        ("plan.json", "plan"),
+        ("preflight_report.json", "preflight"),
+        ("cache_manifest.json", "cache_manifest"),
+        ("asset_manifest.json", "asset_manifest"),
+        ("display_results.json", "display_summary"),
+        ("resource_summary.json", "resource_summary"),
+    ):
+        if (session_root / name).is_file():
+            read_json(session_root / name, artifact)
+    display_stream = session_root / "display_results.jsonl"
+    stream_records = 0
+    if display_stream.is_file():
+        for line_number, line in enumerate(display_stream.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except ValueError as exc:
+                corrupt_artifacts.append(display_stream.name)
+                schema_errors.append(f"{display_stream.name}:{line_number}: invalid JSON: {exc}")
+                continue
+            error = validate_schema(value, "display_result")
+            if error is not None:
+                corrupt_artifacts.append(display_stream.name)
+                schema_errors.append(f"{display_stream.name}:{line_number}: {error}")
+            stream_records += 1
+    summary_path = session_root / "display_results.json"
+    if summary_path.is_file():
+        summary = read_json(summary_path, "display_summary")
+        if summary.get("record_count") != stream_records:
+            corrupt_artifacts.append(summary_path.name)
+            schema_errors.append(
+                f"{summary_path.name}: record_count {summary.get('record_count')!r} "
+                f"does not match JSONL records {stream_records}"
+            )
+    missing_camera_outputs = []
+    for camera in cameras:
+        output = camera.get("output_path")
+        if (
+            camera.get("verification_state") == "recorded"
+            and isinstance(output, str)
+            and not (session_root / output).is_file()
+        ):
+            missing_camera_outputs.append(output)
+            corrupt_artifacts.append("camera_output")
+    orphan_artifacts = sorted(
+        str(path.relative_to(session_root))
+        for path in session_root.rglob("*")
+        if path.is_file()
+        and path.name.startswith(".")
+        and path.name != ".session-incomplete"
+    )
+    if orphan_artifacts:
+        corrupt_artifacts.append("orphan_temporary_files")
+    if manifest and final_status and manifest.get("status") != final_status.get("status"):
+        corrupt_artifacts.append("final_status.json")
+        schema_errors.append("final_status.json: status disagrees with session_manifest.json")
     terminal = final_status.get("status") in {"COMPLETE", "FAILED", "INTERRUPTED", "CLEANUP_FAILED"}
     return {
         "session_root": str(session_root),
-        "status": final_status.get("status", "UNKNOWN"),
+        "status": "CORRUPT" if corrupt_artifacts else final_status.get("status", "UNKNOWN"),
         "lifecycle": final_status.get("lifecycle", "UNKNOWN"),
         "last_event": last_event,
         "required_files_present": not missing,
         "missing_required_files": missing,
         "camera_outcomes": cameras,
+        "missing_camera_outputs": missing_camera_outputs,
+        "orphan_artifacts": orphan_artifacts,
+        "corrupt_artifacts": sorted(set(corrupt_artifacts)),
+        "schema_errors": schema_errors,
         "incomplete": bool(
             (session_root / ".session-incomplete").exists()
             or manifest.get("incomplete", True)

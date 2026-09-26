@@ -7,6 +7,7 @@ from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
 from rpi_vstim.core.config import Config
 from rpi_vstim.core.lifecycle import LifecycleState, RuntimeServices
 from rpi_vstim.core.session import SessionOutput, new_session
+from rpi_vstim.core.assets import AssetResolver, build_selected_asset_manifest
 from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
@@ -281,6 +282,18 @@ def run_simulated_session(
 
     try:
         session.write_plan(plan)
+        if fault == "asset_manifest_creation":
+            raise RuntimeError("injected asset_manifest_creation failure")
+        if config.paths.asset_root.is_dir():
+            selected_manifest = build_selected_asset_manifest(
+                plan,
+                AssetResolver(config.paths.asset_root),
+                target_width_px=config.display.width_px,
+                target_height_px=config.display.height_px,
+                transform=plan.metadata.get("asset_transform", "fit_pad"),
+                background_value=int(plan.metadata.get("background_gray", 127)),
+            )
+            session.write_asset_manifest(selected_manifest)
         if fault == "session_metadata_write":
             raise RuntimeError("injected session metadata failure")
         transition(LifecycleState.CONFIGURED)
@@ -296,7 +309,7 @@ def run_simulated_session(
         if services.cameras.degraded:
             degraded.append("camera")
         transition(LifecycleState.PREPARING)
-        if fault in {"asset_manifest_creation", "producer_start"}:
+        if fault == "producer_start":
             raise RuntimeError(f"injected {fault} failure")
         transition(LifecycleState.PRE)
         if interrupt:

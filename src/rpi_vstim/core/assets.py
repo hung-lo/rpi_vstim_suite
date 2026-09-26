@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -201,6 +202,16 @@ class AssetResolver:
             with Image.open(path) as image:
                 width_px, height_px = image.size
                 mode = image.mode
+        except ModuleNotFoundError:
+            if path.suffix.lower() != ".png" or path.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+                raise AssetDecodeError("Pillow is required for this asset format")
+            header = path.read_bytes()[12:29]
+            if len(header) != 17 or header[:4] != b"IHDR":
+                raise AssetDecodeError(f"cannot read PNG metadata: {relative_path}")
+            width_px, height_px, bit_depth, color_type = struct.unpack(">IIBB", header[4:14])
+            if bit_depth != 8 or color_type not in {2, 6}:
+                raise AssetDecodeError(f"unsupported Pillow-free PNG format: {relative_path}")
+            mode = "RGBA" if color_type == 6 else "RGB"
         except Exception as exc:
             raise AssetDecodeError(f"cannot decode asset {relative_path}: {exc}") from exc
         return AssetMetadata(

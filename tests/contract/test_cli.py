@@ -18,6 +18,15 @@ def test_preflight_and_run_dry_run_are_non_hardware(capsys):
     assert "hardware_access=False" in capsys.readouterr().out
 
 
+def test_preflight_text_includes_operator_budget_and_camera_fields(capsys):
+    assert main(["preflight"]) == 0
+    output = capsys.readouterr().out
+    assert "asset_digest=" in output
+    assert "ram_bytes=" in output
+    assert "storage_bytes=" in output
+    assert "cameras=none" in output
+
+
 def test_every_software_groundwork_protocol_runs_without_hardware(tmp_path, capsys):
     protocols = (
         "natural-images",

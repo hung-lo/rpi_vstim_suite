@@ -466,6 +466,7 @@ class LocalCameraSupervisor:
         atomic_write_json(
             self.session_root / "camera_manifest.json",
             {
+                "schema_version": 1,
                 "cameras": self.manifest(),
                 "status_queue_dropped": self.status_channel.dropped,
             },
