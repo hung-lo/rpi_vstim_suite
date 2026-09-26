@@ -7,6 +7,7 @@ import random
 from typing import Iterable
 
 from rpi_vstim.core.duration import seconds_to_frames
+from rpi_vstim.core.assets import IMAGE_SUFFIXES
 from rpi_vstim.core.plan import (
     PlannedEvent,
     SessionPlan,
@@ -15,7 +16,6 @@ from rpi_vstim.core.plan import (
     with_frame_offsets,
 )
 
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"})
 FINAL_ITI_BY_PROFILE = {
     "natural_legacy_plain": True,
     "natural_legacy_camera": False,
