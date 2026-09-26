@@ -80,5 +80,6 @@ def test_udp_publisher_rejects_oversized_packets_without_blocking():
 def test_udp_benchmark_uses_local_receiver():
     result = run_benchmark(messages=20)
     assert result["messages"] == 20
+    assert result["sampled"] == 20
     assert result["queued"] == result["sent"] == 20
     assert result["dropped"] == result["errors"] == 0

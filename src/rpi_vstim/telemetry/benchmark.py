@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import threading
 import time
 
 from .publisher import UdpTelemetryPublisher
@@ -12,6 +13,20 @@ def run_benchmark(messages: int = 1000) -> dict[str, object]:
         raise ValueError("messages must be positive")
     receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(0.1)
+    stop_reader = threading.Event()
+
+    def drain_receiver() -> None:
+        while not stop_reader.is_set():
+            try:
+                receiver.recv(65_535)
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+
+    reader = threading.Thread(target=drain_receiver, name="telemetry-benchmark-receiver")
+    reader.start()
     publisher = UdpTelemetryPublisher("127.0.0.1", receiver.getsockname()[1])
     samples_ns: list[int] = []
     try:
@@ -20,13 +35,16 @@ def run_benchmark(messages: int = 1000) -> dict[str, object]:
             accepted = publisher.publish({"type": "state", "sequence_number": sequence})
             samples_ns.append(time.perf_counter_ns() - started)
             if not accepted:
-                raise RuntimeError("local telemetry handoff dropped a benchmark packet")
+                break
     finally:
         publisher.close()
+        stop_reader.set()
+        reader.join(timeout=1.0)
         receiver.close()
     samples_ns.sort()
     return {
         "messages": messages,
+        "sampled": len(samples_ns),
         "queued": publisher.queued_count,
         "sent": publisher.sent_count,
         "dropped": publisher.dropped_count,
