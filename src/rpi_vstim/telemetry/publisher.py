@@ -137,7 +137,6 @@ class UdpTelemetryPublisher(TelemetryPublisher):
                     udp_socket.sendto(packet, destination)
                 except OSError:
                     self.error_count += 1
-                    self._worker_failed = True
                 else:
                     self.sent_count += 1
         except OSError:
