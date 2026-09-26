@@ -163,6 +163,7 @@ class ProductionFrameRenderer:
         self.cache = BoundedFrameCache(cache_size)
         buffer_size = self.stride_bytes * height_px
         self._buffers = (bytearray(buffer_size), bytearray(buffer_size))
+        self.payload_allocations = 0
 
     @property
     def scanout_buffer_bytes(self) -> int:
@@ -187,6 +188,32 @@ class ProductionFrameRenderer:
             if photodiode_state is None
             else photodiode_state
         )
+        if photodiode_state not in {"on", "off"}:
+            raise ValueError("photodiode_state must be 'on' or 'off'")
+        packed = self.prepare_payload(
+            rgb888,
+            photodiode_state=photodiode_state,
+            asset_key=asset_key,
+        )
+        target = self._buffers[frame_index % 2]
+        target[:] = packed
+        return RenderedFrame(
+            frame_index,
+            self.width_px,
+            self.height_px,
+            self.pixel_format,
+            self.stride_bytes,
+            photodiode_state,
+            memoryview(target),
+        )
+
+    def prepare_payload(
+        self,
+        rgb888: bytes | bytearray | memoryview,
+        *,
+        photodiode_state: str,
+        asset_key: Hashable | None = None,
+    ) -> bytes:
         if photodiode_state not in {"on", "off"}:
             raise ValueError("photodiode_state must be 'on' or 'off'")
         key = (
@@ -217,19 +244,10 @@ class ProductionFrameRenderer:
                     photodiode_state,
                 )
             packed = bytes(prepared)
+            self.payload_allocations += 1
             if key is not None:
                 self.cache.put(key, packed)
-        target = self._buffers[frame_index % 2]
-        target[:] = packed
-        return RenderedFrame(
-            frame_index,
-            self.width_px,
-            self.height_px,
-            self.pixel_format,
-            self.stride_bytes,
-            photodiode_state,
-            memoryview(target),
-        )
+        return packed
 
     def prepare_pair(
         self,

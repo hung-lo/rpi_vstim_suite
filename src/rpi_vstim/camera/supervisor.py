@@ -7,6 +7,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from threading import Thread
 from typing import Any, Callable, Sequence
 
 from rpi_vstim.core.camera import CameraState
@@ -58,6 +59,8 @@ class CameraCaptureSpec:
     pixel_format_or_codec: str = ""
     startup_timeout_s: float = 5.0
     stop_timeout_s: float = 5.0
+    stall_timeout_s: float | None = 30.0
+    max_diagnostic_bytes: int = 64 * 1024
 
 
 @dataclass
@@ -84,6 +87,9 @@ class CameraWorkerStatus:
     exit_status: int | None = None
     exit_reason: str | None = None
     verification_state: str = "not_checked"
+    diagnostic_log_path: str = ""
+    last_growth_monotonic_ns: int | None = None
+    last_growth_bytes: int = 0
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -122,13 +128,20 @@ class _CameraWorker:
         popen_factory: PopenFactory,
         status_channel: BoundedCameraStatusChannel,
         verify_output_growth: bool,
+        diagnostic_path: Path,
     ) -> None:
         self.spec = spec
         self.output_path = output_path
         self._popen_factory = popen_factory
         self._status_channel = status_channel
         self._verify_output_growth = verify_output_growth
+        self.diagnostic_path = diagnostic_path
         self.process: Any | None = None
+        self._stderr_thread: Thread | None = None
+        self._stderr_chunks: deque[bytes] = deque()
+        self._stderr_bytes = 0
+        self._stopped = False
+        self._last_observed_bytes: int | None = None
         self.status = CameraWorkerStatus(
             camera_id=spec.camera_id,
             role=spec.role,
@@ -140,6 +153,7 @@ class _CameraWorker:
             requested_fps=spec.requested_fps,
             pixel_format_or_codec=spec.pixel_format_or_codec,
             output_path=str(output_path),
+            diagnostic_log_path=str(diagnostic_path),
         )
 
     def _publish(self, event: str, detail: str = "") -> None:
@@ -150,10 +164,13 @@ class _CameraWorker:
                 "state": self.status.state.value,
                 "detail": detail,
                 "timestamp_utc_ns": utc_ns(),
+                "timestamp_monotonic_ns": monotonic_ns(),
             }
         )
 
     def start(self) -> None:
+        if self.process is not None and not self._stopped:
+            raise CameraStartupError(f"camera already started: {self.spec.camera_id}")
         if not self.spec.stable_device_identifier and self.spec.required:
             raise CameraStartupError(f"required camera lacks stable identity: {self.spec.camera_id}")
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,7 +182,7 @@ class _CameraWorker:
             self.process = self._popen_factory(
                 self.spec.command,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
             )
         except OSError as exc:
             self._fail(f"camera process failed to start: {exc}")
@@ -174,6 +191,7 @@ class _CameraWorker:
             self._fail(f"camera process exited during startup: {self.process.returncode}")
             raise CameraStartupError(self.spec.camera_id)
         self.status.state = CameraState.RECORDING
+        self._start_stderr_capture()
         self._publish("CAMERA_STARTED")
         if (
             self._verify_output_growth
@@ -182,13 +200,15 @@ class _CameraWorker:
             self._fail("camera output did not appear or grow before startup timeout")
             self._terminate(force=True)
             raise CameraStartupError(self.spec.camera_id)
+        self._refresh_bytes()
 
     def _wait_for_output_growth(self, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if self.process is not None and self.process.poll() is not None:
                 return False
-            if self.output_path.exists() and self.output_path.stat().st_size > 0:
+            self._refresh_bytes()
+            if self.status.bytes_written > 0:
                 return True
             time.sleep(0.01)
         return False
@@ -200,29 +220,43 @@ class _CameraWorker:
                 self.status.exit_status = int(exit_status)
                 self._fail(f"camera process exited during recording: {exit_status}")
         self._refresh_bytes()
+        if self._stalled():
+            self._fail("camera output stalled before the configured deadline")
+            self._terminate(force=False)
+            if self.process is not None and self.process.poll() is None:
+                self._terminate(force=True)
         return self.status
 
     def stop(self) -> CameraWorkerStatus:
+        if self._stopped:
+            return self.status
         if self.process is None:
+            self._stopped = True
+            self._write_diagnostic()
             return self.status
         if self.status.state == CameraState.RECORDING:
             self._publish("CAMERA_STOP_REQUESTED")
+        if self.process.poll() is None:
             self._terminate(force=False)
-            if self.process.poll() is None:
-                self._terminate(force=True)
-            self.status.exit_status = self.process.poll()
-            if self.status.state == CameraState.RECORDING:
-                self.status.state = (
-                    CameraState.COMPLETED
-                    if self.status.exit_status in (0, None)
-                    else CameraState.FAILED
-                )
+        if self.process.poll() is None:
+            self._terminate(force=True)
+        self._reap(self.spec.stop_timeout_s)
+        if self.process.poll() is None:
+            self._fail("camera process remained alive after kill")
+        elif self.status.exit_status is None:
+            self.status.exit_status = int(self.process.poll())
+        if self.status.state == CameraState.RECORDING:
+            if self.status.exit_status == 0:
+                self.status.state = CameraState.COMPLETED
+                self.status.exit_reason = self.status.exit_reason or "graceful_stop"
+            else:
+                self._fail(f"camera exited with status {self.status.exit_status}")
         self.status.stop_utc_ns = utc_ns()
         self.status.stop_monotonic_ns = monotonic_ns()
         self._refresh_bytes()
-        self.status.verification_state = (
-            "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
-        )
+        self.status.verification_state = self._verification_state()
+        self._write_diagnostic()
+        self._stopped = True
         self._publish("CAMERA_STOPPED")
         return self.status
 
@@ -230,14 +264,38 @@ class _CameraWorker:
         if self.process is None or self.process.poll() is not None:
             return
         if force:
-            self.process.kill()
+            try:
+                self.process.kill()
+            except OSError as exc:
+                self._fail(f"camera kill failed: {exc}")
+                return
             self.status.exit_reason = "forced_kill_after_stop_timeout"
             return
-        self.process.terminate()
         try:
-            self.process.wait(timeout=self.spec.stop_timeout_s)
-        except subprocess.TimeoutExpired:
+            self.process.terminate()
+        except OSError as exc:
+            self._fail(f"camera terminate failed: {exc}")
+            return
+        if not self._reap(self.spec.stop_timeout_s):
             self.status.exit_reason = "stop_timeout"
+
+    def _reap(self, timeout_s: float) -> bool:
+        if self.process is None:
+            return True
+        if self.process.poll() is not None:
+            self.status.exit_status = int(self.process.poll())
+            return True
+        try:
+            result = self.process.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            return False
+        if result is not None:
+            self.status.exit_status = int(result)
+        else:
+            result = self.process.poll()
+            if result is not None:
+                self.status.exit_status = int(result)
+        return self.process.poll() is not None
 
     def _fail(self, detail: str) -> None:
         self.status.state = CameraState.FAILED if self.spec.required else CameraState.DEGRADED
@@ -247,9 +305,59 @@ class _CameraWorker:
 
     def _refresh_bytes(self) -> None:
         try:
-            self.status.bytes_written = self.output_path.stat().st_size
+            bytes_written = self.output_path.stat().st_size
         except OSError:
-            self.status.bytes_written = 0
+            bytes_written = 0
+        now = monotonic_ns()
+        if self._last_observed_bytes is None or bytes_written > self._last_observed_bytes:
+            self.status.last_growth_monotonic_ns = now
+            self.status.last_growth_bytes = bytes_written
+        self._last_observed_bytes = bytes_written
+        self.status.bytes_written = bytes_written
+
+    def _stalled(self) -> bool:
+        timeout = self.spec.stall_timeout_s
+        return bool(
+            timeout is not None
+            and self.status.state == CameraState.RECORDING
+            and self.status.last_growth_monotonic_ns is not None
+            and monotonic_ns() - self.status.last_growth_monotonic_ns
+            > int(timeout * 1_000_000_000)
+        )
+
+    def _verification_state(self) -> str:
+        if self.status.state == CameraState.COMPLETED and self.status.exit_status == 0:
+            return "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
+        if self.status.bytes_written > 0:
+            return "output_nonempty_failed"
+        return "recording_failed"
+
+    def _start_stderr_capture(self) -> None:
+        stream = getattr(self.process, "stderr", None)
+        if stream is None or not hasattr(stream, "read"):
+            return
+        self._stderr_thread = Thread(target=self._capture_stderr, args=(stream,), daemon=True)
+        self._stderr_thread.start()
+
+    def _capture_stderr(self, stream: Any) -> None:
+        remaining = self.spec.max_diagnostic_bytes
+        while remaining > 0:
+            chunk = stream.read(min(4096, remaining))
+            if not chunk:
+                return
+            if isinstance(chunk, str):
+                chunk = chunk.encode(errors="replace")
+            self._stderr_chunks.append(bytes(chunk))
+            self._stderr_bytes += len(chunk)
+            remaining -= len(chunk)
+
+    def _write_diagnostic(self) -> None:
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=self.spec.stop_timeout_s)
+        if not self._stderr_chunks:
+            return
+        self.diagnostic_path.parent.mkdir(parents=True, exist_ok=True)
+        self.diagnostic_path.write_bytes(b"".join(self._stderr_chunks)[-self.spec.max_diagnostic_bytes :])
 
 
 class LocalCameraSupervisor:
@@ -273,8 +381,11 @@ class LocalCameraSupervisor:
         self._verify_output_growth = verify_output_growth
         self.status_channel = BoundedCameraStatusChannel(status_capacity)
         self._workers: dict[str, _CameraWorker] = {}
+        self._active = False
 
     def start(self, session_root: Path | None = None) -> None:
+        if self._active:
+            raise RuntimeError("camera supervisor is already active")
         self.session_root = session_root or self.session_root
         if self.session_root is None:
             raise ValueError("session_root is required")
@@ -286,14 +397,17 @@ class LocalCameraSupervisor:
                 / spec.camera_id
                 / f"capture.{spec.output_extension}"
             )
+            diagnostic = output.with_name("stderr.log")
             worker = _CameraWorker(
                 spec,
                 output,
                 popen_factory=self._popen_factory,
                 status_channel=self.status_channel,
                 verify_output_growth=self._verify_output_growth,
+                diagnostic_path=diagnostic,
             )
             worker.status.output_path = str(output.relative_to(self.session_root))
+            worker.status.diagnostic_log_path = str(diagnostic.relative_to(self.session_root))
             self._workers[spec.camera_id] = worker
             try:
                 worker.start()
@@ -302,7 +416,10 @@ class LocalCameraSupervisor:
                 if spec.required:
                     for previous in started:
                         previous.stop()
+                    self._write_manifest()
+                    self._active = False
                     raise
+        self._active = True
         self._write_manifest()
 
     def poll(self) -> tuple[CameraWorkerStatus, ...]:
@@ -310,6 +427,7 @@ class LocalCameraSupervisor:
 
     def stop(self) -> tuple[CameraWorkerStatus, ...]:
         statuses = tuple(worker.stop() for worker in self._workers.values())
+        self._active = False
         self._write_manifest()
         return statuses
 

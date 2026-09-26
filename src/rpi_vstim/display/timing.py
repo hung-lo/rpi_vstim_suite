@@ -25,6 +25,23 @@ class TimingSummary:
     estimated_dropped_frame_count: int = 0
     timestamp_source: str | None = None
 
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "count": self.count,
+            "median_us": self.median_us,
+            "p95_us": self.p95_us,
+            "p99_us": self.p99_us,
+            "minimum_us": self.minimum_us,
+            "maximum_us": self.maximum_us,
+            "mean_us": self.mean_us,
+            "estimated_refresh_hz": self.estimated_refresh_hz,
+            "outside_tolerance_count": self.outside_tolerance_count,
+            "long_interval_count": self.long_interval_count,
+            "short_interval_count": self.short_interval_count,
+            "estimated_dropped_frame_count": self.estimated_dropped_frame_count,
+            "timestamp_source": self.timestamp_source,
+        }
+
 
 @dataclass(frozen=True)
 class FlipTraceAnalysis:
@@ -35,6 +52,23 @@ class FlipTraceAnalysis:
     frame_metadata_mismatch_count: int
     paired_callback_displacement_count: int
     callback_dispatch_latency_ns: tuple[int, ...]
+    long_to_short_pair_count: int = 0
+    short_to_long_pair_count: int = 0
+    paired_interval_sum_error_us: tuple[float, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kernel_summary": self.kernel_summary.as_dict() if self.kernel_summary else None,
+            "callback_summary": self.callback_summary.as_dict() if self.callback_summary else None,
+            "kernel_sequence_gap_count": self.kernel_sequence_gap_count,
+            "frame_index_gap_count": self.frame_index_gap_count,
+            "frame_metadata_mismatch_count": self.frame_metadata_mismatch_count,
+            "paired_callback_displacement_count": self.paired_callback_displacement_count,
+            "callback_dispatch_latency_ns": list(self.callback_dispatch_latency_ns),
+            "long_to_short_pair_count": self.long_to_short_pair_count,
+            "short_to_long_pair_count": self.short_to_long_pair_count,
+            "paired_interval_sum_error_us": list(self.paired_interval_sum_error_us),
+        }
 
 
 def comparable_callback_timestamp_ns(
@@ -59,6 +93,8 @@ def analyze_flip_events(
     nominal_refresh_hz: float,
     tolerance_fraction: float = 0.05,
     kernel_timestamp_clock: str = "unknown",
+    expected_metadata: Sequence[dict[str, Any]] | None = None,
+    validate_alternating_smoke: bool = False,
 ) -> FlipTraceAnalysis:
     """Analyze corrected native events without rewriting or mutating a trace."""
     if not events:
@@ -89,19 +125,34 @@ def analyze_flip_events(
         right["frame_index"] != left["frame_index"] + 1
         for left, right in pairwise(events)
     )
-    metadata_mismatches = sum(
-        event["buffer_index"] != event["frame_index"] % 2
-        or event["photodiode_state"] != ("on" if event["frame_index"] % 2 == 0 else "off")
-        for event in events
-    )
+    metadata_mismatches = _metadata_mismatch_count(events, expected_metadata)
+    if validate_alternating_smoke:
+        metadata_mismatches = validate_alternating_smoke_metadata(events)
     expected = 1_000_000.0 / nominal_refresh_hz
     callback_intervals = tuple(
         (right - left) / 1_000.0 for left, right in pairwise(callback_values)
     )
-    paired = sum(
+    long_to_short = sum(
         current > expected * (1.0 + tolerance_fraction)
         and following < expected * (1.0 - tolerance_fraction)
         for current, following in pairwise(callback_intervals)
+    )
+    short_to_long = sum(
+        current < expected * (1.0 - tolerance_fraction)
+        and following > expected * (1.0 + tolerance_fraction)
+        for current, following in pairwise(callback_intervals)
+    )
+    pair_errors = tuple(
+        current + following - (2.0 * expected)
+        for current, following in pairwise(callback_intervals)
+        if (
+            current > expected * (1.0 + tolerance_fraction)
+            and following < expected * (1.0 - tolerance_fraction)
+        )
+        or (
+            current < expected * (1.0 - tolerance_fraction)
+            and following > expected * (1.0 + tolerance_fraction)
+        )
     )
     latency: list[int] = []
     for event in events:
@@ -122,9 +173,32 @@ def analyze_flip_events(
         sequence_gaps,
         frame_gaps,
         metadata_mismatches,
-        paired,
+        long_to_short,
         tuple(latency),
+        long_to_short,
+        short_to_long,
+        pair_errors,
     )
+
+
+def validate_alternating_smoke_metadata(events: Sequence[dict[str, Any]]) -> int:
+    """Validate the Phase 3 even-frame photodiode/buffer convention only."""
+    return sum(
+        event["buffer_index"] != event["frame_index"] % 2
+        or event["photodiode_state"] != ("on" if event["frame_index"] % 2 == 0 else "off")
+        for event in events
+    )
+
+
+def _metadata_mismatch_count(
+    events: Sequence[dict[str, Any]], expected: Sequence[dict[str, Any]] | None
+) -> int:
+    if expected is None:
+        return 0
+    mismatches = abs(len(events) - len(expected))
+    for event, target in zip(events, expected):
+        mismatches += any(event.get(key) != value for key, value in target.items())
+    return mismatches
 
 
 def summarize_intervals(

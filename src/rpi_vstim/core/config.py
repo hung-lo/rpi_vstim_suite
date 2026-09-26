@@ -79,6 +79,7 @@ class CameraDeviceConfig:
     output_naming_policy: str = "capture"
     startup_timeout_s: float = 5.0
     stop_timeout_s: float = 5.0
+    stall_timeout_s: float | None = 30.0
 
     @property
     def stable_device_identifier(self) -> str:
@@ -196,6 +197,8 @@ class Config:
                 raise ConfigError(f"camera requested dimensions/FPS must be positive: {camera.id}")
             if camera.startup_timeout_s <= 0 or camera.stop_timeout_s <= 0:
                 raise ConfigError(f"camera timeouts must be positive: {camera.id}")
+            if camera.stall_timeout_s is not None and camera.stall_timeout_s <= 0:
+                raise ConfigError(f"camera stall_timeout_s must be positive or null: {camera.id}")
             if not camera.output_extension or "/" in camera.output_extension:
                 raise ConfigError(f"camera output_extension is invalid: {camera.id}")
             if camera.output_naming_policy != "capture":

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from .cache import BoundedCache
+from .timestamps import utc_ns
 
 IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"})
 
@@ -32,6 +34,54 @@ class AssetMetadata:
     height_px: int
     mode: str
     byte_size: int
+    mtime_ns: int
+    inode: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "relative_path": self.relative_path,
+            "asset_id": self.asset_id,
+            "sha256": self.sha256,
+            "width_px": self.width_px,
+            "height_px": self.height_px,
+            "mode": self.mode,
+            "byte_size": self.byte_size,
+            "mtime_ns": self.mtime_ns,
+            "inode": self.inode,
+        }
+
+
+@dataclass(frozen=True)
+class AssetManifest:
+    """Immutable metadata index built once before presentation."""
+
+    schema_version: int
+    created_utc_ns: int
+    entries: tuple[AssetMetadata, ...]
+    manifest_hash: str
+
+    @classmethod
+    def build(cls, entries: tuple[AssetMetadata, ...]) -> "AssetManifest":
+        canonical = json.dumps(
+            [entry.as_dict() for entry in entries],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return cls(1, utc_ns(), entries, hashlib.sha256(canonical).hexdigest())
+
+    def entry(self, relative_path: str) -> AssetMetadata:
+        for entry in self.entries:
+            if entry.relative_path == str(Path(relative_path)):
+                return entry
+        raise AssetNotFoundError(f"asset is absent from manifest: {relative_path}")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "created_utc_ns": self.created_utc_ns,
+            "manifest_hash": self.manifest_hash,
+            "entries": [entry.as_dict() for entry in self.entries],
+        }
 
 
 @dataclass(frozen=True)
@@ -77,6 +127,7 @@ class AssetResolver:
 
     def metadata(self, relative_path: str) -> AssetMetadata:
         path = self.resolve(relative_path)
+        stat = path.stat()
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         try:
             from PIL import Image
@@ -93,12 +144,18 @@ class AssetResolver:
             width_px=width_px,
             height_px=height_px,
             mode=mode,
-            byte_size=path.stat().st_size,
+            byte_size=stat.st_size,
+            mtime_ns=stat.st_mtime_ns,
+            inode=stat.st_ino,
         )
 
     def verify(self, relative_paths: tuple[str, ...] | None = None) -> tuple[AssetMetadata, ...]:
         paths = self.discover() if relative_paths is None else relative_paths
         return tuple(self.metadata(path) for path in paths)
+
+    def build_manifest(self, relative_paths: tuple[str, ...]) -> AssetManifest:
+        unique_paths = tuple(dict.fromkeys(relative_paths))
+        return AssetManifest.build(tuple(self.metadata(path) for path in unique_paths))
 
 
 class AssetPreparer:
@@ -113,6 +170,7 @@ class AssetPreparer:
         transform: str = "fit_pad",
         background_value: int = 127,
         cache_size: int = 8,
+        manifest: AssetManifest | None = None,
     ) -> None:
         if width_px <= 0 or height_px <= 0:
             raise ValueError("prepared asset dimensions must be positive")
@@ -125,17 +183,23 @@ class AssetPreparer:
         self.height_px = height_px
         self.transform = transform
         self.background_value = background_value
+        self.manifest = manifest
         self.cache = BoundedCache[str, PreparedAsset](
             cache_size,
             size_of=lambda asset: len(asset.rgb888),
         )
 
     def prepare(self, relative_path: str) -> PreparedAsset:
-        metadata = self.resolver.metadata(relative_path)
+        metadata = (
+            self.manifest.entry(relative_path)
+            if self.manifest is not None
+            else self.resolver.metadata(relative_path)
+        )
         cached = self.cache.get(metadata.sha256)
         if cached is not None:
             return cached
         path = self.resolver.resolve(relative_path)
+        self._verify_source_fingerprint(path, metadata)
         try:
             from PIL import Image, ImageOps
 
@@ -168,6 +232,7 @@ class AssetPreparer:
             rgb888 = image.tobytes()
         except Exception as exc:
             raise AssetDecodeError(f"cannot prepare asset {relative_path}: {exc}") from exc
+        self._verify_source_fingerprint(path, metadata)
         asset = PreparedAsset(
             metadata=metadata,
             width_px=self.width_px,
@@ -182,6 +247,16 @@ class AssetPreparer:
         )
         self.cache.put(metadata.sha256, asset)
         return asset
+
+    @staticmethod
+    def _verify_source_fingerprint(path: Path, metadata: AssetMetadata) -> None:
+        stat = path.stat()
+        if (
+            stat.st_size != metadata.byte_size
+            or stat.st_mtime_ns != metadata.mtime_ns
+            or stat.st_ino != metadata.inode
+        ):
+            raise AssetError(f"asset changed during preparation: {metadata.relative_path}")
 
     def metrics(self) -> dict[str, int]:
         return self.cache.metrics()

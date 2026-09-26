@@ -11,6 +11,8 @@ def test_resource_budget_is_parameterized_and_bounded():
             pixel_format="RGB565",
             prepared_cache_frames=8,
             natural_source_cache_frames=2,
+            frame_transport_capacity=4,
+            camera_count=2,
             camera_queue_bytes_per_camera=1024,
             camera_bitrate_bps=(8_000_000, 12_000_000),
         )
@@ -21,7 +23,10 @@ def test_resource_budget_is_parameterized_and_bounded():
         "scanout_bytes",
         "prepared_cache_bytes",
         "natural_source_cache_bytes",
+        "frame_transport_queue_bytes",
         "camera_queue_bytes",
+        "asset_manifest_bytes",
+        "status_queue_bytes",
         "telemetry_buffer_bytes",
         "log_buffer_bytes",
     ))

@@ -6,8 +6,9 @@ import re
 import tempfile
 from dataclasses import dataclass
 from dataclasses import asdict, is_dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .config import Config
 from .event_log import EventLogger
@@ -22,7 +23,7 @@ def atomic_write_json(path: Path, value: Any) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, indent=2, sort_keys=True)
+            json.dump(_jsonable(value), handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -51,7 +52,14 @@ class SessionOutput:
         self.context = context
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
-        self._display_results: list[dict[str, Any]] = []
+        self._display_stream: TextIO | None = None
+        self._display_summary = {
+            "schema_version": 1,
+            "record_count": 0,
+            "requested_frame_count": 0,
+            "completed_frame_count": 0,
+            "incomplete": True,
+        }
 
     def write_initial_outputs(self) -> None:
         self.context.session_root.mkdir(parents=True, exist_ok=True)
@@ -72,6 +80,13 @@ class SessionOutput:
         self._write_manifest()
         self._events = EventLogger(self.context.session_root / "events.csv")
         self._events.open(["event", "lifecycle", "sequence_id", "timestamp_utc_ns", "detail"])
+        self._display_stream = (self.context.session_root / "display_results.jsonl").open(
+            "w", encoding="utf-8"
+        )
+        atomic_write_json(
+            self.context.session_root / "display_results.json",
+            self._display_summary,
+        )
         self.record_event("SESSION_CREATED", lifecycle="CREATED")
 
     def _write_manifest(self) -> None:
@@ -99,12 +114,27 @@ class SessionOutput:
         value = asdict(value) if is_dataclass(value) else value
         atomic_write_json(self.context.session_root / "cache_manifest.json", value)
 
+    def write_asset_manifest(self, value: Any) -> None:
+        value = value.as_dict() if hasattr(value, "as_dict") else value
+        atomic_write_json(self.context.session_root / "asset_manifest.json", value)
+
     def write_display_result(self, result: Any) -> None:
+        if self._display_stream is None:
+            raise RuntimeError("session outputs are not initialized")
         value = asdict(result) if is_dataclass(result) else result
-        self._display_results.append(value)
+        self._display_stream.write(json.dumps(_jsonable(value), sort_keys=True) + "\n")
+        self._display_stream.flush()
+        self._display_summary["record_count"] += 1
+        if isinstance(value, dict):
+            self._display_summary["requested_frame_count"] += int(
+                value.get("requested_frame_count", 0)
+            )
+            self._display_summary["completed_frame_count"] += int(
+                value.get("completed_frame_count", 0)
+            )
         atomic_write_json(
             self.context.session_root / "display_results.json",
-            {"results": self._display_results},
+            self._display_summary,
         )
 
     def write_resource_summary(self, value: Any) -> None:
@@ -156,6 +186,16 @@ class SessionOutput:
         atomic_write_json(self.context.session_root / "final_status.json", self._manifest)
 
     def close(self) -> None:
+        if self._display_stream is not None:
+            self._display_stream.flush()
+            os.fsync(self._display_stream.fileno())
+            self._display_stream.close()
+            self._display_stream = None
+            self._display_summary["incomplete"] = False
+            atomic_write_json(
+                self.context.session_root / "display_results.json",
+                self._display_summary,
+            )
         if self._events is not None:
             self._events.close()
             self._events = None
@@ -185,3 +225,17 @@ def new_session(
         host_provenance=collect_provenance(source_commit=source_commit),
     )
     return SessionOutput(context)
+
+
+def _jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return _jsonable(asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value

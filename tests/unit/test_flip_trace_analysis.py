@@ -38,6 +38,7 @@ def test_flip_analysis_does_not_report_unknown_clock_latency():
         trace,
         nominal_refresh_hz=60.0,
         kernel_timestamp_clock="unknown",
+        validate_alternating_smoke=True,
     )
     assert analysis.callback_dispatch_latency_ns == ()
     assert analysis.kernel_sequence_gap_count == 2
@@ -50,3 +51,14 @@ def test_flip_analysis_marks_callback_long_short_pair_separately():
     trace[3]["callback_monotonic_ns"] = trace[2]["callback_monotonic_ns"] + 8_000_000
     analysis = analyze_flip_events(trace, nominal_refresh_hz=60.0)
     assert analysis.paired_callback_displacement_count == 1
+    assert analysis.long_to_short_pair_count == 1
+    assert analysis.short_to_long_pair_count == 0
+    assert len(analysis.paired_interval_sum_error_us) == 1
+
+
+def test_flip_analysis_accepts_constant_natural_image_metadata():
+    trace = events(4)
+    for event in trace:
+        event["photodiode_state"] = "on"
+    analysis = analyze_flip_events(trace, nominal_refresh_hz=60.0)
+    assert analysis.frame_metadata_mismatch_count == 0

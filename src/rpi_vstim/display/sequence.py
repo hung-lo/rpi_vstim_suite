@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import queue
 import time
+from collections import deque
 from dataclasses import dataclass
+from threading import Condition
 from typing import Iterable, Iterator
 
 from rpi_vstim.core.assets import AssetPreparer
@@ -55,49 +56,79 @@ class BoundedFrameTransport:
         if capacity <= 0:
             raise ValueError("transport capacity must be positive")
         self.capacity = capacity
-        self._queue: queue.Queue[PreparedSequenceFrame | object] = queue.Queue(maxsize=capacity)
+        self._queue: deque[PreparedSequenceFrame] = deque()
+        self._condition = Condition()
         self._closed = False
         self._aborted: str | None = None
 
     def put(self, frame: PreparedSequenceFrame, *, timeout_s: float | None = None) -> None:
-        if self._closed:
-            if self._aborted is not None:
-                raise FrameTransportAborted(self._aborted)
-            raise FrameTransportClosed("frame transport is closed")
-        try:
-            self._queue.put(frame, timeout=timeout_s)
-        except queue.Full as exc:
-            raise FrameTransportBackpressure("frame transport is full") from exc
+        deadline = self._deadline(timeout_s)
+        with self._condition:
+            while len(self._queue) >= self.capacity:
+                self._raise_if_closed()
+                remaining = self._remaining(deadline)
+                if remaining == 0:
+                    raise FrameTransportBackpressure("frame transport is full")
+                self._condition.wait(remaining)
+            self._raise_if_closed()
+            self._queue.append(frame)
+            self._condition.notify_all()
 
     def get(self, *, timeout_s: float | None = None) -> PreparedSequenceFrame | None:
-        if timeout_s is not None and timeout_s < 0:
-            raise ValueError("timeout_s must be non-negative")
-        deadline = None if timeout_s is None else time.monotonic() + timeout_s
-        while True:
-            if self._closed and self._queue.empty():
-                return None
-            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
-            try:
-                item = self._queue.get(timeout=remaining)
-            except queue.Empty as exc:
+        deadline = self._deadline(timeout_s)
+        with self._condition:
+            while not self._queue:
+                if self._aborted is not None:
+                    raise FrameTransportAborted(self._aborted)
                 if self._closed:
                     return None
-                raise TimeoutError("no prepared frame available") from exc
-            return item
+                remaining = self._remaining(deadline)
+                if remaining == 0:
+                    raise TimeoutError("no prepared frame available")
+                self._condition.wait(remaining)
+            if self._aborted is not None:
+                raise FrameTransportAborted(self._aborted)
+            frame = self._queue.popleft()
+            self._condition.notify_all()
+            return frame
 
     def finish(self) -> None:
-        self._closed = True
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
 
     def abort(self, reason: str) -> None:
-        self._aborted = reason
-        self._closed = True
+        with self._condition:
+            self._aborted = reason
+            self._closed = True
+            self._queue.clear()
+            self._condition.notify_all()
 
     @property
     def aborted(self) -> str | None:
         return self._aborted
 
     def __len__(self) -> int:
-        return self._queue.qsize()
+        with self._condition:
+            return len(self._queue)
+
+    @staticmethod
+    def _deadline(timeout_s: float | None) -> float | None:
+        if timeout_s is not None and timeout_s < 0:
+            raise ValueError("timeout_s must be non-negative")
+        return None if timeout_s is None else time.monotonic() + timeout_s
+
+    @staticmethod
+    def _remaining(deadline: float | None) -> float | None:
+        if deadline is None:
+            return None
+        return max(0.0, deadline - time.monotonic())
+
+    def _raise_if_closed(self) -> None:
+        if self._aborted is not None:
+            raise FrameTransportAborted(self._aborted)
+        if self._closed:
+            raise FrameTransportClosed("frame transport is closed")
 
     def iter_frames(self) -> Iterator[PreparedSequenceFrame]:
         while True:
@@ -162,8 +193,7 @@ class NaturalImageFrameSource:
 
     def prepared_frames(self, plan: SessionPlan) -> Iterator[PreparedSequenceFrame]:
         for frame in self.planned_frames(plan):
-            rendered = self.renderer.prepare(
-                frame.frame_index,
+            packed = self.renderer.prepare_payload(
                 frame.rgb888,
                 photodiode_state=frame.photodiode_state,
                 asset_key=frame.asset_key,
@@ -175,7 +205,7 @@ class NaturalImageFrameSource:
                 asset_path=frame.asset_path,
                 asset_key=frame.asset_key,
                 photodiode_state=frame.photodiode_state,
-                packed=bytes(rendered.data),
+                packed=packed,
             )
 
     def metrics(self) -> dict[str, object]:

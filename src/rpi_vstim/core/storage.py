@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -19,6 +21,17 @@ class StorageInspection:
     free_bytes: int | None
     status: str
 
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "configured_path": str(self.configured_path),
+            "exists": self.exists,
+            "is_directory": self.is_directory,
+            "mounted": self.mounted,
+            "writable": self.writable,
+            "free_bytes": self.free_bytes,
+            "status": self.status,
+        }
+
 
 @dataclass(frozen=True)
 class StoragePreflight:
@@ -26,6 +39,15 @@ class StoragePreflight:
     passed: bool
     estimated_required_bytes: int
     checks: tuple[dict[str, object], ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path": str(self.path),
+            "passed": self.passed,
+            "estimated_required_bytes": self.estimated_required_bytes,
+            "checks": list(self.checks),
+            "status": self.status,
+        }
 
     @property
     def status(self) -> str:
@@ -64,6 +86,7 @@ def preflight_storage(
     expected_device: str | None = None,
     identity_reader: Callable[[Path], str] | None = None,
     allow_test_path: bool = False,
+    write_probe: bool = False,
 ) -> StoragePreflight:
     """Fail closed before production writes; never mounts or selects a fallback.
 
@@ -114,6 +137,9 @@ def preflight_storage(
                 "detail": f"expected={expected_device!r}, observed={identity!r}",
             }
         )
+    if write_probe:
+        passed, detail = _write_probe(root)
+        checks.append({"name": "write_probe", "passed": passed, "detail": detail})
     return StoragePreflight(
         root,
         all(bool(check["passed"]) for check in checks),
@@ -123,6 +149,30 @@ def preflight_storage(
 
 
 def _unsafe_fallback(path: Path) -> bool:
-    home = Path.home().resolve()
-    temporary = Path(os.environ.get("TMPDIR", "/tmp")).resolve()
-    return path == Path("/") or path == home or home in path.parents or path == temporary
+    resolved = path.resolve()
+    unsafe_roots = {
+        Path("/").resolve(),
+        Path.home().resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    }
+    if os.name == "posix":
+        unsafe_roots.add(Path("/var/tmp").resolve())
+    return any(resolved == root or root in resolved.parents for root in unsafe_roots)
+
+
+def _write_probe(root: Path) -> tuple[bool, str]:
+    if not root.is_dir():
+        return False, "root is not a directory"
+    path = root / f".rpi-vstim-preflight-{uuid.uuid4().hex}"
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(descriptor, b"rpi-vstim-preflight\n")
+        os.fsync(descriptor)
+        return True, "write/fsync/delete probe passed"
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        path.unlink(missing_ok=True)

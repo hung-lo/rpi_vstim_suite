@@ -1,8 +1,14 @@
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
-from rpi_vstim.core.assets import AssetDecodeError, AssetNotFoundError, AssetPreparer, AssetResolver
+from rpi_vstim.core.assets import (
+    AssetDecodeError,
+    AssetNotFoundError,
+    AssetPreparer,
+    AssetResolver,
+)
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
 from rpi_vstim.display.renderer import ProductionFrameRenderer
 from rpi_vstim.display.sequence import (
@@ -35,6 +41,20 @@ def test_asset_resolver_and_preparer_are_deterministic_and_bounded(tmp_path):
     preparer.prepare("b.png")
     assert preparer.metrics()["evictions"] == 1
     assert preparer.metrics()["memory_bytes"] == 3 * 3 * 3
+
+
+def test_manifest_avoids_rehashing_and_reopening_cached_assets(tmp_path, monkeypatch):
+    write_image(tmp_path / "a.png", (200, 100, 50))
+    resolver = AssetResolver(tmp_path)
+    manifest = resolver.build_manifest(("a.png",))
+    assert manifest.entry("a.png").sha256 == manifest.entries[0].sha256
+    preparer = AssetPreparer(resolver, 3, 3, manifest=manifest)
+    first = preparer.prepare("a.png")
+
+    monkeypatch.setattr(resolver, "metadata", lambda _path: (_ for _ in ()).throw(AssertionError()))
+    monkeypatch.setattr(resolver, "resolve", lambda _path: (_ for _ in ()).throw(AssertionError()))
+    assert preparer.prepare("a.png") is first
+    assert preparer.metrics()["hits"] == 1
 
 
 def test_asset_errors_are_explicit(tmp_path):
@@ -77,6 +97,7 @@ def test_natural_image_source_maps_plan_frames_and_prevents_stale_pixels(tmp_pat
     assert [frame.photodiode_state for frame in frames] == ["off", "on", "on", "off"]
     assert frames[1].asset_key == frames[2].asset_key
     assert frames[1].packed == frames[2].packed
+    assert frames[1].packed is frames[2].packed
     assert frames[0].packed != frames[1].packed
     assert source.metrics()["renderer_cache"]["hits"] == 2
 
@@ -98,6 +119,68 @@ def test_frame_transport_is_ordered_bounded_and_abortable():
     aborted.abort("producer stopped")
     with pytest.raises(RuntimeError, match="producer stopped"):
         aborted.put(frame)
+
+
+def test_frame_transport_finish_wakes_blocked_consumer():
+    transport = BoundedFrameTransport(1)
+    result = []
+
+    def consume():
+        result.append(transport.get())
+
+    thread = Thread(target=consume)
+    thread.start()
+    transport.finish()
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert result == [None]
+
+
+def test_frame_transport_abort_wakes_consumer_and_clears_queued_frames():
+    transport = BoundedFrameTransport(1)
+    result = []
+
+    def consume():
+        try:
+            transport.get()
+        except Exception as exc:  # asserted below; thread must not hang
+            result.append(exc)
+
+    thread = Thread(target=consume)
+    thread.start()
+    transport.abort("producer failed")
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert len(result) == 1
+    assert isinstance(result[0], RuntimeError)
+    assert str(result[0]) == "producer failed"
+    queued = BoundedFrameTransport(1)
+    queued.put(PreparedSequenceFrame(0, "event", "sequence", "a.png", "asset", "on", b"a"))
+    queued.abort("discard queued")
+    with pytest.raises(RuntimeError, match="discard queued"):
+        queued.get(timeout_s=0)
+
+
+def test_frame_transport_blocked_put_wakes_on_abort():
+    transport = BoundedFrameTransport(1)
+    frame = PreparedSequenceFrame(0, "event", "sequence", "a.png", "asset", "on", b"a")
+    transport.put(frame)
+    result = []
+
+    def produce():
+        try:
+            transport.put(frame)
+        except Exception as exc:  # asserted below; thread must not hang
+            result.append(exc)
+
+    thread = Thread(target=produce)
+    thread.start()
+    transport.abort("consumer failed")
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert len(result) == 1
+    assert isinstance(result[0], RuntimeError)
+    assert str(result[0]) == "consumer failed"
 
 
 def test_plan_to_transport_replays_deterministically_and_fails_mid_plan(tmp_path):
