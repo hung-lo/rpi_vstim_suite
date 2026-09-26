@@ -214,3 +214,31 @@ sustained two-camera recording to the SSD, and run combined leased display +
 two-camera + SSD-write load while collecting RAM, CPU, temperature, throttling,
 and display timing. The Pi SD card must not be used as a substitute for
 production-storage acceptance.
+
+## Remote RC hardware validation — 2026-09-26
+
+The bounded remote validation report is
+`docs/hardware/pi5_rc_hardware_validation_2026-09-26.md`.
+
+- [x] Validate the full native libdrm/Wayland build on the Pi with
+  `-Wall -Wextra -Wpedantic -Werror`, including KMS probe, DRM lease support,
+  and both native self-tests.
+- [x] Run the full Python test suite under Pi Python 3.13.5: `211 passed`;
+  compileall, shell syntax, and the safe preflight fixture config also pass.
+- [x] Run exactly one corrected HDMI-A-2-only 300-frame trace with the
+  corrected kernel/callback/realtime/frame/buffer/photodiode schema;
+  connector 42 and lease objects `[42,93,104,666]` completed `300/300` with
+  contiguous sequences, zero mismatches, and `restored=true`.
+- [x] Verify `DRM_CAP_TIMESTAMP_MONOTONIC=1`, labwc continuity, HDMI-A-1
+  compositor continuity, and clean lease release.
+- [x] Resolve both live IMX708 cameras from stable topology identities to
+  unique numeric rpicam selectors; both one-second opens pass and duplicate
+  identities fail closed.
+- [x] Run the operator preflight and five hardware-free simulations/session
+  inspections on Pi Python 3.13.5.
+- [x] Run one short `/tmp`-only leased production-renderer plus dual-camera
+  integration smoke with clean camera/display exit and restoration.
+- [ ] Accept production storage: the experiment SSD is absent, and no mount,
+  write probe, endurance test, or SD-card fallback was used.
+- [ ] Accept physical/optical display timing, GPIO/reward/lick behavior, or a
+  behavioral session; these remain deferred until physical presence.

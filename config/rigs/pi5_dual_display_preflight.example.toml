@@ -1,0 +1,42 @@
+# Safe operator-preflight fixture for the currently audited Pi 5.
+# Preflight never acquires the display, opens cameras, or mounts storage.
+[display]
+backend = "kms"
+ownership = "lease"
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
+width_px = 1024
+height_px = 600
+refresh_hz = 59.82
+require_exact_refresh = true
+refresh_tolerance_hz = 0.05
+pixel_format = "RGB565"
+
+[cameras]
+enabled_by_default = true
+record_to_session = true
+verify_output_growth = true
+
+[[cameras.devices]]
+id = "imx708_noir"
+role = "camera_0"
+required = true
+backend = "rpicam"
+device = "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a"
+expected_family = "imx708"
+
+[[cameras.devices]]
+id = "imx708_wide_noir"
+role = "camera_1"
+required = true
+backend = "rpicam"
+device = "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a"
+expected_family = "imx708"
+
+[protocol]
+name = "natural-images"
+version = "software-groundwork"
+image_duration_s = 0.5015045135406219
+image_count = 5
+repeat_count = 2
+selection_seed = 777

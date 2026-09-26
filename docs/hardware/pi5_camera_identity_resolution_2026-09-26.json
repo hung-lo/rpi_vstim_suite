@@ -1,0 +1,54 @@
+{
+  "date": "2026-09-26",
+  "source": "rpicam-hello --list-cameras",
+  "configured_identities": [
+    {
+      "camera_id": "imx708_noir",
+      "stable_device_identifier": "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a",
+      "expected_family": "imx708"
+    },
+    {
+      "camera_id": "imx708_wide_noir",
+      "stable_device_identifier": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a",
+      "expected_family": "imx708"
+    }
+  ],
+  "enumerated": [
+    {
+      "stable_device_identifier": "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a",
+      "family": "imx708",
+      "runtime_selector": "0",
+      "topology": "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a",
+      "runtime_nodes": ["/dev/media0", "/dev/video8"],
+      "udev_primary_path": "/dev/v4l/by-path/platform-1f00110000.csi-video-index0"
+    },
+    {
+      "stable_device_identifier": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a",
+      "family": "imx708",
+      "runtime_selector": "1",
+      "topology": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a",
+      "runtime_nodes": ["/dev/media4", "/dev/video0"],
+      "udev_primary_path": "/dev/v4l/by-path/platform-1f00128000.csi-video-index0"
+    }
+  ],
+  "resolution": {
+    "passed": true,
+    "missing": [],
+    "ambiguous": [],
+    "mismatched_family": [],
+    "resolved_selectors": {
+      "imx708_noir": "0",
+      "imx708_wide_noir": "1"
+    }
+  },
+  "capture_commands": [
+    ["rpicam-vid", "--camera", "0", "--output", "imx708_noir.h264"],
+    ["rpicam-vid", "--camera", "1", "--output", "imx708_wide_noir.h264"]
+  ],
+  "one_second_open_tests": [
+    {"selector": "0", "command": "rpicam-hello --camera 0 --timeout 1000 --nopreview", "exit": 0},
+    {"selector": "1", "command": "rpicam-hello --camera 1 --timeout 1000 --nopreview", "exit": 0}
+  ],
+  "ambiguity_check": {"duplicate_identity_rejected": true},
+  "workers_remaining_after_test": false
+}

@@ -1,4 +1,6 @@
 from rpi_vstim.cli import main
+from rpi_vstim.core.config import config_from_mapping
+from rpi_vstim.core.dry_run import build_dry_run_report
 
 
 def test_list_protocols(capsys):
@@ -25,6 +27,15 @@ def test_preflight_text_includes_operator_budget_and_camera_fields(capsys):
     assert "ram_bytes=" in output
     assert "storage_bytes=" in output
     assert "cameras=none" in output
+
+
+def test_reward_preflight_does_not_write_configured_root(tmp_path):
+    config = config_from_mapping(
+        {"paths": {"output_root": str(tmp_path)}, "protocol": {"name": "reward-conditioning"}}
+    )
+    report = build_dry_run_report(config, protocol_name="reward-conditioning")
+    assert report["plan"]["event_count"] == 500
+    assert not (tmp_path / ".simulation_reward_state").exists()
 
 
 def test_every_software_groundwork_protocol_runs_without_hardware(tmp_path, capsys):

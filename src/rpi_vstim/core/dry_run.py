@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .assets import AssetResolver, build_selected_asset_manifest
 from .config import Config
@@ -24,7 +25,9 @@ def build_dry_run_report(
     if protocol != config.protocol.name:
         config = replace(config, protocol=replace(config.protocol, name=protocol))
     config.validate()
-    plan = build_simulation_plan(config, protocol_name=protocol, seed=seed)
+    with TemporaryDirectory(prefix="rpi-vstim-preflight-") as scratch:
+        plan_config = replace(config, paths=replace(config.paths, output_root=Path(scratch)))
+        plan = build_simulation_plan(plan_config, protocol_name=protocol, seed=seed)
     selected = tuple(
         str(event.metadata["image"])
         for event in plan.events

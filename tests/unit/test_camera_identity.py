@@ -5,6 +5,7 @@ import pytest
 from rpi_vstim.camera.identity import (
     CameraIdentity,
     parse_enumerated_cameras,
+    parse_rpicam_camera_listing,
     resolve_camera_identities,
 )
 
@@ -16,13 +17,13 @@ def enumeration():
                 {
                     "stable_device_identifier": "imx708-left",
                     "family": "imx708",
-                    "runtime_selector": "camera=0",
+                    "runtime_selector": "0",
                     "topology": "platform:10/i2c-1/port@0",
                 },
                 {
                     "stable_device_identifier": "imx708-right",
                     "family": "imx708",
-                    "runtime_selector": "camera=1",
+                    "runtime_selector": "1",
                     "topology": "platform:10/i2c-1/port@1",
                 },
             ]
@@ -39,7 +40,22 @@ def test_camera_identity_resolution_distinguishes_two_same_family_cameras():
         enumeration(),
     )
     assert report.passed
-    assert [camera.runtime_selector for camera in report.resolved] == ["camera=0", "camera=1"]
+    assert [camera.runtime_selector for camera in report.resolved] == ["0", "1"]
+
+
+def test_rpicam_listing_resolves_topology_and_numeric_selector():
+    cameras = parse_rpicam_camera_listing(
+        """Available cameras
+-----------------
+0 : imx708_noir [4608x2592 10-bit RGGB] (/base/axi/i2c@88000/imx708@1a)
+1 : imx708_wide_noir [4608x2592 10-bit RGGB] (/base/axi/i2c@80000/imx708@1a)
+"""
+    )
+    assert [(camera.family, camera.runtime_selector) for camera in cameras] == [
+        ("imx708", "0"),
+        ("imx708", "1"),
+    ]
+    assert cameras[0].stable_device_identifier == cameras[0].topology
 
 
 @pytest.mark.parametrize("configured_field", ["missing", "ambiguous", "family"])

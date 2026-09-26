@@ -1,10 +1,11 @@
-from pathlib import Path
 import json
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
+from rpi_vstim.camera.identity import ResolvedCamera
 from rpi_vstim.camera.supervisor import (
     BoundedCameraStatusChannel,
     CameraCaptureSpec,
@@ -12,7 +13,6 @@ from rpi_vstim.camera.supervisor import (
     LocalCameraSupervisor,
     build_rpicam_command,
 )
-from rpi_vstim.camera.identity import ResolvedCamera
 from rpi_vstim.core.camera import CameraState
 
 
@@ -139,11 +139,11 @@ def test_rpicam_command_does_not_guess_transient_video_nodes(tmp_path):
             pixel_format_or_codec="h264",
         ),
         tmp_path / "capture.h264",
-        resolved_camera=ResolvedCamera("face", "usb-serial", "imx708", "camera=0", "platform:0"),
+        resolved_camera=ResolvedCamera("face", "usb-serial", "imx708", "0", "platform:0"),
     )
     assert command[0] == "rpicam-vid"
     assert "/dev/video0" not in command
-    assert command[1:3] == ("--camera", "camera=0")
+    assert command[1:3] == ("--camera", "0")
     assert "--width" in command and "1280" in command
 
 

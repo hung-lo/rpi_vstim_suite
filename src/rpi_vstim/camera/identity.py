@@ -1,10 +1,17 @@
-"""Fixture-driven stable camera identity resolution without device access."""
+"""Stable camera identity resolution from live or fixture enumeration."""
 
 from __future__ import annotations
 
 import json
+import re
+import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
+
+_RPICAM_CAMERA_LINE = re.compile(
+    r"^\s*(\d+)\s*:\s*(\S+)\s+\[[^]]+\]\s+\(([^)]+)\)\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -80,6 +87,43 @@ def parse_enumerated_cameras(value: str | Iterable[dict[str, Any]]) -> tuple[Enu
         )
         for row in rows
     )
+
+
+def parse_rpicam_camera_listing(value: str) -> tuple[EnumeratedCamera, ...]:
+    cameras = []
+    for line in value.splitlines():
+        match = _RPICAM_CAMERA_LINE.match(line)
+        if match is None:
+            continue
+        index, name, topology = match.groups()
+        cameras.append(
+            EnumeratedCamera(
+                stable_device_identifier=topology,
+                family=name.split("_", 1)[0],
+                runtime_selector=index,
+                topology=topology,
+            )
+        )
+    if not cameras:
+        raise ValueError("rpicam camera enumeration returned no cameras")
+    if len({camera.runtime_selector for camera in cameras}) != len(cameras):
+        raise ValueError("rpicam camera enumeration returned duplicate selectors")
+    if len({camera.stable_device_identifier for camera in cameras}) != len(cameras):
+        raise ValueError("rpicam camera enumeration returned duplicate stable identities")
+    return tuple(cameras)
+
+
+def enumerate_rpicam_cameras(
+    command: str = "rpicam-hello", *, timeout_s: float = 5.0
+) -> tuple[EnumeratedCamera, ...]:
+    result = subprocess.run(
+        (command, "--list-cameras"),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+    )
+    return parse_rpicam_camera_listing(f"{result.stdout}\n{result.stderr}")
 
 
 def resolve_camera_identities(

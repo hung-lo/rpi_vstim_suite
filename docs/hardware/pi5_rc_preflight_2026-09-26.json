@@ -1,0 +1,116 @@
+{
+  "asset_manifest": null,
+  "asset_manifest_digest": null,
+  "asset_status": "deferred: configured asset root is unavailable",
+  "camera_requirements": [
+    {
+      "expected_family": "imx708",
+      "id": "imx708_noir",
+      "required": true,
+      "role": "camera_0",
+      "stable_identity": "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a"
+    },
+    {
+      "expected_family": "imx708",
+      "id": "imx708_wide_noir",
+      "required": true,
+      "role": "camera_1",
+      "stable_identity": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a"
+    }
+  ],
+  "config_digest": "ff250cb28f498d730b311c9163403b8e2f0a04b954c4458afe13b4848105ac6d",
+  "display_requirement": {
+    "backend": "kms",
+    "calibration_id": "",
+    "eye_distance_cm": 16.0,
+    "height_px": 600,
+    "ownership": "lease",
+    "physical_height_cm": 8.72,
+    "physical_width_cm": 15.5,
+    "pixel_format": "RGB565",
+    "preview_connector": "HDMI-A-1",
+    "refresh_hz": 59.82,
+    "refresh_tolerance_hz": 0.05,
+    "require_exact_refresh": true,
+    "stimulus_connector": "HDMI-A-2",
+    "width_px": 1024
+  },
+  "hardware_access": false,
+  "hardware_gates_not_exercised": [
+    "DRM/KMS acquisition",
+    "camera capture and identity negotiation",
+    "SSD identity and sustained writes",
+    "GPIO/reward/lick actuation",
+    "photodiode validation"
+  ],
+  "plan": {
+    "estimated_duration_s": 19.675693747910397,
+    "event_count": 22,
+    "selected_image_occurrences": 10,
+    "total_frames": 1177
+  },
+  "production_root_requirement": {
+    "mount_required_for_hardware": true,
+    "path": "/mnt/hd",
+    "sd_card_is_not_accepted": true
+  },
+  "protocol": "natural-images",
+  "resource_budget": {
+    "asset_manifest_bytes": 0,
+    "camera_queue_bytes": 0,
+    "camera_storage_bytes_per_second": 0,
+    "estimated_ram_bytes": 38993920,
+    "frame_transport_queue_bytes": 9830400,
+    "log_buffer_bytes": 1048576,
+    "natural_source_cache_bytes": 14745600,
+    "prepared_cache_bytes": 9830400,
+    "scanout_bytes": 2457600,
+    "status_queue_bytes": 32768,
+    "telemetry_buffer_bytes": 1048576
+  },
+  "schema_version": 1,
+  "seed": 0,
+  "storage": {
+    "checks": [
+      {
+        "detail": "temporary/test override",
+        "name": "safe_production_root",
+        "passed": true
+      },
+      {
+        "detail": "absent",
+        "name": "exists",
+        "passed": false
+      },
+      {
+        "detail": "absent",
+        "name": "directory",
+        "passed": false
+      },
+      {
+        "detail": "mount required",
+        "name": "mounted",
+        "passed": true
+      },
+      {
+        "detail": "absent",
+        "name": "writable",
+        "passed": false
+      },
+      {
+        "detail": "None",
+        "name": "minimum_free_bytes",
+        "passed": false
+      },
+      {
+        "detail": "1205248",
+        "name": "estimated_required_bytes",
+        "passed": false
+      }
+    ],
+    "estimated_required_bytes": 1205248,
+    "passed": false,
+    "path": "/mnt/hd",
+    "status": "failed:exists"
+  }
+}

@@ -1,0 +1,39 @@
+during-start 2026-09-26T09:26:46,390091773-04:00
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Gi       774Mi       130Mi       134Mi       1.3Gi       1.2Gi
+Swap:          2.0Gi        12Mi       1.9Gi
+0.00 0.02 0.00 2/380 815298
+40250
+throttled=0x0
+ 815257 Sl         00:01 29.7  4.7 rpicam-vid --camera 0 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output /tmp/rpi-vstim-combined-rc-20260926/imx708_noir.h264
+ 815258 Sl         00:01 30.0  4.7 rpicam-vid --camera 1 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output /tmp/rpi-vstim-combined-rc-20260926/imx708_wide_noir.h264
+during-display 2026-09-26T09:26:48,406067171-04:00
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Gi       824Mi       124Mi       137Mi       1.3Gi       1.2Gi
+Swap:          2.0Gi        12Mi       1.9Gi
+0.08 0.04 0.01 1/382 815308
+40250
+throttled=0x0
+ 815257 Sl         00:03 20.4  4.7 rpicam-vid --camera 0 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output /tmp/rpi-vstim-combined-rc-20260926/imx708_noir.h264
+ 815258 Sl         00:03 20.5  4.7 rpicam-vid --camera 1 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output /tmp/rpi-vstim-combined-rc-20260926/imx708_wide_noir.h264
+ 815302 S          00:02 77.5  1.5 python3 -m rpi_vstim hardware kms-render-smoke --config /tmp/rpi-vstim-rc-20260926/config/rigs/pi5_dual_display_provisional.example.toml --binary /tmp/rpi-vstim-rc-kms-20260926/kms_probe --frames 300 --lease --json
+624K	/tmp/rpi-vstim-combined-rc-20260926
+end 2026-09-26T09:26:53,960254552-04:00
+exit display=0 noir=0 wide=0
+               total        used        free      shared  buff/cache   available
+Mem:           2.0Gi       699Mi       253Mi       129Mi       1.3Gi       1.3Gi
+Swap:          2.0Gi        12Mi       1.9Gi
+0.16 0.05 0.01 2/349 815322
+40800
+throttled=0x0
+total 2.2M
+-rw-rw-r-- 1 pi pi   83K Sep 26 09:26 display.json
+-rw-rw-r-- 1 pi pi     0 Sep 26 09:26 display.stderr
+-rw-rw-r-- 1 pi pi 1005K Sep 26 09:26 imx708_noir.h264
+-rw-rw-r-- 1 pi pi  4.1K Sep 26 09:26 imx708_noir.log
+-rw-rw-r-- 1 pi pi  993K Sep 26 09:26 imx708_wide_noir.h264
+-rw-rw-r-- 1 pi pi  4.1K Sep 26 09:26 imx708_wide_noir.log
+-rw-rw-r-- 1 pi pi  2.2K Sep 26 09:26 resources.log
+-rw-rw-r-- 1 pi pi    36 Sep 26 09:26 start.txt
+workers
+815254 bash -c set +e; T=/tmp/rpi-vstim-combined-rc-20260926; mkdir -p "$T"; date --iso-8601=ns > "$T/start.txt"; rpicam-vid --camera 0 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output "$T/imx708_noir.h264" > "$T/imx708_noir.log" 2>&1 & P0=$!; rpicam-vid --camera 1 --width 640 --height 480 --framerate 30 --no-raw --nopreview --codec h264 --bitrate 1000000 --inline --timeout 8000 --output "$T/imx708_wide_noir.h264" > "$T/imx708_wide_noir.log" 2>&1 & P1=$!; sleep 1; { echo "during-start $(date --iso-8601=ns)"; free -h; cat /proc/loadavg; cat /sys/class/thermal/thermal_zone0/temp; vcgencmd get_throttled; ps -o pid=,stat=,etime=,pcpu=,pmem=,cmd= -p "$P0","$P1"; } > "$T/resources.log"; PYTHONPATH=/tmp/rpi-vstim-rc-20260926/src python3 -m rpi_vstim hardware kms-render-smoke --config /tmp/rpi-vstim-rc-20260926/config/rigs/pi5_dual_display_provisional.example.toml --binary /tmp/rpi-vstim-rc-kms-20260926/kms_probe --frames 300 --lease --json > "$T/display.json" 2> "$T/display.stderr" & PD=$!; sleep 2; { echo "during-display $(date --iso-8601=ns)"; free -h; cat /proc/loadavg; cat /sys/class/thermal/thermal_zone0/temp; vcgencmd get_throttled; ps -o pid=,stat=,etime=,pcpu=,pmem=,cmd= -p "$P0","$P1","$PD"; du -h "$T"; } >> "$T/resources.log"; wait "$PD"; RD=$?; wait "$P0"; R0=$?; wait "$P1"; R1=$?; { echo "end $(date --iso-8601=ns)"; echo "exit display=$RD noir=$R0 wide=$R1"; free -h; cat /proc/loadavg; cat /sys/class/thermal/thermal_zone0/temp; vcgencmd get_throttled; ls -lh "$T"; echo workers; pgrep -af "rpicam-(vid|still|hello)|kms_probe|rpi_vstim" || true; } >> "$T/resources.log"; echo "statuses display=$RD noir=$R0 wide=$R1"; cat "$T/display.stderr"; cat "$T/resources.log"

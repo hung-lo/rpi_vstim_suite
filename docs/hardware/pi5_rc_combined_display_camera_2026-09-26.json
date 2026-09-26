@@ -1,0 +1,2762 @@
+{
+  "aborted": false,
+  "access": {
+    "connector_resolved": true,
+    "crtc_resolved": true,
+    "device_opened": true,
+    "mode_compatible": true,
+    "modeset_authority": "acquired",
+    "page_flips": "completed",
+    "primary_plane_compatible": true,
+    "resources_enumerated": true
+  },
+  "completed_frame_count": 300,
+  "connector": "HDMI-A-2",
+  "connector_id": 42,
+  "crtc_id": 104,
+  "device": "wayland-drm-lease",
+  "estimated_dropped_frame_count": 0,
+  "estimated_refresh_hz": 59.8215477,
+  "first_page_flip_callback_monotonic_ns": 3701289970659174,
+  "first_page_flip_callback_realtime_ns": 1790429208118529172,
+  "first_page_flip_kernel_event_ns": 3701289971287000,
+  "flip_events": [
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701289970659174,
+      "callback_realtime_ns": 1790429208118529172,
+      "frame_index": 0,
+      "kernel_event_ns": 3701289971287000,
+      "kernel_sequence": 221416292,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701289988029731,
+      "callback_realtime_ns": 1790429208135899710,
+      "frame_index": 1,
+      "kernel_event_ns": 3701289987344000,
+      "kernel_sequence": 221416293,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290004104235,
+      "callback_realtime_ns": 1790429208151974214,
+      "frame_index": 2,
+      "kernel_event_ns": 3701290004057000,
+      "kernel_sequence": 221416294,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290020800997,
+      "callback_realtime_ns": 1790429208168670976,
+      "frame_index": 3,
+      "kernel_event_ns": 3701290020774000,
+      "kernel_sequence": 221416295,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290037511092,
+      "callback_realtime_ns": 1790429208185381163,
+      "frame_index": 4,
+      "kernel_event_ns": 3701290038153000,
+      "kernel_sequence": 221416296,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290054247928,
+      "callback_realtime_ns": 1790429208202117925,
+      "frame_index": 5,
+      "kernel_event_ns": 3701290054870000,
+      "kernel_sequence": 221416297,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290070926041,
+      "callback_realtime_ns": 1790429208218796020,
+      "frame_index": 6,
+      "kernel_event_ns": 3701290071585000,
+      "kernel_sequence": 221416298,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290087672118,
+      "callback_realtime_ns": 1790429208235542097,
+      "frame_index": 7,
+      "kernel_event_ns": 3701290088303000,
+      "kernel_sequence": 221416299,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290104371121,
+      "callback_realtime_ns": 1790429208252241100,
+      "frame_index": 8,
+      "kernel_event_ns": 3701290105018000,
+      "kernel_sequence": 221416300,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290121100456,
+      "callback_realtime_ns": 1790429208268970436,
+      "frame_index": 9,
+      "kernel_event_ns": 3701290121071000,
+      "kernel_sequence": 221416301,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290137791922,
+      "callback_realtime_ns": 1790429208285661901,
+      "frame_index": 10,
+      "kernel_event_ns": 3701290138450000,
+      "kernel_sequence": 221416302,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290154535888,
+      "callback_realtime_ns": 1790429208302405885,
+      "frame_index": 11,
+      "kernel_event_ns": 3701290155168000,
+      "kernel_sequence": 221416303,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290171226298,
+      "callback_realtime_ns": 1790429208319096277,
+      "frame_index": 12,
+      "kernel_event_ns": 3701290171883000,
+      "kernel_sequence": 221416304,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290187973078,
+      "callback_realtime_ns": 1790429208335843075,
+      "frame_index": 13,
+      "kernel_event_ns": 3701290188601000,
+      "kernel_sequence": 221416305,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290204658284,
+      "callback_realtime_ns": 1790429208352528263,
+      "frame_index": 14,
+      "kernel_event_ns": 3701290205315000,
+      "kernel_sequence": 221416306,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290221399490,
+      "callback_realtime_ns": 1790429208369269469,
+      "frame_index": 15,
+      "kernel_event_ns": 3701290222034000,
+      "kernel_sequence": 221416307,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290238091086,
+      "callback_realtime_ns": 1790429208385961065,
+      "frame_index": 16,
+      "kernel_event_ns": 3701290238748000,
+      "kernel_sequence": 221416308,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290254840773,
+      "callback_realtime_ns": 1790429208402710752,
+      "frame_index": 17,
+      "kernel_event_ns": 3701290255467000,
+      "kernel_sequence": 221416309,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290271543776,
+      "callback_realtime_ns": 1790429208419413755,
+      "frame_index": 18,
+      "kernel_event_ns": 3701290272183000,
+      "kernel_sequence": 221416310,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290288472241,
+      "callback_realtime_ns": 1790429208436342220,
+      "frame_index": 19,
+      "kernel_event_ns": 3701290288900000,
+      "kernel_sequence": 221416311,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290304959892,
+      "callback_realtime_ns": 1790429208452829890,
+      "frame_index": 20,
+      "kernel_event_ns": 3701290305614000,
+      "kernel_sequence": 221416312,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290321700080,
+      "callback_realtime_ns": 1790429208469570059,
+      "frame_index": 21,
+      "kernel_event_ns": 3701290322332000,
+      "kernel_sequence": 221416313,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290338391694,
+      "callback_realtime_ns": 1790429208486261673,
+      "frame_index": 22,
+      "kernel_event_ns": 3701290339047000,
+      "kernel_sequence": 221416314,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290355131659,
+      "callback_realtime_ns": 1790429208503001638,
+      "frame_index": 23,
+      "kernel_event_ns": 3701290355765000,
+      "kernel_sequence": 221416315,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290371822588,
+      "callback_realtime_ns": 1790429208519692567,
+      "frame_index": 24,
+      "kernel_event_ns": 3701290372480000,
+      "kernel_sequence": 221416316,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290388824923,
+      "callback_realtime_ns": 1790429208536695013,
+      "frame_index": 25,
+      "kernel_event_ns": 3701290388547000,
+      "kernel_sequence": 221416317,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290405285445,
+      "callback_realtime_ns": 1790429208553155424,
+      "frame_index": 26,
+      "kernel_event_ns": 3701290405914000,
+      "kernel_sequence": 221416318,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290422027503,
+      "callback_realtime_ns": 1790429208569897482,
+      "frame_index": 27,
+      "kernel_event_ns": 3701290421970000,
+      "kernel_sequence": 221416319,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290438707468,
+      "callback_realtime_ns": 1790429208586577466,
+      "frame_index": 28,
+      "kernel_event_ns": 3701290439346000,
+      "kernel_sequence": 221416320,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290455696970,
+      "callback_realtime_ns": 1790429208603566968,
+      "frame_index": 29,
+      "kernel_event_ns": 3701290455401000,
+      "kernel_sequence": 221416321,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290472154307,
+      "callback_realtime_ns": 1790429208620024341,
+      "frame_index": 30,
+      "kernel_event_ns": 3701290472116000,
+      "kernel_sequence": 221416322,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290489069346,
+      "callback_realtime_ns": 1790429208636939325,
+      "frame_index": 31,
+      "kernel_event_ns": 3701290488833000,
+      "kernel_sequence": 221416323,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290505598552,
+      "callback_realtime_ns": 1790429208653468532,
+      "frame_index": 32,
+      "kernel_event_ns": 3701290505553000,
+      "kernel_sequence": 221416324,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290522523981,
+      "callback_realtime_ns": 1790429208670393960,
+      "frame_index": 33,
+      "kernel_event_ns": 3701290522272000,
+      "kernel_sequence": 221416325,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290539033002,
+      "callback_realtime_ns": 1790429208686902981,
+      "frame_index": 34,
+      "kernel_event_ns": 3701290538992000,
+      "kernel_sequence": 221416326,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290555744153,
+      "callback_realtime_ns": 1790429208703614132,
+      "frame_index": 35,
+      "kernel_event_ns": 3701290555700000,
+      "kernel_sequence": 221416327,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290572446081,
+      "callback_realtime_ns": 1790429208720316060,
+      "frame_index": 36,
+      "kernel_event_ns": 3701290573078000,
+      "kernel_sequence": 221416328,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290590927117,
+      "callback_realtime_ns": 1790429208738797096,
+      "frame_index": 37,
+      "kernel_event_ns": 3701290589138000,
+      "kernel_sequence": 221416329,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290605896364,
+      "callback_realtime_ns": 1790429208753766343,
+      "frame_index": 38,
+      "kernel_event_ns": 3701290606511000,
+      "kernel_sequence": 221416330,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290622605459,
+      "callback_realtime_ns": 1790429208770475438,
+      "frame_index": 39,
+      "kernel_event_ns": 3701290622564000,
+      "kernel_sequence": 221416331,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290639291055,
+      "callback_realtime_ns": 1790429208787161163,
+      "frame_index": 40,
+      "kernel_event_ns": 3701290639942000,
+      "kernel_sequence": 221416332,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290656062779,
+      "callback_realtime_ns": 1790429208803932758,
+      "frame_index": 41,
+      "kernel_event_ns": 3701290655995000,
+      "kernel_sequence": 221416333,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290672722837,
+      "callback_realtime_ns": 1790429208820592817,
+      "frame_index": 42,
+      "kernel_event_ns": 3701290673375000,
+      "kernel_sequence": 221416334,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290689470284,
+      "callback_realtime_ns": 1790429208837340263,
+      "frame_index": 43,
+      "kernel_event_ns": 3701290690092000,
+      "kernel_sequence": 221416335,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290706150991,
+      "callback_realtime_ns": 1790429208854020951,
+      "frame_index": 44,
+      "kernel_event_ns": 3701290706807000,
+      "kernel_sequence": 221416336,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290722893345,
+      "callback_realtime_ns": 1790429208870763343,
+      "frame_index": 45,
+      "kernel_event_ns": 3701290723526000,
+      "kernel_sequence": 221416337,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290739583051,
+      "callback_realtime_ns": 1790429208887453012,
+      "frame_index": 46,
+      "kernel_event_ns": 3701290740240000,
+      "kernel_sequence": 221416338,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290756328906,
+      "callback_realtime_ns": 1790429208904198885,
+      "frame_index": 47,
+      "kernel_event_ns": 3701290756294000,
+      "kernel_sequence": 221416339,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290773015649,
+      "callback_realtime_ns": 1790429208920885628,
+      "frame_index": 48,
+      "kernel_event_ns": 3701290773672000,
+      "kernel_sequence": 221416340,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290789756633,
+      "callback_realtime_ns": 1790429208937626631,
+      "frame_index": 49,
+      "kernel_event_ns": 3701290790391000,
+      "kernel_sequence": 221416341,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290806448154,
+      "callback_realtime_ns": 1790429208954318133,
+      "frame_index": 50,
+      "kernel_event_ns": 3701290807105000,
+      "kernel_sequence": 221416342,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290823199657,
+      "callback_realtime_ns": 1790429208971069654,
+      "frame_index": 51,
+      "kernel_event_ns": 3701290823823000,
+      "kernel_sequence": 221416343,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290839879882,
+      "callback_realtime_ns": 1790429208987749861,
+      "frame_index": 52,
+      "kernel_event_ns": 3701290840538000,
+      "kernel_sequence": 221416344,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290856625014,
+      "callback_realtime_ns": 1790429209004495011,
+      "frame_index": 53,
+      "kernel_event_ns": 3701290857256000,
+      "kernel_sequence": 221416345,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290873315665,
+      "callback_realtime_ns": 1790429209021185662,
+      "frame_index": 54,
+      "kernel_event_ns": 3701290873971000,
+      "kernel_sequence": 221416346,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290890064593,
+      "callback_realtime_ns": 1790429209037934591,
+      "frame_index": 55,
+      "kernel_event_ns": 3701290890689000,
+      "kernel_sequence": 221416347,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290906745392,
+      "callback_realtime_ns": 1790429209054615371,
+      "frame_index": 56,
+      "kernel_event_ns": 3701290907403000,
+      "kernel_sequence": 221416348,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290923484357,
+      "callback_realtime_ns": 1790429209071354336,
+      "frame_index": 57,
+      "kernel_event_ns": 3701290924122000,
+      "kernel_sequence": 221416349,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290940178323,
+      "callback_realtime_ns": 1790429209088048302,
+      "frame_index": 58,
+      "kernel_event_ns": 3701290940836000,
+      "kernel_sequence": 221416350,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290956933437,
+      "callback_realtime_ns": 1790429209104803416,
+      "frame_index": 59,
+      "kernel_event_ns": 3701290957554000,
+      "kernel_sequence": 221416351,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701290973611291,
+      "callback_realtime_ns": 1790429209121481270,
+      "frame_index": 60,
+      "kernel_event_ns": 3701290974269000,
+      "kernel_sequence": 221416352,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701290990363942,
+      "callback_realtime_ns": 1790429209138233921,
+      "frame_index": 61,
+      "kernel_event_ns": 3701290990988000,
+      "kernel_sequence": 221416353,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291007046463,
+      "callback_realtime_ns": 1790429209154916460,
+      "frame_index": 62,
+      "kernel_event_ns": 3701291007702000,
+      "kernel_sequence": 221416354,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291023791058,
+      "callback_realtime_ns": 1790429209171661056,
+      "frame_index": 63,
+      "kernel_event_ns": 3701291024420000,
+      "kernel_sequence": 221416355,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291040554653,
+      "callback_realtime_ns": 1790429209188424632,
+      "frame_index": 64,
+      "kernel_event_ns": 3701291041135000,
+      "kernel_sequence": 221416356,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291057218748,
+      "callback_realtime_ns": 1790429209205088727,
+      "frame_index": 65,
+      "kernel_event_ns": 3701291057853000,
+      "kernel_sequence": 221416357,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291073915936,
+      "callback_realtime_ns": 1790429209221785934,
+      "frame_index": 66,
+      "kernel_event_ns": 3701291074568000,
+      "kernel_sequence": 221416358,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291090648494,
+      "callback_realtime_ns": 1790429209238518492,
+      "frame_index": 67,
+      "kernel_event_ns": 3701291091286000,
+      "kernel_sequence": 221416359,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291107354126,
+      "callback_realtime_ns": 1790429209255224105,
+      "frame_index": 68,
+      "kernel_event_ns": 3701291108003000,
+      "kernel_sequence": 221416360,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291124086481,
+      "callback_realtime_ns": 1790429209271956460,
+      "frame_index": 69,
+      "kernel_event_ns": 3701291124054000,
+      "kernel_sequence": 221416361,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291140778854,
+      "callback_realtime_ns": 1790429209288648851,
+      "frame_index": 70,
+      "kernel_event_ns": 3701291141434000,
+      "kernel_sequence": 221416362,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291157518616,
+      "callback_realtime_ns": 1790429209305388613,
+      "frame_index": 71,
+      "kernel_event_ns": 3701291158151000,
+      "kernel_sequence": 221416363,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291174215303,
+      "callback_realtime_ns": 1790429209322085301,
+      "frame_index": 72,
+      "kernel_event_ns": 3701291174867000,
+      "kernel_sequence": 221416364,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291190948435,
+      "callback_realtime_ns": 1790429209338818415,
+      "frame_index": 73,
+      "kernel_event_ns": 3701291191584000,
+      "kernel_sequence": 221416365,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291207645605,
+      "callback_realtime_ns": 1790429209355515584,
+      "frame_index": 74,
+      "kernel_event_ns": 3701291208299000,
+      "kernel_sequence": 221416366,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291224387848,
+      "callback_realtime_ns": 1790429209372257827,
+      "frame_index": 75,
+      "kernel_event_ns": 3701291224353000,
+      "kernel_sequence": 221416367,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291241077888,
+      "callback_realtime_ns": 1790429209388947885,
+      "frame_index": 76,
+      "kernel_event_ns": 3701291241731000,
+      "kernel_sequence": 221416368,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291257815464,
+      "callback_realtime_ns": 1790429209405685443,
+      "frame_index": 77,
+      "kernel_event_ns": 3701291258450000,
+      "kernel_sequence": 221416369,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291274515800,
+      "callback_realtime_ns": 1790429209422385779,
+      "frame_index": 78,
+      "kernel_event_ns": 3701291275164000,
+      "kernel_sequence": 221416370,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291291246766,
+      "callback_realtime_ns": 1790429209439116745,
+      "frame_index": 79,
+      "kernel_event_ns": 3701291291882000,
+      "kernel_sequence": 221416371,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291307949102,
+      "callback_realtime_ns": 1790429209455819081,
+      "frame_index": 80,
+      "kernel_event_ns": 3701291308597000,
+      "kernel_sequence": 221416372,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291324678382,
+      "callback_realtime_ns": 1790429209472548380,
+      "frame_index": 81,
+      "kernel_event_ns": 3701291325315000,
+      "kernel_sequence": 221416373,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291341382681,
+      "callback_realtime_ns": 1790429209489252641,
+      "frame_index": 82,
+      "kernel_event_ns": 3701291342030000,
+      "kernel_sequence": 221416374,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291358114387,
+      "callback_realtime_ns": 1790429209505984385,
+      "frame_index": 83,
+      "kernel_event_ns": 3701291358748000,
+      "kernel_sequence": 221416375,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291374811816,
+      "callback_realtime_ns": 1790429209522681795,
+      "frame_index": 84,
+      "kernel_event_ns": 3701291375463000,
+      "kernel_sequence": 221416376,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291391541855,
+      "callback_realtime_ns": 1790429209539411853,
+      "frame_index": 85,
+      "kernel_event_ns": 3701291392180000,
+      "kernel_sequence": 221416377,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291408240913,
+      "callback_realtime_ns": 1790429209556110892,
+      "frame_index": 86,
+      "kernel_event_ns": 3701291408896000,
+      "kernel_sequence": 221416378,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291424978805,
+      "callback_realtime_ns": 1790429209572848784,
+      "frame_index": 87,
+      "kernel_event_ns": 3701291425613000,
+      "kernel_sequence": 221416379,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291441680104,
+      "callback_realtime_ns": 1790429209589550101,
+      "frame_index": 88,
+      "kernel_event_ns": 3701291442329000,
+      "kernel_sequence": 221416380,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291458412125,
+      "callback_realtime_ns": 1790429209606282104,
+      "frame_index": 89,
+      "kernel_event_ns": 3701291459046000,
+      "kernel_sequence": 221416381,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291475112294,
+      "callback_realtime_ns": 1790429209622982366,
+      "frame_index": 90,
+      "kernel_event_ns": 3701291475761000,
+      "kernel_sequence": 221416382,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291491843722,
+      "callback_realtime_ns": 1790429209639713720,
+      "frame_index": 91,
+      "kernel_event_ns": 3701291492479000,
+      "kernel_sequence": 221416383,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291508565688,
+      "callback_realtime_ns": 1790429209656435667,
+      "frame_index": 92,
+      "kernel_event_ns": 3701291509197000,
+      "kernel_sequence": 221416384,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291525276672,
+      "callback_realtime_ns": 1790429209673146725,
+      "frame_index": 93,
+      "kernel_event_ns": 3701291525912000,
+      "kernel_sequence": 221416385,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291542000934,
+      "callback_realtime_ns": 1790429209689870913,
+      "frame_index": 94,
+      "kernel_event_ns": 3701291541965000,
+      "kernel_sequence": 221416386,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291558710066,
+      "callback_realtime_ns": 1790429209706580064,
+      "frame_index": 95,
+      "kernel_event_ns": 3701291559344000,
+      "kernel_sequence": 221416387,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291575419532,
+      "callback_realtime_ns": 1790429209723289529,
+      "frame_index": 96,
+      "kernel_event_ns": 3701291576061000,
+      "kernel_sequence": 221416388,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291592139942,
+      "callback_realtime_ns": 1790429209740009921,
+      "frame_index": 97,
+      "kernel_event_ns": 3701291592777000,
+      "kernel_sequence": 221416389,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291608870648,
+      "callback_realtime_ns": 1790429209756740645,
+      "frame_index": 98,
+      "kernel_event_ns": 3701291608832000,
+      "kernel_sequence": 221416390,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291625574928,
+      "callback_realtime_ns": 1790429209773444926,
+      "frame_index": 99,
+      "kernel_event_ns": 3701291626210000,
+      "kernel_sequence": 221416391,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291642308449,
+      "callback_realtime_ns": 1790429209790178428,
+      "frame_index": 100,
+      "kernel_event_ns": 3701291642267000,
+      "kernel_sequence": 221416392,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291659010359,
+      "callback_realtime_ns": 1790429209806880338,
+      "frame_index": 101,
+      "kernel_event_ns": 3701291659643000,
+      "kernel_sequence": 221416393,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291675712788,
+      "callback_realtime_ns": 1790429209823582785,
+      "frame_index": 102,
+      "kernel_event_ns": 3701291676360000,
+      "kernel_sequence": 221416394,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291692442346,
+      "callback_realtime_ns": 1790429209840312325,
+      "frame_index": 103,
+      "kernel_event_ns": 3701291693075000,
+      "kernel_sequence": 221416395,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291709142459,
+      "callback_realtime_ns": 1790429209857012642,
+      "frame_index": 104,
+      "kernel_event_ns": 3701291709791000,
+      "kernel_sequence": 221416396,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291725874073,
+      "callback_realtime_ns": 1790429209873744052,
+      "frame_index": 105,
+      "kernel_event_ns": 3701291726508000,
+      "kernel_sequence": 221416397,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291742574854,
+      "callback_realtime_ns": 1790429209890444833,
+      "frame_index": 106,
+      "kernel_event_ns": 3701291743223000,
+      "kernel_sequence": 221416398,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291759306282,
+      "callback_realtime_ns": 1790429209907176317,
+      "frame_index": 107,
+      "kernel_event_ns": 3701291759941000,
+      "kernel_sequence": 221416399,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291776036710,
+      "callback_realtime_ns": 1790429209923906708,
+      "frame_index": 108,
+      "kernel_event_ns": 3701291776658000,
+      "kernel_sequence": 221416400,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291792741695,
+      "callback_realtime_ns": 1790429209940611692,
+      "frame_index": 109,
+      "kernel_event_ns": 3701291793374000,
+      "kernel_sequence": 221416401,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291809453419,
+      "callback_realtime_ns": 1790429209957323398,
+      "frame_index": 110,
+      "kernel_event_ns": 3701291810089000,
+      "kernel_sequence": 221416402,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291826174737,
+      "callback_realtime_ns": 1790429209974044734,
+      "frame_index": 111,
+      "kernel_event_ns": 3701291826806000,
+      "kernel_sequence": 221416403,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291842874480,
+      "callback_realtime_ns": 1790429209990744459,
+      "frame_index": 112,
+      "kernel_event_ns": 3701291843521000,
+      "kernel_sequence": 221416404,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291859594334,
+      "callback_realtime_ns": 1790429210007464313,
+      "frame_index": 113,
+      "kernel_event_ns": 3701291860239000,
+      "kernel_sequence": 221416405,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291876315541,
+      "callback_realtime_ns": 1790429210024185538,
+      "frame_index": 114,
+      "kernel_event_ns": 3701291876956000,
+      "kernel_sequence": 221416406,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291893033728,
+      "callback_realtime_ns": 1790429210040903707,
+      "frame_index": 115,
+      "kernel_event_ns": 3701291893672000,
+      "kernel_sequence": 221416407,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291909780286,
+      "callback_realtime_ns": 1790429210057650284,
+      "frame_index": 116,
+      "kernel_event_ns": 3701291909727000,
+      "kernel_sequence": 221416408,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291926472678,
+      "callback_realtime_ns": 1790429210074342657,
+      "frame_index": 117,
+      "kernel_event_ns": 3701291927105000,
+      "kernel_sequence": 221416409,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291943415458,
+      "callback_realtime_ns": 1790429210091285455,
+      "frame_index": 118,
+      "kernel_event_ns": 3701291943159000,
+      "kernel_sequence": 221416410,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291959921831,
+      "callback_realtime_ns": 1790429210107791810,
+      "frame_index": 119,
+      "kernel_event_ns": 3701291960537000,
+      "kernel_sequence": 221416411,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701291976606352,
+      "callback_realtime_ns": 1790429210124476331,
+      "frame_index": 120,
+      "kernel_event_ns": 3701291977253000,
+      "kernel_sequence": 221416412,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701291993332651,
+      "callback_realtime_ns": 1790429210141202630,
+      "frame_index": 121,
+      "kernel_event_ns": 3701291993970000,
+      "kernel_sequence": 221416413,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292010054061,
+      "callback_realtime_ns": 1790429210157924040,
+      "frame_index": 122,
+      "kernel_event_ns": 3701292010686000,
+      "kernel_sequence": 221416414,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292026768305,
+      "callback_realtime_ns": 1790429210174638302,
+      "frame_index": 123,
+      "kernel_event_ns": 3701292027403000,
+      "kernel_sequence": 221416415,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292043546325,
+      "callback_realtime_ns": 1790429210191416304,
+      "frame_index": 124,
+      "kernel_event_ns": 3701292043458000,
+      "kernel_sequence": 221416416,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292060201087,
+      "callback_realtime_ns": 1790429210208071066,
+      "frame_index": 125,
+      "kernel_event_ns": 3701292060836000,
+      "kernel_sequence": 221416417,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292076963738,
+      "callback_realtime_ns": 1790429210224833717,
+      "frame_index": 126,
+      "kernel_event_ns": 3701292077552000,
+      "kernel_sequence": 221416418,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292093634944,
+      "callback_realtime_ns": 1790429210241504923,
+      "frame_index": 127,
+      "kernel_event_ns": 3701292094269000,
+      "kernel_sequence": 221416419,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292110358651,
+      "callback_realtime_ns": 1790429210258228648,
+      "frame_index": 128,
+      "kernel_event_ns": 3701292110322000,
+      "kernel_sequence": 221416420,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292127065524,
+      "callback_realtime_ns": 1790429210274935503,
+      "frame_index": 129,
+      "kernel_event_ns": 3701292127701000,
+      "kernel_sequence": 221416421,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292143960230,
+      "callback_realtime_ns": 1790429210291830227,
+      "frame_index": 130,
+      "kernel_event_ns": 3701292143754000,
+      "kernel_sequence": 221416422,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292160500195,
+      "callback_realtime_ns": 1790429210308370193,
+      "frame_index": 131,
+      "kernel_event_ns": 3701292161134000,
+      "kernel_sequence": 221416423,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292177303624,
+      "callback_realtime_ns": 1790429210325173621,
+      "frame_index": 132,
+      "kernel_event_ns": 3701292177851000,
+      "kernel_sequence": 221416424,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292193931293,
+      "callback_realtime_ns": 1790429210341801291,
+      "frame_index": 133,
+      "kernel_event_ns": 3701292194567000,
+      "kernel_sequence": 221416425,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292210648370,
+      "callback_realtime_ns": 1790429210358518367,
+      "frame_index": 134,
+      "kernel_event_ns": 3701292211283000,
+      "kernel_sequence": 221416426,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292227366965,
+      "callback_realtime_ns": 1790429210375236944,
+      "frame_index": 135,
+      "kernel_event_ns": 3701292228000000,
+      "kernel_sequence": 221416427,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292244289782,
+      "callback_realtime_ns": 1790429210392159761,
+      "frame_index": 136,
+      "kernel_event_ns": 3701292244053000,
+      "kernel_sequence": 221416428,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292260797933,
+      "callback_realtime_ns": 1790429210408667912,
+      "frame_index": 137,
+      "kernel_event_ns": 3701292261433000,
+      "kernel_sequence": 221416429,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292277517806,
+      "callback_realtime_ns": 1790429210425387804,
+      "frame_index": 138,
+      "kernel_event_ns": 3701292277484000,
+      "kernel_sequence": 221416430,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292294231957,
+      "callback_realtime_ns": 1790429210442101954,
+      "frame_index": 139,
+      "kernel_event_ns": 3701292294865000,
+      "kernel_sequence": 221416431,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292311213292,
+      "callback_realtime_ns": 1790429210459083271,
+      "frame_index": 140,
+      "kernel_event_ns": 3701292311582000,
+      "kernel_sequence": 221416432,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292327662184,
+      "callback_realtime_ns": 1790429210475532182,
+      "frame_index": 141,
+      "kernel_event_ns": 3701292328298000,
+      "kernel_sequence": 221416433,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292344378964,
+      "callback_realtime_ns": 1790429210492248943,
+      "frame_index": 142,
+      "kernel_event_ns": 3701292345014000,
+      "kernel_sequence": 221416434,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292361093837,
+      "callback_realtime_ns": 1790429210508963816,
+      "frame_index": 143,
+      "kernel_event_ns": 3701292361731000,
+      "kernel_sequence": 221416435,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292377808358,
+      "callback_realtime_ns": 1790429210525678356,
+      "frame_index": 144,
+      "kernel_event_ns": 3701292378448000,
+      "kernel_sequence": 221416436,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292394530491,
+      "callback_realtime_ns": 1790429210542400488,
+      "frame_index": 145,
+      "kernel_event_ns": 3701292395164000,
+      "kernel_sequence": 221416437,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292411241141,
+      "callback_realtime_ns": 1790429210559111139,
+      "frame_index": 146,
+      "kernel_event_ns": 3701292411880000,
+      "kernel_sequence": 221416438,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292427962977,
+      "callback_realtime_ns": 1790429210575832975,
+      "frame_index": 147,
+      "kernel_event_ns": 3701292428596000,
+      "kernel_sequence": 221416439,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292444675776,
+      "callback_realtime_ns": 1790429210592545774,
+      "frame_index": 148,
+      "kernel_event_ns": 3701292445313000,
+      "kernel_sequence": 221416440,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292461396723,
+      "callback_realtime_ns": 1790429210609266721,
+      "frame_index": 149,
+      "kernel_event_ns": 3701292462029000,
+      "kernel_sequence": 221416441,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292478108133,
+      "callback_realtime_ns": 1790429210625978149,
+      "frame_index": 150,
+      "kernel_event_ns": 3701292478746000,
+      "kernel_sequence": 221416442,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292494827950,
+      "callback_realtime_ns": 1790429210642697948,
+      "frame_index": 151,
+      "kernel_event_ns": 3701292495462000,
+      "kernel_sequence": 221416443,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292511548823,
+      "callback_realtime_ns": 1790429210659418821,
+      "frame_index": 152,
+      "kernel_event_ns": 3701292512178000,
+      "kernel_sequence": 221416444,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292528263696,
+      "callback_realtime_ns": 1790429210676133694,
+      "frame_index": 153,
+      "kernel_event_ns": 3701292528895000,
+      "kernel_sequence": 221416445,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292544995069,
+      "callback_realtime_ns": 1790429210692865067,
+      "frame_index": 154,
+      "kernel_event_ns": 3701292544947000,
+      "kernel_sequence": 221416446,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292561696776,
+      "callback_realtime_ns": 1790429210709566773,
+      "frame_index": 155,
+      "kernel_event_ns": 3701292562328000,
+      "kernel_sequence": 221416447,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292578404556,
+      "callback_realtime_ns": 1790429210726274553,
+      "frame_index": 156,
+      "kernel_event_ns": 3701292579044000,
+      "kernel_sequence": 221416448,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292595128392,
+      "callback_realtime_ns": 1790429210742998389,
+      "frame_index": 157,
+      "kernel_event_ns": 3701292595760000,
+      "kernel_sequence": 221416449,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292611841968,
+      "callback_realtime_ns": 1790429210759711984,
+      "frame_index": 158,
+      "kernel_event_ns": 3701292611813000,
+      "kernel_sequence": 221416450,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292628563156,
+      "callback_realtime_ns": 1790429210776433154,
+      "frame_index": 159,
+      "kernel_event_ns": 3701292629193000,
+      "kernel_sequence": 221416451,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292645282622,
+      "callback_realtime_ns": 1790429210793152619,
+      "frame_index": 160,
+      "kernel_event_ns": 3701292645247000,
+      "kernel_sequence": 221416452,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292661994828,
+      "callback_realtime_ns": 1790429210809864844,
+      "frame_index": 161,
+      "kernel_event_ns": 3701292662626000,
+      "kernel_sequence": 221416453,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292678710442,
+      "callback_realtime_ns": 1790429210826580458,
+      "frame_index": 162,
+      "kernel_event_ns": 3701292679342000,
+      "kernel_sequence": 221416454,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292695429481,
+      "callback_realtime_ns": 1790429210843299479,
+      "frame_index": 163,
+      "kernel_event_ns": 3701292696059000,
+      "kernel_sequence": 221416455,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292712148854,
+      "callback_realtime_ns": 1790429210860018870,
+      "frame_index": 164,
+      "kernel_event_ns": 3701292712111000,
+      "kernel_sequence": 221416456,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292728865172,
+      "callback_realtime_ns": 1790429210876735169,
+      "frame_index": 165,
+      "kernel_event_ns": 3701292729491000,
+      "kernel_sequence": 221416457,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292745580119,
+      "callback_realtime_ns": 1790429210893450135,
+      "frame_index": 166,
+      "kernel_event_ns": 3701292745543000,
+      "kernel_sequence": 221416458,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292762295917,
+      "callback_realtime_ns": 1790429210910165915,
+      "frame_index": 167,
+      "kernel_event_ns": 3701292762924000,
+      "kernel_sequence": 221416459,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292779218216,
+      "callback_realtime_ns": 1790429210927088213,
+      "frame_index": 168,
+      "kernel_event_ns": 3701292778976000,
+      "kernel_sequence": 221416460,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292795727978,
+      "callback_realtime_ns": 1790429210943597976,
+      "frame_index": 169,
+      "kernel_event_ns": 3701292796357000,
+      "kernel_sequence": 221416461,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292812452888,
+      "callback_realtime_ns": 1790429210960322886,
+      "frame_index": 170,
+      "kernel_event_ns": 3701292813073000,
+      "kernel_sequence": 221416462,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292829160613,
+      "callback_realtime_ns": 1790429210977030610,
+      "frame_index": 171,
+      "kernel_event_ns": 3701292829790000,
+      "kernel_sequence": 221416463,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292845874801,
+      "callback_realtime_ns": 1790429210993744798,
+      "frame_index": 172,
+      "kernel_event_ns": 3701292845842000,
+      "kernel_sequence": 221416464,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292862591396,
+      "callback_realtime_ns": 1790429211010461393,
+      "frame_index": 173,
+      "kernel_event_ns": 3701292863222000,
+      "kernel_sequence": 221416465,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292879308824,
+      "callback_realtime_ns": 1790429211027178822,
+      "frame_index": 174,
+      "kernel_event_ns": 3701292879939000,
+      "kernel_sequence": 221416466,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292896036271,
+      "callback_realtime_ns": 1790429211043906287,
+      "frame_index": 175,
+      "kernel_event_ns": 3701292896655000,
+      "kernel_sequence": 221416467,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292912752163,
+      "callback_realtime_ns": 1790429211060622179,
+      "frame_index": 176,
+      "kernel_event_ns": 3701292912709000,
+      "kernel_sequence": 221416468,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292929454406,
+      "callback_realtime_ns": 1790429211077324404,
+      "frame_index": 177,
+      "kernel_event_ns": 3701292930088000,
+      "kernel_sequence": 221416469,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292946187890,
+      "callback_realtime_ns": 1790429211094057906,
+      "frame_index": 178,
+      "kernel_event_ns": 3701292946141000,
+      "kernel_sequence": 221416470,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292962901504,
+      "callback_realtime_ns": 1790429211110771520,
+      "frame_index": 179,
+      "kernel_event_ns": 3701292963521000,
+      "kernel_sequence": 221416471,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701292979598654,
+      "callback_realtime_ns": 1790429211127468689,
+      "frame_index": 180,
+      "kernel_event_ns": 3701292980237000,
+      "kernel_sequence": 221416472,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701292996317268,
+      "callback_realtime_ns": 1790429211144187284,
+      "frame_index": 181,
+      "kernel_event_ns": 3701292996953000,
+      "kernel_sequence": 221416473,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293013037474,
+      "callback_realtime_ns": 1790429211160907472,
+      "frame_index": 182,
+      "kernel_event_ns": 3701293013006000,
+      "kernel_sequence": 221416474,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293029755607,
+      "callback_realtime_ns": 1790429211177625623,
+      "frame_index": 183,
+      "kernel_event_ns": 3701293030386000,
+      "kernel_sequence": 221416475,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293046474776,
+      "callback_realtime_ns": 1790429211194344792,
+      "frame_index": 184,
+      "kernel_event_ns": 3701293047103000,
+      "kernel_sequence": 221416476,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293063181834,
+      "callback_realtime_ns": 1790429211211051832,
+      "frame_index": 185,
+      "kernel_event_ns": 3701293063819000,
+      "kernel_sequence": 221416477,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293079903207,
+      "callback_realtime_ns": 1790429211227773204,
+      "frame_index": 186,
+      "kernel_event_ns": 3701293080537000,
+      "kernel_sequence": 221416478,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293096624821,
+      "callback_realtime_ns": 1790429211244494818,
+      "frame_index": 187,
+      "kernel_event_ns": 3701293097252000,
+      "kernel_sequence": 221416479,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293113346249,
+      "callback_realtime_ns": 1790429211261216247,
+      "frame_index": 188,
+      "kernel_event_ns": 3701293113969000,
+      "kernel_sequence": 221416480,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293130047066,
+      "callback_realtime_ns": 1790429211277917064,
+      "frame_index": 189,
+      "kernel_event_ns": 3701293130684000,
+      "kernel_sequence": 221416481,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293146772754,
+      "callback_realtime_ns": 1790429211294642752,
+      "frame_index": 190,
+      "kernel_event_ns": 3701293146736000,
+      "kernel_sequence": 221416482,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293163478812,
+      "callback_realtime_ns": 1790429211311348828,
+      "frame_index": 191,
+      "kernel_event_ns": 3701293164117000,
+      "kernel_sequence": 221416483,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293180211463,
+      "callback_realtime_ns": 1790429211328081479,
+      "frame_index": 192,
+      "kernel_event_ns": 3701293180171000,
+      "kernel_sequence": 221416484,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293196913410,
+      "callback_realtime_ns": 1790429211344783426,
+      "frame_index": 193,
+      "kernel_event_ns": 3701293197550000,
+      "kernel_sequence": 221416485,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293214185115,
+      "callback_realtime_ns": 1790429211362055131,
+      "frame_index": 194,
+      "kernel_event_ns": 3701293214267000,
+      "kernel_sequence": 221416486,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293230359323,
+      "callback_realtime_ns": 1790429211378229320,
+      "frame_index": 195,
+      "kernel_event_ns": 3701293230983000,
+      "kernel_sequence": 221416487,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293247076270,
+      "callback_realtime_ns": 1790429211394946286,
+      "frame_index": 196,
+      "kernel_event_ns": 3701293247699000,
+      "kernel_sequence": 221416488,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293263794994,
+      "callback_realtime_ns": 1790429211411664992,
+      "frame_index": 197,
+      "kernel_event_ns": 3701293264416000,
+      "kernel_sequence": 221416489,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293280511404,
+      "callback_realtime_ns": 1790429211428381420,
+      "frame_index": 198,
+      "kernel_event_ns": 3701293281132000,
+      "kernel_sequence": 221416490,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293297224000,
+      "callback_realtime_ns": 1790429211445093997,
+      "frame_index": 199,
+      "kernel_event_ns": 3701293297849000,
+      "kernel_sequence": 221416491,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293313942261,
+      "callback_realtime_ns": 1790429211461812259,
+      "frame_index": 200,
+      "kernel_event_ns": 3701293314565000,
+      "kernel_sequence": 221416492,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293330657560,
+      "callback_realtime_ns": 1790429211478527576,
+      "frame_index": 201,
+      "kernel_event_ns": 3701293331281000,
+      "kernel_sequence": 221416493,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293347375748,
+      "callback_realtime_ns": 1790429211495245746,
+      "frame_index": 202,
+      "kernel_event_ns": 3701293347997000,
+      "kernel_sequence": 221416494,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293364090158,
+      "callback_realtime_ns": 1790429211511960174,
+      "frame_index": 203,
+      "kernel_event_ns": 3701293364714000,
+      "kernel_sequence": 221416495,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293380802975,
+      "callback_realtime_ns": 1790429211528672991,
+      "frame_index": 204,
+      "kernel_event_ns": 3701293381430000,
+      "kernel_sequence": 221416496,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293397506293,
+      "callback_realtime_ns": 1790429211545376290,
+      "frame_index": 205,
+      "kernel_event_ns": 3701293398146000,
+      "kernel_sequence": 221416497,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293414244388,
+      "callback_realtime_ns": 1790429211562114404,
+      "frame_index": 206,
+      "kernel_event_ns": 3701293414863000,
+      "kernel_sequence": 221416498,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293430954613,
+      "callback_realtime_ns": 1790429211578824610,
+      "frame_index": 207,
+      "kernel_event_ns": 3701293431579000,
+      "kernel_sequence": 221416499,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293447675967,
+      "callback_realtime_ns": 1790429211595545983,
+      "frame_index": 208,
+      "kernel_event_ns": 3701293447632000,
+      "kernel_sequence": 221416500,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293464389896,
+      "callback_realtime_ns": 1790429211612259893,
+      "frame_index": 209,
+      "kernel_event_ns": 3701293465012000,
+      "kernel_sequence": 221416501,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293481106713,
+      "callback_realtime_ns": 1790429211628976710,
+      "frame_index": 210,
+      "kernel_event_ns": 3701293481065000,
+      "kernel_sequence": 221416502,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293497820901,
+      "callback_realtime_ns": 1790429211645690917,
+      "frame_index": 211,
+      "kernel_event_ns": 3701293498445000,
+      "kernel_sequence": 221416503,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293514550107,
+      "callback_realtime_ns": 1790429211662420105,
+      "frame_index": 212,
+      "kernel_event_ns": 3701293514498000,
+      "kernel_sequence": 221416504,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293531241073,
+      "callback_realtime_ns": 1790429211679111070,
+      "frame_index": 213,
+      "kernel_event_ns": 3701293531878000,
+      "kernel_sequence": 221416505,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293547975816,
+      "callback_realtime_ns": 1790429211695845813,
+      "frame_index": 214,
+      "kernel_event_ns": 3701293548595000,
+      "kernel_sequence": 221416506,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293564673448,
+      "callback_realtime_ns": 1790429211712543464,
+      "frame_index": 215,
+      "kernel_event_ns": 3701293565310000,
+      "kernel_sequence": 221416507,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293581610876,
+      "callback_realtime_ns": 1790429211729480892,
+      "frame_index": 216,
+      "kernel_event_ns": 3701293581366000,
+      "kernel_sequence": 221416508,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293598099972,
+      "callback_realtime_ns": 1790429211745969969,
+      "frame_index": 217,
+      "kernel_event_ns": 3701293598743000,
+      "kernel_sequence": 221416509,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293614830030,
+      "callback_realtime_ns": 1790429211762700027,
+      "frame_index": 218,
+      "kernel_event_ns": 3701293614796000,
+      "kernel_sequence": 221416510,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293631535014,
+      "callback_realtime_ns": 1790429211779405030,
+      "frame_index": 219,
+      "kernel_event_ns": 3701293632175000,
+      "kernel_sequence": 221416511,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293648258739,
+      "callback_realtime_ns": 1790429211796128755,
+      "frame_index": 220,
+      "kernel_event_ns": 3701293648892000,
+      "kernel_sequence": 221416512,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293664975223,
+      "callback_realtime_ns": 1790429211812845239,
+      "frame_index": 221,
+      "kernel_event_ns": 3701293665609000,
+      "kernel_sequence": 221416513,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293681705707,
+      "callback_realtime_ns": 1790429211829575723,
+      "frame_index": 222,
+      "kernel_event_ns": 3701293682325000,
+      "kernel_sequence": 221416514,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293698408246,
+      "callback_realtime_ns": 1790429211846278244,
+      "frame_index": 223,
+      "kernel_event_ns": 3701293699042000,
+      "kernel_sequence": 221416515,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293715137527,
+      "callback_realtime_ns": 1790429211863007543,
+      "frame_index": 224,
+      "kernel_event_ns": 3701293715096000,
+      "kernel_sequence": 221416516,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293731830492,
+      "callback_realtime_ns": 1790429211879700490,
+      "frame_index": 225,
+      "kernel_event_ns": 3701293732474000,
+      "kernel_sequence": 221416517,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293748565458,
+      "callback_realtime_ns": 1790429211896435455,
+      "frame_index": 226,
+      "kernel_event_ns": 3701293748527000,
+      "kernel_sequence": 221416518,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293765264238,
+      "callback_realtime_ns": 1790429211913134254,
+      "frame_index": 227,
+      "kernel_event_ns": 3701293765906000,
+      "kernel_sequence": 221416519,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293781984407,
+      "callback_realtime_ns": 1790429211929854423,
+      "frame_index": 228,
+      "kernel_event_ns": 3701293782623000,
+      "kernel_sequence": 221416520,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293798704262,
+      "callback_realtime_ns": 1790429211946574259,
+      "frame_index": 229,
+      "kernel_event_ns": 3701293799339000,
+      "kernel_sequence": 221416521,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293815432172,
+      "callback_realtime_ns": 1790429211963302169,
+      "frame_index": 230,
+      "kernel_event_ns": 3701293815392000,
+      "kernel_sequence": 221416522,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293832133063,
+      "callback_realtime_ns": 1790429211980003061,
+      "frame_index": 231,
+      "kernel_event_ns": 3701293832773000,
+      "kernel_sequence": 221416523,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293848864955,
+      "callback_realtime_ns": 1790429211996734952,
+      "frame_index": 232,
+      "kernel_event_ns": 3701293848825000,
+      "kernel_sequence": 221416524,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293865564365,
+      "callback_realtime_ns": 1790429212013434362,
+      "frame_index": 233,
+      "kernel_event_ns": 3701293866205000,
+      "kernel_sequence": 221416525,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293882298663,
+      "callback_realtime_ns": 1790429212030168661,
+      "frame_index": 234,
+      "kernel_event_ns": 3701293882260000,
+      "kernel_sequence": 221416526,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293898999777,
+      "callback_realtime_ns": 1790429212046869775,
+      "frame_index": 235,
+      "kernel_event_ns": 3701293899638000,
+      "kernel_sequence": 221416527,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293915739650,
+      "callback_realtime_ns": 1790429212063609666,
+      "frame_index": 236,
+      "kernel_event_ns": 3701293915692000,
+      "kernel_sequence": 221416528,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293932439023,
+      "callback_realtime_ns": 1790429212080309021,
+      "frame_index": 237,
+      "kernel_event_ns": 3701293933071000,
+      "kernel_sequence": 221416529,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293949172359,
+      "callback_realtime_ns": 1790429212097042375,
+      "frame_index": 238,
+      "kernel_event_ns": 3701293949787000,
+      "kernel_sequence": 221416530,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293965864843,
+      "callback_realtime_ns": 1790429212113734841,
+      "frame_index": 239,
+      "kernel_event_ns": 3701293966503000,
+      "kernel_sequence": 221416531,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701293982595549,
+      "callback_realtime_ns": 1790429212130465565,
+      "frame_index": 240,
+      "kernel_event_ns": 3701293983220000,
+      "kernel_sequence": 221416532,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701293999297626,
+      "callback_realtime_ns": 1790429212147167623,
+      "frame_index": 241,
+      "kernel_event_ns": 3701293999936000,
+      "kernel_sequence": 221416533,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294016042832,
+      "callback_realtime_ns": 1790429212163912830,
+      "frame_index": 242,
+      "kernel_event_ns": 3701294015989000,
+      "kernel_sequence": 221416534,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294032732501,
+      "callback_realtime_ns": 1790429212180602499,
+      "frame_index": 243,
+      "kernel_event_ns": 3701294033368000,
+      "kernel_sequence": 221416535,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294049486282,
+      "callback_realtime_ns": 1790429212197356279,
+      "frame_index": 244,
+      "kernel_event_ns": 3701294049422000,
+      "kernel_sequence": 221416536,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294066160599,
+      "callback_realtime_ns": 1790429212214030597,
+      "frame_index": 245,
+      "kernel_event_ns": 3701294066801000,
+      "kernel_sequence": 221416537,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294082933268,
+      "callback_realtime_ns": 1790429212230803266,
+      "frame_index": 246,
+      "kernel_event_ns": 3701294082865000,
+      "kernel_sequence": 221416538,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294099587289,
+      "callback_realtime_ns": 1790429212247457287,
+      "frame_index": 247,
+      "kernel_event_ns": 3701294100233000,
+      "kernel_sequence": 221416539,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294116358051,
+      "callback_realtime_ns": 1790429212264228067,
+      "frame_index": 248,
+      "kernel_event_ns": 3701294116295000,
+      "kernel_sequence": 221416540,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294133031887,
+      "callback_realtime_ns": 1790429212280901903,
+      "frame_index": 249,
+      "kernel_event_ns": 3701294133667000,
+      "kernel_sequence": 221416541,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294149790297,
+      "callback_realtime_ns": 1790429212297660295,
+      "frame_index": 250,
+      "kernel_event_ns": 3701294149727000,
+      "kernel_sequence": 221416542,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294166456374,
+      "callback_realtime_ns": 1790429212314326390,
+      "frame_index": 251,
+      "kernel_event_ns": 3701294167100000,
+      "kernel_sequence": 221416543,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294183185654,
+      "callback_realtime_ns": 1790429212331055670,
+      "frame_index": 252,
+      "kernel_event_ns": 3701294183817000,
+      "kernel_sequence": 221416544,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294199889435,
+      "callback_realtime_ns": 1790429212347759432,
+      "frame_index": 253,
+      "kernel_event_ns": 3701294200532000,
+      "kernel_sequence": 221416545,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294216620030,
+      "callback_realtime_ns": 1790429212364490027,
+      "frame_index": 254,
+      "kernel_event_ns": 3701294216585000,
+      "kernel_sequence": 221416546,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294233320810,
+      "callback_realtime_ns": 1790429212381190808,
+      "frame_index": 255,
+      "kernel_event_ns": 3701294233965000,
+      "kernel_sequence": 221416547,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294250061813,
+      "callback_realtime_ns": 1790429212397931829,
+      "frame_index": 256,
+      "kernel_event_ns": 3701294250682000,
+      "kernel_sequence": 221416548,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294266752352,
+      "callback_realtime_ns": 1790429212414622368,
+      "frame_index": 257,
+      "kernel_event_ns": 3701294267398000,
+      "kernel_sequence": 221416549,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294283495558,
+      "callback_realtime_ns": 1790429212431365575,
+      "frame_index": 258,
+      "kernel_event_ns": 3701294284115000,
+      "kernel_sequence": 221416550,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294300194820,
+      "callback_realtime_ns": 1790429212448064818,
+      "frame_index": 259,
+      "kernel_event_ns": 3701294300831000,
+      "kernel_sequence": 221416551,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294316923175,
+      "callback_realtime_ns": 1790429212464793172,
+      "frame_index": 260,
+      "kernel_event_ns": 3701294316885000,
+      "kernel_sequence": 221416552,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294333619937,
+      "callback_realtime_ns": 1790429212481489953,
+      "frame_index": 261,
+      "kernel_event_ns": 3701294334264000,
+      "kernel_sequence": 221416553,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294350373235,
+      "callback_realtime_ns": 1790429212498243251,
+      "frame_index": 262,
+      "kernel_event_ns": 3701294350317000,
+      "kernel_sequence": 221416554,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294367062682,
+      "callback_realtime_ns": 1790429212514932698,
+      "frame_index": 263,
+      "kernel_event_ns": 3701294367697000,
+      "kernel_sequence": 221416555,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294383784852,
+      "callback_realtime_ns": 1790429212531654868,
+      "frame_index": 264,
+      "kernel_event_ns": 3701294383750000,
+      "kernel_sequence": 221416556,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294400477410,
+      "callback_realtime_ns": 1790429212548347407,
+      "frame_index": 265,
+      "kernel_event_ns": 3701294401128000,
+      "kernel_sequence": 221416557,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294420080221,
+      "callback_realtime_ns": 1790429212567950237,
+      "frame_index": 266,
+      "kernel_event_ns": 3701294417847000,
+      "kernel_sequence": 221416558,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294433913100,
+      "callback_realtime_ns": 1790429212581783098,
+      "frame_index": 267,
+      "kernel_event_ns": 3701294434562000,
+      "kernel_sequence": 221416559,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294450658029,
+      "callback_realtime_ns": 1790429212598528026,
+      "frame_index": 268,
+      "kernel_event_ns": 3701294451279000,
+      "kernel_sequence": 221416560,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294467344105,
+      "callback_realtime_ns": 1790429212615214084,
+      "frame_index": 269,
+      "kernel_event_ns": 3701294467993000,
+      "kernel_sequence": 221416561,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294484106385,
+      "callback_realtime_ns": 1790429212631976402,
+      "frame_index": 270,
+      "kernel_event_ns": 3701294484053000,
+      "kernel_sequence": 221416562,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294500777666,
+      "callback_realtime_ns": 1790429212648647645,
+      "frame_index": 271,
+      "kernel_event_ns": 3701294501427000,
+      "kernel_sequence": 221416563,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294517523835,
+      "callback_realtime_ns": 1790429212665393833,
+      "frame_index": 272,
+      "kernel_event_ns": 3701294518145000,
+      "kernel_sequence": 221416564,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294534221078,
+      "callback_realtime_ns": 1790429212682091095,
+      "frame_index": 273,
+      "kernel_event_ns": 3701294534860000,
+      "kernel_sequence": 221416565,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294550955359,
+      "callback_realtime_ns": 1790429212698825375,
+      "frame_index": 274,
+      "kernel_event_ns": 3701294551577000,
+      "kernel_sequence": 221416566,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294567696139,
+      "callback_realtime_ns": 1790429212715566155,
+      "frame_index": 275,
+      "kernel_event_ns": 3701294568293000,
+      "kernel_sequence": 221416567,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294584415827,
+      "callback_realtime_ns": 1790429212732285843,
+      "frame_index": 276,
+      "kernel_event_ns": 3701294585009000,
+      "kernel_sequence": 221416568,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294601069830,
+      "callback_realtime_ns": 1790429212748939846,
+      "frame_index": 277,
+      "kernel_event_ns": 3701294601725000,
+      "kernel_sequence": 221416569,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294618016128,
+      "callback_realtime_ns": 1790429212765886125,
+      "frame_index": 278,
+      "kernel_event_ns": 3701294617779000,
+      "kernel_sequence": 221416570,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294634522538,
+      "callback_realtime_ns": 1790429212782392536,
+      "frame_index": 279,
+      "kernel_event_ns": 3701294635159000,
+      "kernel_sequence": 221416571,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294651244559,
+      "callback_realtime_ns": 1790429212799114557,
+      "frame_index": 280,
+      "kernel_event_ns": 3701294651875000,
+      "kernel_sequence": 221416572,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294667940580,
+      "callback_realtime_ns": 1790429212815810560,
+      "frame_index": 281,
+      "kernel_event_ns": 3701294668590000,
+      "kernel_sequence": 221416573,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294684675564,
+      "callback_realtime_ns": 1790429212832545581,
+      "frame_index": 282,
+      "kernel_event_ns": 3701294685308000,
+      "kernel_sequence": 221416574,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294701371012,
+      "callback_realtime_ns": 1790429212849241009,
+      "frame_index": 283,
+      "kernel_event_ns": 3701294702023000,
+      "kernel_sequence": 221416575,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294718113884,
+      "callback_realtime_ns": 1790429212865983882,
+      "frame_index": 284,
+      "kernel_event_ns": 3701294718077000,
+      "kernel_sequence": 221416576,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294734803443,
+      "callback_realtime_ns": 1790429212882673440,
+      "frame_index": 285,
+      "kernel_event_ns": 3701294735456000,
+      "kernel_sequence": 221416577,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294751747056,
+      "callback_realtime_ns": 1790429212899617072,
+      "frame_index": 286,
+      "kernel_event_ns": 3701294752174000,
+      "kernel_sequence": 221416578,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294768256781,
+      "callback_realtime_ns": 1790429212916126779,
+      "frame_index": 287,
+      "kernel_event_ns": 3701294768890000,
+      "kernel_sequence": 221416579,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294784979450,
+      "callback_realtime_ns": 1790429212932849448,
+      "frame_index": 288,
+      "kernel_event_ns": 3701294784943000,
+      "kernel_sequence": 221416580,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294801669027,
+      "callback_realtime_ns": 1790429212949539025,
+      "frame_index": 289,
+      "kernel_event_ns": 3701294802321000,
+      "kernel_sequence": 221416581,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294818407918,
+      "callback_realtime_ns": 1790429212966277916,
+      "frame_index": 290,
+      "kernel_event_ns": 3701294819039000,
+      "kernel_sequence": 221416582,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294835105884,
+      "callback_realtime_ns": 1790429212982975900,
+      "frame_index": 291,
+      "kernel_event_ns": 3701294835755000,
+      "kernel_sequence": 221416583,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294851912349,
+      "callback_realtime_ns": 1790429212999782347,
+      "frame_index": 292,
+      "kernel_event_ns": 3701294851808000,
+      "kernel_sequence": 221416584,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294868554778,
+      "callback_realtime_ns": 1790429213016424775,
+      "frame_index": 293,
+      "kernel_event_ns": 3701294869188000,
+      "kernel_sequence": 221416585,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294885279169,
+      "callback_realtime_ns": 1790429213033149167,
+      "frame_index": 294,
+      "kernel_event_ns": 3701294885242000,
+      "kernel_sequence": 221416586,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294901968005,
+      "callback_realtime_ns": 1790429213049838003,
+      "frame_index": 295,
+      "kernel_event_ns": 3701294902620000,
+      "kernel_sequence": 221416587,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294918705008,
+      "callback_realtime_ns": 1790429213066575005,
+      "frame_index": 296,
+      "kernel_event_ns": 3701294919338000,
+      "kernel_sequence": 221416588,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294935400288,
+      "callback_realtime_ns": 1790429213083270286,
+      "frame_index": 297,
+      "kernel_event_ns": 3701294936053000,
+      "kernel_sequence": 221416589,
+      "photodiode_state": "off"
+    },
+    {
+      "buffer_index": 0,
+      "callback_monotonic_ns": 3701294952348661,
+      "callback_realtime_ns": 1790429213100218677,
+      "frame_index": 298,
+      "kernel_event_ns": 3701294952108000,
+      "kernel_sequence": 221416590,
+      "photodiode_state": "on"
+    },
+    {
+      "buffer_index": 1,
+      "callback_monotonic_ns": 3701294968837830,
+      "callback_realtime_ns": 1790429213116707828,
+      "frame_index": 299,
+      "kernel_event_ns": 3701294969486000,
+      "kernel_sequence": 221416591,
+      "photodiode_state": "off"
+    }
+  ],
+  "frame_source": "external-raw-pair",
+  "interval_tolerance_fraction": 0.05,
+  "intervals_outside_tolerance": 0,
+  "kernel_timestamp_clock": "monotonic",
+  "last_page_flip_callback_monotonic_ns": 3701294968837830,
+  "last_page_flip_callback_realtime_ns": 1790429213116707828,
+  "last_page_flip_kernel_event_ns": 3701294969486000,
+  "lease_objects": [
+    42,
+    93,
+    104,
+    666
+  ],
+  "long_interval_count": 0,
+  "maximum_vblank_interval_us": 17381.0,
+  "mean_vblank_interval_us": 16716.384615,
+  "minimum_vblank_interval_us": 16051.0,
+  "missed_vblank_count": 0,
+  "nominal_refresh_hz": 59.8214286,
+  "ownership": "lease-active",
+  "p95_vblank_interval_us": 17380.0,
+  "p99_vblank_interval_us": 17381.0,
+  "photodiode": {
+    "corner": "bottom_right",
+    "frame_state": "logical_frame_0=on,logical_frame_1=off,initial_modeset=off_preroll",
+    "off_value": 0,
+    "on_value": 255,
+    "size_px": 50
+  },
+  "pixel_format": "RGB565",
+  "requested_frame_count": 300,
+  "requested_mode": "1024x600@59.82",
+  "restored": true,
+  "selected_mode": "1024x600@59.8214",
+  "short_interval_count": 0,
+  "std_vblank_interval_us": 419.374749,
+  "timing_source": "kernel_event"
+}
