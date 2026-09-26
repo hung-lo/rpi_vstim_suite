@@ -34,11 +34,12 @@ def run(frames: int, cache_size: int, transport_capacity: int) -> dict[str, obje
     with tempfile.TemporaryDirectory(prefix="rpi-vstim-asset-stress-") as temporary:
         root = Path(temporary)
         assets = build_corpus(root)
+        base_frames, remainder = divmod(frames, len(assets))
         events = tuple(
             PlannedEvent(
                 f"asset-{index}",
                 "image",
-                max(1, frames // len(assets)),
+                max(1, base_frames + (index < remainder)),
                 metadata={"image": assets[index % len(assets)]},
             )
             for index in range(len(assets))

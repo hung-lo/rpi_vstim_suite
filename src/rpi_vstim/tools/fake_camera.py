@@ -60,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         pass
     elif args.mode == "zero-output":
         output.touch()
-    elif args.mode in {"normal", "stall", "stderr", "delayed-exit", "ignore-terminate"}:
+    elif args.mode in {
+        "normal", "delayed-startup", "stall", "stderr", "delayed-exit",
+        "ignore-terminate", "seeded-failure",
+    }:
         output.write_bytes(b"frame\n")
     elif args.mode == "truncated":
         output.write_bytes(b"partial")

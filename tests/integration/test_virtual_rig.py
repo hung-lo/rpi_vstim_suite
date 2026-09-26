@@ -52,3 +52,14 @@ def test_virtual_rig_required_camera_failure_is_terminal_and_inspectable(tmp_pat
     assert manifest["schema_version"] == 1
     assert manifest["cameras"][0]["state"] == "FAILED"
     assert inspect_session(root)["status"] == "FAILED"
+
+
+def test_virtual_rig_force_kill_of_required_camera_is_not_complete(tmp_path):
+    result = run_virtual_session(
+        virtual_config(tmp_path),
+        protocol_name="natural-images",
+        session_id="camera-kill",
+        camera_mode="ignore-terminate",
+    )
+    assert result.final_state.value == "CLEANUP_FAILED"
+    assert inspect_session(result.session.context.session_root)["status"] == "CLEANUP_FAILED"

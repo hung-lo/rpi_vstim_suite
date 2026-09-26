@@ -8,9 +8,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from rpi_vstim.core.config import CameraDeviceConfig, config_from_mapping
-from rpi_vstim.core.virtual_rig import run_virtual_session
 from rpi_vstim.core.session import inspect_session
+from rpi_vstim.core.config import config_from_mapping
+from rpi_vstim.core.virtual_rig import run_virtual_session
 
 
 PROTOCOLS = ("natural-images", "reward-conditioning", "spout-training", "drifting-gratings", "retinotopy")

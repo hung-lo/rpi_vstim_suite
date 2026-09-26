@@ -120,7 +120,17 @@ class VirtualCameraService:
 
     def stop(self) -> None:
         if self.supervisor is not None:
-            self.supervisor.stop()
+            recording = {
+                status.camera_id
+                for status in self.supervisor.poll()
+                if status.state == CameraState.RECORDING
+            }
+            statuses = self.supervisor.stop()
+            if any(
+                status.required and status.camera_id in recording and status.state == CameraState.FAILED
+                for status in statuses
+            ):
+                raise RuntimeError("required virtual camera failed during stop")
 
     def manifest(self) -> list[dict[str, object]]:
         return self.supervisor.manifest() if self.supervisor is not None else []

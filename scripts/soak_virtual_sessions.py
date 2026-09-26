@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import resource
-import shutil
 import tempfile
 import time
 import tracemalloc
