@@ -317,6 +317,17 @@ def run_simulated_session(
         if protocol_failure:
             raise RuntimeError("simulated protocol failure")
         for event in plan.events:
+            camera_poll = getattr(services.cameras, "poll", None)
+            if camera_poll is not None:
+                camera_statuses = camera_poll()
+                if any(
+                    status.required and status.state.value == "FAILED"
+                    for status in camera_statuses
+                ):
+                    raise CameraStartupError("required camera failed during recording")
+                if any(status.state.value == "DEGRADED" for status in camera_statuses):
+                    if "camera" not in degraded:
+                        degraded.append("camera")
             if fault == "producer_mid" and sequence_number > 2:
                 raise RuntimeError("injected producer mid-session failure")
             target_lifecycle = LifecycleState(event.phase)

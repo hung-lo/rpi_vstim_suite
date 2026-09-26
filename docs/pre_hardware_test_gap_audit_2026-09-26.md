@@ -3,7 +3,7 @@
 Baseline: `codex/pre-hardware-rc-hardening` at parent `15cd7ab`. Local
 `coverage`/`pytest-cov` is unavailable, so this audit uses the test inventory,
 targeted branch inspection, and standalone campaigns. The fast suite grew from
-195 baseline tests to 201 after the RC changes.
+195 baseline tests to 207 after the RC changes.
 
 ## Closed high-value gaps
 

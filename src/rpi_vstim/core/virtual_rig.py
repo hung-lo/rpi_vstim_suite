@@ -80,6 +80,7 @@ class VirtualCameraService:
         self.mode = mode
         self.fail_ids = fail_ids or set()
         self.supervisor: LocalCameraSupervisor | None = None
+        self._started = False
 
     @property
     def degraded(self) -> bool:
@@ -117,20 +118,20 @@ class VirtualCameraService:
             )
         self.supervisor = LocalCameraSupervisor(specs, verify_output_growth=self.config.cameras.verify_output_growth)
         self.supervisor.start(session_root)
+        self._started = True
+
+    def poll(self):
+        return self.supervisor.poll() if self.supervisor is not None else ()
 
     def stop(self) -> None:
         if self.supervisor is not None:
-            recording = {
-                status.camera_id
-                for status in self.supervisor.poll()
-                if status.state == CameraState.RECORDING
-            }
             statuses = self.supervisor.stop()
             if any(
-                status.required and status.camera_id in recording and status.state == CameraState.FAILED
+                self._started and status.required and status.state == CameraState.FAILED
                 for status in statuses
             ):
                 raise RuntimeError("required virtual camera failed during stop")
+            self._started = False
 
     def manifest(self) -> list[dict[str, object]]:
         return self.supervisor.manifest() if self.supervisor is not None else []
