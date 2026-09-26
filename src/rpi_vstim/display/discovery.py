@@ -91,15 +91,8 @@ def select_display(
     *,
     role: str = "stimulus",
 ) -> DisplaySelection:
-    """Resolve an explicit role and mode; never silently choose another screen."""
-    connector_name = config.stimulus_connector if role == "stimulus" else config.preview_connector
-    if connector_name is None:
-        raise DisplaySelectionError(f"{role} display is disabled")
-    connector = inventory.connector(connector_name)
-    if connector.status != "connected":
-        raise DisplaySelectionError(
-            f"configured {role} connector is not connected: {connector.name} ({connector.status})"
-        )
+    """Resolve an explicit role and its configured stimulus mode."""
+    connector = select_connector(inventory, config, role=role)
     candidates = [
         mode
         for mode in connector.modes
@@ -118,6 +111,24 @@ def select_display(
             f"requested {config.refresh_hz:g}Hz, nearest {selected.refresh_hz:g}Hz"
         )
     return DisplaySelection(role, connector, selected)
+
+
+def select_connector(
+    inventory: DisplayInventory,
+    config: DisplayConfig,
+    *,
+    role: str = "preview",
+) -> ConnectorInfo:
+    """Resolve role identity/status without imposing stimulus mode constraints."""
+    connector_name = config.stimulus_connector if role == "stimulus" else config.preview_connector
+    if connector_name is None:
+        raise DisplaySelectionError(f"{role} display is disabled")
+    connector = inventory.connector(connector_name)
+    if connector.status != "connected":
+        raise DisplaySelectionError(
+            f"configured {role} connector is not connected: {connector.name} ({connector.status})"
+        )
+    return connector
 
 
 def connected_connectors(inventory: DisplayInventory) -> tuple[ConnectorInfo, ...]:

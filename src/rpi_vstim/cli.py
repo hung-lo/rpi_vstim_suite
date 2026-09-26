@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "hardware" and args.hardware_command == "kms-render-smoke":
         display = KmsDisplayBackend(
             native_binary=args.binary,
-            use_lease=args.lease,
+            use_lease=True if args.lease else None,
         )
         try:
             loaded = load_config(args.config)
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 binary=args.binary,
                 device=args.device,
                 probe_only=args.hardware_command == "kms-probe",
-                lease=args.lease,
+                lease=args.lease or config.ownership == "lease",
             )
             print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else payload)
         except (ConfigError, NativeKmsError, OSError, ValueError) as exc:

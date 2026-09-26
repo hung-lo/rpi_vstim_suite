@@ -24,20 +24,28 @@ class KmsDisplayBackend:
         *,
         native_binary: Path | str | None = None,
         photodiode: PhotodiodePatch | None = None,
-        use_lease: bool = False,
+        use_lease: bool | None = None,
     ) -> None:
         self.config: DisplayConfig | None = None
         self.info: DisplayInfo | None = None
         self.native_binary = native_binary
         self.photodiode = photodiode or PhotodiodePatch("bottom_right", 50, 255, 0)
-        self.use_lease = use_lease
+        self._use_lease_override = use_lease
+        self.use_lease = False
         self.renderer: ProductionFrameRenderer | None = None
         self.last_probe_payload: dict[str, object] | None = None
 
     def open(self, config: DisplayConfig) -> DisplayInfo:
+        if config.ownership not in {"direct", "lease"}:
+            raise ValueError(f"unsupported display ownership: {config.ownership}")
         result = probe_config(config)
         selected = result["stimulus"]
         self.config = config
+        self.use_lease = (
+            config.ownership == "lease"
+            if self._use_lease_override is None
+            else self._use_lease_override
+        )
         self.info = DisplayInfo(
             self.name,
             str(selected["connector"]),

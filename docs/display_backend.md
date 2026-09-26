@@ -21,10 +21,12 @@ The mapping was verified by a short HDMI-A-1-only leased pattern observed on
 the camera monitor, followed by a short HDMI-A-2-only leased control. Connector
 names are not embedded in protocol code and can be swapped in a rig profile.
 
-Mode selection requires the configured width/height and accepts a refresh only
-within `refresh_tolerance_hz`. `require_exact_refresh` keeps the selection
-fail-closed for the requested timing; no alternate connector is selected when
-the configured one is missing, disconnected, or lacks the requested mode.
+Stimulus mode selection requires the configured width/height and accepts a
+refresh only within `refresh_tolerance_hz`. `require_exact_refresh` keeps the
+stimulus selection fail-closed for the requested timing. Preview discovery only
+checks the configured connector's identity and connected status because labwc
+owns its mode; it does not impose the stimulus resolution/refresh on the
+camera-monitor output.
 
 The read-only CLI path is:
 
@@ -59,7 +61,7 @@ DRM master; diagnose that ownership first.
 ## Timing boundary
 
 The native layer owns dumb-buffer allocation, synchronous page-flip events,
-vblank sequence/timestamps, abort handling, and restoration of the original
+kernel event timestamps, callback-dispatch diagnostics, abort handling, and restoration of the original
 CRTC state. `ProductionFrameRenderer` converts prepared RGB888 frames into
 bounded RGB565 or XRGB8888 scanout buffers, applies the photodiode patch before
 submission, and passes a two-frame packed pair to the same native leased KMS
@@ -68,7 +70,9 @@ allocation occurs in that timing-critical loop.
 
 Python timing helpers report median, p95, p99, min/max, estimated refresh, and
 intervals outside tolerance, long/short intervals, and estimated dropped
-frames. Software timestamps are not physical photodiode onsets. Native KMS
+frames with an explicit timestamp source. Kernel event timestamps are preferred
+for interval summaries; callback timestamps remain a separate dispatch
+diagnostic. Neither is a physical photodiode onset. Native KMS
 errors distinguish readable/enumerable resources from modesetting ownership;
 when labwc owns the DRM master, the result is an ownership block rather than a
 generic display failure. The corrected HDMI-A-2 10,000-frame run and the

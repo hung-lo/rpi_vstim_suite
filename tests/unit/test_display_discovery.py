@@ -45,6 +45,8 @@ def test_preview_can_be_disabled_and_wrong_mode_fails():
 def test_non_exact_refresh_selects_nearest_supported_mode():
     inventory = parse_modetest_connectors(FIXTURE)
     config = DisplayConfig(
+        stimulus_connector="HDMI-A-2",
+        preview_connector="HDMI-A-1",
         width_px=1024,
         height_px=600,
         refresh_hz=60.0,
@@ -55,7 +57,13 @@ def test_non_exact_refresh_selects_nearest_supported_mode():
 
 def test_exact_refresh_rejects_unavailable_rate():
     inventory = parse_modetest_connectors(FIXTURE)
-    config = DisplayConfig(width_px=1024, height_px=600, refresh_hz=60.0)
+    config = DisplayConfig(
+        stimulus_connector="HDMI-A-2",
+        preview_connector="HDMI-A-1",
+        width_px=1024,
+        height_px=600,
+        refresh_hz=60.0,
+    )
     with pytest.raises(DisplaySelectionError, match="refresh"):
         select_display(inventory, config)
 
@@ -109,3 +117,16 @@ def test_probe_config_keeps_preview_separate():
     result = probe_config(config, command=("cat", "tests/fixtures/modetest_dual_hdmi.txt"))
     assert result["stimulus"]["connector"] == "HDMI-A-1"
     assert result["preview"]["connector"] == "HDMI-A-2"
+
+
+def test_probe_config_does_not_apply_stimulus_mode_to_preview():
+    config = DisplayConfig(
+        stimulus_connector="HDMI-A-1",
+        preview_connector="HDMI-A-2",
+        width_px=1280,
+        height_px=720,
+        refresh_hz=60.0,
+    )
+    result = probe_config(config, command=("cat", "tests/fixtures/modetest_dual_hdmi.txt"))
+    assert result["stimulus"]["mode"] == "1280x720"
+    assert result["preview"] == {"connector": "HDMI-A-2", "status": "connected"}

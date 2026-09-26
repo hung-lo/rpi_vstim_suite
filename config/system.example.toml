@@ -5,9 +5,10 @@ asset_root = "/home/pi/stimulus_assets"
 reward_state_root = "/mnt/hd/vstim_reward_assignments"
 
 [display]
-backend = "kms"
-stimulus_connector = "HDMI-A-2"
-preview_connector = "HDMI-A-1"
+backend = "fake"
+ownership = "direct"
+stimulus_connector = ""
+preview_connector = ""
 width_px = 1280
 height_px = 720
 refresh_hz = 60.0

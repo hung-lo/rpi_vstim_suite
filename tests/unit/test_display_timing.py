@@ -21,9 +21,11 @@ def test_timestamps_and_invalid_intervals():
     summary = summarize_timestamps_ns(
         (1_000_000_000, 1_016_666_000, 1_033_332_000),
         nominal_refresh_hz=60.0,
+        timestamp_source="kernel_event",
     )
     assert summary.count == 2
     assert summary.median_us == 16_666.0
+    assert summary.timestamp_source == "kernel_event"
     with pytest.raises(ValueError, match="positive"):
         summarize_intervals((0.0,), nominal_refresh_hz=60.0)
 

@@ -6,6 +6,7 @@ from rpi_vstim.core.config import DisplayConfig
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.display.frame_program import FrameProgram
 from rpi_vstim.display.kms import KmsDisplayBackend
+from rpi_vstim.display.photodiode import PhotodiodePatch
 from rpi_vstim.hardware.simulated import SimulatedHardwareBackend
 
 
@@ -65,6 +66,7 @@ def test_kms_open_uses_selected_probe_and_presents_native_result(monkeypatch):
     display = KmsDisplayBackend()
     info = display.open(
         DisplayConfig(
+            ownership="direct",
             stimulus_connector="HDMI-A-1",
             preview_connector="HDMI-A-2",
             width_px=1024,
@@ -86,9 +88,27 @@ def test_kms_open_failure_does_not_leave_partial_state(monkeypatch):
     monkeypatch.setattr("rpi_vstim.display.kms.probe_config", fail)
     display = KmsDisplayBackend()
     with pytest.raises(RuntimeError, match="connector"):
-        display.open(DisplayConfig())
+        display.open(DisplayConfig(ownership="direct"))
     assert display.config is None
     assert display.info is None
+
+
+def test_kms_backend_derives_lease_ownership_from_rig_config(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {"stimulus": {"connector": "HDMI-A-2", "mode": "2x2", "refresh_hz": 60.0}, "preview": None},
+    )
+    display = KmsDisplayBackend()
+    display.open(
+        DisplayConfig(
+            ownership="lease",
+            stimulus_connector="HDMI-A-2",
+            width_px=2,
+            height_px=2,
+        )
+    )
+    assert display.use_lease is True
+    display.close()
 
 
 def test_kms_present_failure_closes_backend(monkeypatch):
@@ -108,7 +128,14 @@ def test_kms_present_failure_closes_backend(monkeypatch):
         lambda config, **kwargs: (_ for _ in ()).throw(RuntimeError("page-flip timeout")),
     )
     display = KmsDisplayBackend()
-    display.open(DisplayConfig(width_px=1024, height_px=600, refresh_hz=59.82))
+    display.open(
+        DisplayConfig(
+            ownership="direct",
+            width_px=1024,
+            height_px=600,
+            refresh_hz=59.82,
+        )
+    )
     with pytest.raises(RuntimeError, match="page-flip"):
         display.present_color((0, 0, 0), frames=1)
     assert display.config is None
@@ -123,12 +150,12 @@ def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypa
             "preview": {"connector": "HDMI-A-1"},
         },
     )
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"frame_bytes": []}
 
     def fake_probe(config, **kwargs):
         frame_file = Path(kwargs["frame_file"])
         captured["frame_path"] = frame_file
-        captured["frame_bytes"] = frame_file.read_bytes()
+        captured["frame_bytes"].append(frame_file.read_bytes())
         return {
             "connector": "HDMI-A-2",
             "selected_mode": "2x2@59.82",
@@ -146,9 +173,12 @@ def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypa
         }
 
     monkeypatch.setattr("rpi_vstim.display.kms.run_native_probe", fake_probe)
-    display = KmsDisplayBackend()
+    display = KmsDisplayBackend(
+        photodiode=PhotodiodePatch("bottom_right", 1, 255, 0)
+    )
     display.open(
         DisplayConfig(
+            ownership="direct",
             stimulus_connector="HDMI-A-2",
             preview_connector="HDMI-A-1",
             width_px=2,
@@ -157,7 +187,11 @@ def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypa
     )
     rgb = bytes((10, 20, 30)) * 4
     result = display.present_rgb_pair(rgb, rgb, frames=2, sequence_id="renderer")
+    replacement = bytes((200, 30, 10)) * 4
+    display.present_rgb_pair(replacement, replacement, frames=2, sequence_id="renderer-2")
     assert result.connector == "HDMI-A-2"
-    assert len(captured["frame_bytes"]) == 2 * 2 * 2 * 2
+    assert len(captured["frame_bytes"]) == 2
+    assert len(captured["frame_bytes"][0]) == 2 * 2 * 2 * 2
+    assert captured["frame_bytes"][0] != captured["frame_bytes"][1]
     assert not Path(captured["frame_path"]).exists()
     display.close()

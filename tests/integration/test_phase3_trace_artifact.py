@@ -12,14 +12,16 @@ TRACE = (
 )
 
 
-def test_combined_phase3_trace_has_contiguous_compensating_intervals():
+def test_historical_phase3_trace_has_contiguous_callback_intervals():
     payload = json.loads(TRACE.read_text())
     events = payload["flip_events"]
+    assert "kernel_event_ns" not in events[0]
     timestamps = tuple(event["monotonic_ns"] for event in events)
     summary = summarize_timestamps_ns(
         timestamps,
         nominal_refresh_hz=payload["nominal_refresh_hz"],
         tolerance_fraction=payload["interval_tolerance_fraction"],
+        timestamp_source="legacy_callback_monotonic",
     )
     expected_us = 1_000_000.0 / payload["nominal_refresh_hz"]
     tolerance_us = expected_us * payload["interval_tolerance_fraction"]
@@ -34,6 +36,7 @@ def test_combined_phase3_trace_has_contiguous_compensating_intervals():
     )
 
     assert summary.count == 3599
+    assert summary.timestamp_source == "legacy_callback_monotonic"
     assert summary.outside_tolerance_count == payload["intervals_outside_tolerance"] == 210
     assert summary.long_interval_count == payload["long_interval_count"] == 105
     assert summary.short_interval_count == payload["short_interval_count"] == 105

@@ -1,5 +1,7 @@
 [display]
 backend = "kms"
+# Ownership is intentionally unset until this future rig is audited.
+# Choose "direct" or "lease" only after validating its display stack.
 stimulus_connector = "HDMI-A-1"
 preview_connector = "HDMI-A-2"
 width_px = 1280

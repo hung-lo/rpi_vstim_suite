@@ -20,9 +20,14 @@ class DisplayResult:
     sequence_id: str
     requested_frame_count: int
     completed_frame_count: int
-    first_page_flip_monotonic_ns: int | None = None
-    last_page_flip_monotonic_ns: int | None = None
-    first_page_flip_realtime_ns: int | None = None
+    first_page_flip_kernel_event_ns: int | None = None
+    last_page_flip_kernel_event_ns: int | None = None
+    first_page_flip_callback_monotonic_ns: int | None = None
+    last_page_flip_callback_monotonic_ns: int | None = None
+    first_page_flip_callback_realtime_ns: int | None = None
+    last_page_flip_callback_realtime_ns: int | None = None
+    timing_source: str | None = None
+    kernel_timestamp_clock: str | None = None
     mean_vblank_interval_us: float | None = None
     std_vblank_interval_us: float | None = None
     maximum_vblank_interval_us: float | None = None

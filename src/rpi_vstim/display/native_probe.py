@@ -141,9 +141,30 @@ def display_result_from_probe(
         sequence_id=sequence_id,
         requested_frame_count=int(payload["requested_frame_count"]),
         completed_frame_count=int(payload["completed_frame_count"]),
-        first_page_flip_monotonic_ns=int(payload["first_page_flip_monotonic_ns"]),
-        last_page_flip_monotonic_ns=int(payload["last_page_flip_monotonic_ns"]),
-        first_page_flip_realtime_ns=int(payload["first_page_flip_realtime_ns"]),
+        first_page_flip_kernel_event_ns=_optional_int(payload, "first_page_flip_kernel_event_ns"),
+        last_page_flip_kernel_event_ns=_optional_int(payload, "last_page_flip_kernel_event_ns"),
+        first_page_flip_callback_monotonic_ns=_timestamp(
+            payload,
+            "first_page_flip_callback_monotonic_ns",
+            "first_page_flip_monotonic_ns",
+        ),
+        last_page_flip_callback_monotonic_ns=_timestamp(
+            payload,
+            "last_page_flip_callback_monotonic_ns",
+            "last_page_flip_monotonic_ns",
+        ),
+        first_page_flip_callback_realtime_ns=_timestamp(
+            payload,
+            "first_page_flip_callback_realtime_ns",
+            "first_page_flip_realtime_ns",
+        ),
+        last_page_flip_callback_realtime_ns=_optional_int(
+            payload, "last_page_flip_callback_realtime_ns"
+        ),
+        timing_source=str(
+            payload.get("timing_source", "legacy_callback_monotonic")
+        ),
+        kernel_timestamp_clock=str(payload.get("kernel_timestamp_clock", "unknown")),
         mean_vblank_interval_us=float(payload["mean_vblank_interval_us"]),
         std_vblank_interval_us=float(payload["std_vblank_interval_us"]),
         maximum_vblank_interval_us=float(payload["maximum_vblank_interval_us"]),
@@ -161,6 +182,17 @@ def display_result_from_probe(
 def _optional_float(payload: dict[str, Any], name: str) -> float | None:
     value = payload.get(name)
     return None if value is None else float(value)
+
+
+def _optional_int(payload: dict[str, Any], name: str) -> int | None:
+    value = payload.get(name)
+    return None if value is None else int(value)
+
+
+def _timestamp(payload: dict[str, Any], current: str, legacy: str) -> int | None:
+    if current in payload:
+        return _optional_int(payload, current)
+    return _optional_int(payload, legacy)
 
 
 def _photodiode_state(payload: dict[str, Any]) -> str | None:

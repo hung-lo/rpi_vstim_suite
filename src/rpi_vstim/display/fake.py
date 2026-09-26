@@ -40,16 +40,17 @@ class FakeDisplayBackend:
         self.presented.append((sequence_id, program.frame_count))
         first_mono = monotonic_ns()
         return DisplayResult(
-            self.name,
-            self.config.connector,
-            f"{self.config.width_px}x{self.config.height_px}@{self.config.refresh_hz}",
-            self.config.pixel_format,
-            sequence_id,
-            program.frame_count,
-            program.frame_count,
-            first_mono,
-            first_mono,
-            utc_ns(),
+            backend_name=self.name,
+            connector=self.config.connector,
+            mode=f"{self.config.width_px}x{self.config.height_px}@{self.config.refresh_hz}",
+            pixel_format=self.config.pixel_format,
+            sequence_id=sequence_id,
+            requested_frame_count=program.frame_count,
+            completed_frame_count=program.frame_count,
+            first_page_flip_callback_monotonic_ns=first_mono,
+            last_page_flip_callback_monotonic_ns=first_mono,
+            first_page_flip_callback_realtime_ns=utc_ns(),
+            timing_source="fake",
         )
 
     def present_color(self, rgb: tuple[int, int, int], *, frames: int) -> DisplayResult:

@@ -189,9 +189,55 @@ def test_native_result_preserves_timing_and_patch_diagnostics():
     }
     result = display_result_from_probe(
         payload,
-        DisplayConfig(stimulus_connector="HDMI-A-1", preview_connector="HDMI-A-2"),
+        DisplayConfig(
+            ownership="direct",
+            stimulus_connector="HDMI-A-1",
+            preview_connector="HDMI-A-2",
+        ),
         sequence_id="test",
     )
     assert result.intervals_outside_tolerance == 1
     assert result.estimated_dropped_frame_count == 1
     assert result.photodiode_state == "even=on,odd=off"
+
+
+def test_native_result_preserves_kernel_and_callback_timestamp_sources():
+    payload = {
+        "connector": "HDMI-A-2",
+        "selected_mode": "1024x600@59.8214",
+        "pixel_format": "RGB565",
+        "requested_frame_count": 2,
+        "completed_frame_count": 2,
+        "first_page_flip_kernel_event_ns": 100,
+        "last_page_flip_kernel_event_ns": 200,
+        "first_page_flip_callback_monotonic_ns": 90,
+        "last_page_flip_callback_monotonic_ns": 210,
+        "first_page_flip_callback_realtime_ns": 300,
+        "last_page_flip_callback_realtime_ns": 400,
+        "timing_source": "kernel_event",
+        "kernel_timestamp_clock": "monotonic",
+        "mean_vblank_interval_us": 16_683.0,
+        "std_vblank_interval_us": 1.0,
+        "maximum_vblank_interval_us": 16_684.0,
+        "missed_vblank_count": 0,
+        "aborted": False,
+        "photodiode": {
+            "frame_state": "logical_frame_0=on,logical_frame_1=off,initial_modeset=off_preroll"
+        },
+    }
+    result = display_result_from_probe(
+        payload,
+        DisplayConfig(
+            ownership="lease",
+            stimulus_connector="HDMI-A-2",
+            preview_connector="HDMI-A-1",
+        ),
+        sequence_id="kernel",
+    )
+    assert result.first_page_flip_kernel_event_ns == 100
+    assert result.last_page_flip_kernel_event_ns == 200
+    assert result.first_page_flip_callback_monotonic_ns == 90
+    assert result.last_page_flip_callback_realtime_ns == 400
+    assert result.timing_source == "kernel_event"
+    assert result.kernel_timestamp_clock == "monotonic"
+    assert result.photodiode_state.startswith("logical_frame_0=on")

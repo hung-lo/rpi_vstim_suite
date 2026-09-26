@@ -24,6 +24,7 @@
 #include <xf86drmMode.h>
 
 #include "drm_lease.h"
+#include "frame_semantics.h"
 
 #define MAX_FRAMES 10000U
 #define POLL_TIMEOUT_MS 2000
@@ -54,8 +55,12 @@ typedef struct {
 } Options;
 
 typedef struct {
-    uint64_t monotonic_ns;
-    uint64_t realtime_ns;
+    unsigned int frame_index;
+    unsigned int buffer_index;
+    bool photodiode_on;
+    uint64_t kernel_event_ns;
+    uint64_t callback_monotonic_ns;
+    uint64_t callback_realtime_ns;
     uint32_t kernel_sequence;
 } FlipEvent;
 
@@ -85,6 +90,8 @@ typedef struct {
     uint32_t primary_format_count;
     uint32_t primary_formats[64];
     bool primary_plane_compatible;
+    bool timestamp_capability_known;
+    bool timestamp_monotonic;
     drmModeModeInfo mode;
     bool mode_selected;
     bool lease_active;
@@ -99,6 +106,7 @@ typedef struct {
     unsigned int completed;
     unsigned int missed;
     bool pending;
+    KmsFrameMetadata pending_frame;
 } FlipState;
 
 static void signal_handler(int signal_number) {
@@ -275,6 +283,11 @@ static int inspect_state_fd(const Options *options, KmsState *state, int fd, con
     snprintf(state->device, sizeof(state->device), "%s", device);
     state->device_exists = true;
     state->device_readable = true;
+    uint64_t timestamp_capability = 0;
+    if (drmGetCap(state->fd, DRM_CAP_TIMESTAMP_MONOTONIC, &timestamp_capability) == 0) {
+        state->timestamp_capability_known = true;
+        state->timestamp_monotonic = timestamp_capability != 0;
+    }
     state->resources = drmModeGetResources(state->fd);
     if (state->resources == NULL) {
         fprintf(stderr, "cannot enumerate DRM resources on %s: %s\n",
@@ -581,16 +594,26 @@ static void page_flip_handler(
     int fd, unsigned int frame, unsigned int seconds, unsigned int useconds, void *data
 ) {
     (void)fd;
-    (void)seconds;
-    (void)useconds;
     FlipState *state = data;
     if (state->completed < state->capacity) {
-        state->events[state->completed].monotonic_ns = clock_ns(CLOCK_MONOTONIC_RAW);
-        state->events[state->completed].realtime_ns = clock_ns(CLOCK_REALTIME);
+        state->events[state->completed].frame_index = state->pending_frame.frame_index;
+        state->events[state->completed].buffer_index = state->pending_frame.buffer_index;
+        state->events[state->completed].photodiode_on = state->pending_frame.photodiode_on;
+        state->events[state->completed].kernel_event_ns =
+            (uint64_t)seconds * 1000000000ULL + (uint64_t)useconds * 1000ULL;
+        state->events[state->completed].callback_monotonic_ns = clock_ns(CLOCK_MONOTONIC_RAW);
+        state->events[state->completed].callback_realtime_ns = clock_ns(CLOCK_REALTIME);
         state->events[state->completed].kernel_sequence = frame;
     }
     state->completed++;
     state->pending = false;
+}
+
+static const char *kernel_timestamp_clock(const KmsState *state) {
+    if (!state->timestamp_capability_known) {
+        return "unknown";
+    }
+    return state->timestamp_monotonic ? "monotonic" : "realtime";
 }
 
 static int wait_for_flip(KmsState *state, FlipState *flips) {
@@ -752,7 +775,8 @@ static void print_probe_only(const Options *options, const KmsState *state) {
         printf("  \"ownership\": \"%s\",\n  \"lease_objects\": ",
                state->lease_active ? "lease-active" : "direct");
         print_lease_objects_json(state);
-        printf(",\n");
+        printf(",\n  \"kernel_timestamp_clock\": \"");
+        printf("%s\",\n", kernel_timestamp_clock(state));
         printf("  \"selected_mode\": \"%s@%.6g\",\n  \"nominal_refresh_hz\": %.9g,\n",
                state->mode.name, mode_refresh(&state->mode), mode_refresh(&state->mode));
         printf("  \"primary_plane_id\": %u,\n  \"primary_formats\": [",
@@ -843,6 +867,16 @@ static void print_result(
 ) {
     unsigned int completed = flips->completed > flips->capacity ? flips->capacity : flips->completed;
     size_t interval_count = completed > 1 ? completed - 1U : 0U;
+    bool use_kernel_timestamps = completed > 0;
+    for (unsigned int index = 0; index < completed; ++index) {
+        if (flips->events[index].kernel_event_ns == 0) {
+            use_kernel_timestamps = false;
+            break;
+        }
+    }
+    const char *timing_source = use_kernel_timestamps
+                                    ? "kernel_event"
+                                    : "callback_monotonic_raw";
     double *intervals = interval_count == 0 ? NULL : calloc(interval_count, sizeof(*intervals));
     double sum = 0.0;
     double maximum = 0.0;
@@ -853,8 +887,13 @@ static void print_result(
     unsigned int estimated_dropped = 0;
     const double interval_tolerance = 0.05;
     for (size_t index = 0; index < interval_count; ++index) {
-        double interval = (double)(flips->events[index + 1].monotonic_ns -
-                                   flips->events[index].monotonic_ns) / 1000.0;
+        uint64_t left_timestamp = use_kernel_timestamps
+                                      ? flips->events[index].kernel_event_ns
+                                      : flips->events[index].callback_monotonic_ns;
+        uint64_t right_timestamp = use_kernel_timestamps
+                                       ? flips->events[index + 1].kernel_event_ns
+                                       : flips->events[index + 1].callback_monotonic_ns;
+        double interval = (double)(right_timestamp - left_timestamp) / 1000.0;
         intervals[index] = interval;
         sum += interval;
         if (interval > maximum) {
@@ -904,17 +943,27 @@ static void print_result(
                "\"connector_resolved\": true, \"mode_compatible\": true, "
                "\"crtc_resolved\": true, \"primary_plane_compatible\": true, "
                "\"modeset_authority\": \"acquired\", \"page_flips\": \"completed\"},\n");
-        printf("  \"nominal_refresh_hz\": %.9g,\n  \"pixel_format\": ",
+        printf("  \"nominal_refresh_hz\": %.9g,\n  \"timing_source\": ",
                mode_refresh(&state->mode));
+        json_string(timing_source);
+        printf(",\n  \"kernel_timestamp_clock\": ");
+        json_string(kernel_timestamp_clock(state));
+        printf(",\n  \"pixel_format\": ");
         json_string(options->format_name);
         printf(",\n  \"requested_frame_count\": %u,\n  \"completed_frame_count\": %u,\n",
                options->frames, completed);
-        printf("  \"first_page_flip_monotonic_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[0].monotonic_ns : 0);
-        printf("  \"last_page_flip_monotonic_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[completed - 1U].monotonic_ns : 0);
-        printf("  \"first_page_flip_realtime_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[0].realtime_ns : 0);
+        printf("  \"first_page_flip_kernel_event_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[0].kernel_event_ns : 0);
+        printf("  \"last_page_flip_kernel_event_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[completed - 1U].kernel_event_ns : 0);
+        printf("  \"first_page_flip_callback_monotonic_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[0].callback_monotonic_ns : 0);
+        printf("  \"last_page_flip_callback_monotonic_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[completed - 1U].callback_monotonic_ns : 0);
+        printf("  \"first_page_flip_callback_realtime_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[0].callback_realtime_ns : 0);
+        printf("  \"last_page_flip_callback_realtime_ns\": %" PRIu64 ",\n",
+               completed ? flips->events[completed - 1U].callback_realtime_ns : 0);
         printf("  \"mean_vblank_interval_us\": %.6f,\n  \"std_vblank_interval_us\": %.6f,\n",
                mean, stddev);
         printf("  \"minimum_vblank_interval_us\": %.6f,\n  \"maximum_vblank_interval_us\": %.6f,\n",
@@ -933,7 +982,8 @@ static void print_result(
         printf("  \"photodiode\": {\"corner\": ");
         json_string(options->patch_corner);
         printf(", \"size_px\": %u, \"on_value\": %u, \"off_value\": %u, "
-               "\"frame_state\": \"even=on,odd=off\"},\n",
+               "\"frame_state\": \"logical_frame_0=on,logical_frame_1=off,"
+               "initial_modeset=off_preroll\"},\n",
                options->patch_size, options->patch_on, options->patch_off);
         printf("  \"frame_source\": ");
         json_string(options->frame_file == NULL ? "synthetic-alternating" : "external-raw-pair");
@@ -945,21 +995,27 @@ static void print_result(
             if (index != 0) {
                 putchar(',');
             }
-            printf("{\"frame_index\":%u,\"kernel_sequence\":%u,\"monotonic_ns\":%" PRIu64
-                   ",\"realtime_ns\":%" PRIu64 "}", index,
+            printf("{\"frame_index\":%u,\"buffer_index\":%u,\"photodiode_state\":\"%s\","
+                   "\"kernel_sequence\":%u,\"kernel_event_ns\":%" PRIu64
+                   ",\"callback_monotonic_ns\":%" PRIu64
+                   ",\"callback_realtime_ns\":%" PRIu64 "}",
+                   flips->events[index].frame_index,
+                   flips->events[index].buffer_index,
+                   flips->events[index].photodiode_on ? "on" : "off",
                    flips->events[index].kernel_sequence,
-                   flips->events[index].monotonic_ns,
-                   flips->events[index].realtime_ns);
+                   flips->events[index].kernel_event_ns,
+                   flips->events[index].callback_monotonic_ns,
+                   flips->events[index].callback_realtime_ns);
         }
         printf("]\n}\n");
     } else {
         printf("device=%s connector=%s crtc=%u mode=%s@%.6g format=%s\n",
                state->device, options->connector, state->crtc_id,
                state->mode.name, mode_refresh(&state->mode), options->format_name);
-        printf("frames=%u/%u mean_us=%.3f p95_us=%.3f p99_us=%.3f min_us=%.3f max_us=%.3f "
+        printf("frames=%u/%u source=%s kernel_clock=%s mean_us=%.3f p95_us=%.3f p99_us=%.3f min_us=%.3f max_us=%.3f "
                "estimated_hz=%.6f outside_tolerance=%u long_intervals=%u short_intervals=%u "
                "estimated_dropped=%u missed=%u restored=%s aborted=%s\n",
-               completed, options->frames, mean,
+               completed, options->frames, timing_source, kernel_timestamp_clock(state), mean,
                percentile(intervals, interval_count, 0.95),
                percentile(intervals, interval_count, 0.99),
                interval_count ? minimum : 0.0, maximum, estimated_refresh,
@@ -1194,7 +1250,8 @@ int main(int argc, char **argv) {
     } else if (load_frame_file(&options, buffers) != 0) {
         goto cleanup;
     }
-    if (drmModeSetCrtc(state.fd, state.crtc_id, buffers[0].framebuffer, 0, 0,
+    if (drmModeSetCrtc(state.fd, state.crtc_id,
+                       buffers[kms_preroll_buffer_index()].framebuffer, 0, 0,
                        &state.connector->connector_id, 1, &state.mode) != 0) {
         int set_errno = errno;
         if (set_errno == EACCES || set_errno == EPERM) {
@@ -1211,10 +1268,13 @@ int main(int argc, char **argv) {
     }
     state.modeset_active = true;
     for (unsigned int frame = 0; frame < options.frames; ++frame) {
-        unsigned int next_buffer = frame % 2U ? 0U : 1U;
+        flips.pending_frame = kms_frame_metadata(frame);
         flips.pending = true;
-        if (drmModePageFlip(state.fd, state.crtc_id, buffers[next_buffer].framebuffer,
-                            DRM_MODE_PAGE_FLIP_EVENT, &flips) != 0) {
+        if (drmModePageFlip(
+                state.fd,
+                state.crtc_id,
+                buffers[flips.pending_frame.buffer_index].framebuffer,
+                DRM_MODE_PAGE_FLIP_EVENT, &flips) != 0) {
             flips.missed++;
             int flip_errno = errno;
             if (flip_errno == EACCES || flip_errno == EPERM) {

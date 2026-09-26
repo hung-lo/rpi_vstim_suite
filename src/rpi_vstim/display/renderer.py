@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import Any
 
@@ -177,6 +178,7 @@ class ProductionFrameRenderer:
         rgb888: bytes | bytearray | memoryview,
         *,
         photodiode_state: str | None = None,
+        asset_key: Hashable | None = None,
     ) -> RenderedFrame:
         if frame_index < 0:
             raise ValueError("frame_index must be non-negative")
@@ -187,8 +189,15 @@ class ProductionFrameRenderer:
         )
         if photodiode_state not in {"on", "off"}:
             raise ValueError("photodiode_state must be 'on' or 'off'")
-        key = (frame_index, photodiode_state)
-        packed = self.cache.get(key)
+        key = (
+            asset_key,
+            photodiode_state,
+            self.width_px,
+            self.height_px,
+            self.pixel_format,
+            self.stride_bytes,
+        ) if asset_key is not None else None
+        packed = self.cache.get(key) if key is not None else None
         if packed is None:
             prepared = convert_rgb888_frame(
                 rgb888,
@@ -208,7 +217,8 @@ class ProductionFrameRenderer:
                     photodiode_state,
                 )
             packed = bytes(prepared)
-            self.cache.put(key, packed)
+            if key is not None:
+                self.cache.put(key, packed)
         target = self._buffers[frame_index % 2]
         target[:] = packed
         return RenderedFrame(
@@ -227,16 +237,36 @@ class ProductionFrameRenderer:
         rgb888_off: bytes | bytearray | memoryview,
         *,
         start_frame: int = 0,
+        asset_key_on: Hashable | None = None,
+        asset_key_off: Hashable | None = None,
     ) -> tuple[RenderedFrame, RenderedFrame]:
         return (
-            self.prepare(start_frame, rgb888_on, photodiode_state="on"),
-            self.prepare(start_frame + 1, rgb888_off, photodiode_state="off"),
+            self.prepare(
+                start_frame,
+                rgb888_on,
+                photodiode_state="on",
+                asset_key=asset_key_on,
+            ),
+            self.prepare(
+                start_frame + 1,
+                rgb888_off,
+                photodiode_state="off",
+                asset_key=asset_key_off,
+            ),
         )
 
     def packed_pair(
         self,
         rgb888_on: bytes | bytearray | memoryview,
         rgb888_off: bytes | bytearray | memoryview,
+        *,
+        asset_key_on: Hashable | None = None,
+        asset_key_off: Hashable | None = None,
     ) -> bytes:
-        first, second = self.prepare_pair(rgb888_on, rgb888_off)
+        first, second = self.prepare_pair(
+            rgb888_on,
+            rgb888_off,
+            asset_key_on=asset_key_on,
+            asset_key_off=asset_key_off,
+        )
         return bytes(first.data) + bytes(second.data)

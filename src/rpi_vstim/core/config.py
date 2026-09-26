@@ -25,8 +25,9 @@ class PathsConfig:
 @dataclass(frozen=True)
 class DisplayConfig:
     backend: str = "fake"
-    stimulus_connector: str = "HDMI-A-2"
-    preview_connector: str | None = "HDMI-A-1"
+    ownership: str = ""
+    stimulus_connector: str = ""
+    preview_connector: str | None = None
     width_px: int = 1280
     height_px: int = 720
     refresh_hz: float = 60.0
@@ -122,10 +123,14 @@ class Config:
         """Reject malformed settings and combinations unsafe for experiments."""
         if self.display.backend not in {"fake", "kms", "rpg_legacy"}:
             raise ConfigError(f"unsupported display backend: {self.display.backend}")
+        if self.display.ownership not in {"", "direct", "lease"}:
+            raise ConfigError(f"unsupported display ownership: {self.display.ownership}")
         if self.display.pixel_format not in {"RGB565", "XRGB8888"}:
             raise ConfigError(f"unsupported pixel format: {self.display.pixel_format}")
-        if not self.display.stimulus_connector:
-            raise ConfigError("display stimulus_connector must not be empty")
+        if self.display.backend == "kms" and self.display.ownership not in {"direct", "lease"}:
+            raise ConfigError("display ownership is required for the KMS backend")
+        if self.display.backend == "kms" and not self.display.stimulus_connector:
+            raise ConfigError("display stimulus_connector is required for the KMS backend")
         if self.display.width_px <= 0 or self.display.height_px <= 0 or self.display.refresh_hz <= 0:
             raise ConfigError("display dimensions and refresh_hz must be positive")
         if self.display.preview_connector == self.display.stimulus_connector:

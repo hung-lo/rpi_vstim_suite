@@ -38,14 +38,14 @@ def test_renderer_reuses_two_buffers_and_keeps_patch_state_with_frame():
         cache_size=2,
     )
     source = bytes((32, 64, 128)) * 16
-    first = renderer.prepare(0, source)
-    second = renderer.prepare(1, source)
+    first = renderer.prepare(0, source, asset_key="source")
+    second = renderer.prepare(1, source, asset_key="source")
     assert first.photodiode_state == "on"
     assert second.photodiode_state == "off"
     assert bytes(first.data[:4]) == bytes((0xFF, 0xFF, 0xFF, 0xFF))
     assert bytes(second.data[:4]) == bytes((0, 0, 0, 0))
     assert renderer.scanout_buffer_bytes == 4 * 4 * 2 * 2
-    renderer.prepare(0, source)
+    renderer.prepare(0, source, asset_key="source")
     assert renderer.cache.hits == 1
 
 
@@ -58,11 +58,43 @@ def test_photodiode_state_sequence_and_pair_are_deterministic():
     ]
     renderer = ProductionFrameRenderer(2, 2, "XRGB8888", cache_size=1)
     source = bytes((100, 110, 120)) * 4
-    first, second = renderer.prepare_pair(source, source)
+    first, second = renderer.prepare_pair(
+        source,
+        source,
+        asset_key_on="source-on",
+        asset_key_off="source-off",
+    )
     assert first.photodiode_state == "on"
     assert second.photodiode_state == "off"
     assert len(renderer.packed_pair(source, source)) == 2 * 2 * 2 * 4
     assert len(renderer.cache) == 1
+
+
+def test_renderer_does_not_cache_unidentified_pixels():
+    renderer = ProductionFrameRenderer(2, 1, "RGB565")
+    first = renderer.prepare(0, bytes((255, 0, 0)) * 2)
+    first_bytes = bytes(first.data)
+    second = renderer.prepare(0, bytes((0, 255, 0)) * 2)
+    assert first_bytes != bytes(second.data)
+    assert renderer.cache.hits == 0
+
+
+def test_renderer_cache_key_includes_asset_and_photodiode_state():
+    renderer = ProductionFrameRenderer(
+        2,
+        1,
+        "RGB565",
+        photodiode=PhotodiodePatch("bottom_right", 1, 255, 0),
+    )
+    source = bytes((100, 110, 120)) * 2
+    first = renderer.prepare(0, source, asset_key="image", photodiode_state="on")
+    first_bytes = bytes(first.data)
+    second = renderer.prepare(7, source, asset_key="image", photodiode_state="on")
+    second_bytes = bytes(second.data)
+    third = renderer.prepare(8, source, asset_key="image", photodiode_state="off")
+    assert first_bytes == second_bytes
+    assert second_bytes != bytes(third.data)
+    assert renderer.cache.hits == 1
 
 
 def test_photodiode_always_dark_light_and_boundary_states_are_explicit():
@@ -101,6 +133,6 @@ def test_cache_is_bounded_when_many_frames_are_prepared():
     renderer = ProductionFrameRenderer(2, 2, "RGB565", cache_size=3)
     source = bytes((1, 2, 3)) * 4
     for frame_index in range(20):
-        renderer.prepare(frame_index, source)
+        renderer.prepare(frame_index, source, asset_key=f"frame-{frame_index}")
     assert len(renderer.cache) == 3
     assert renderer.cache.memory_bytes == 3 * 2 * 2 * 2

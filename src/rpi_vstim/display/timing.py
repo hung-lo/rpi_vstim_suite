@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from statistics import fmean, median, quantiles
 
@@ -22,6 +22,7 @@ class TimingSummary:
     long_interval_count: int = 0
     short_interval_count: int = 0
     estimated_dropped_frame_count: int = 0
+    timestamp_source: str | None = None
 
 
 def summarize_intervals(
@@ -79,6 +80,7 @@ def summarize_timestamps_ns(
     *,
     nominal_refresh_hz: float,
     tolerance_fraction: float = 0.05,
+    timestamp_source: str = "unknown",
 ) -> TimingSummary:
     values = tuple(int(value) for value in timestamps_ns)
     if any(value < 0 for value in values):
@@ -86,8 +88,11 @@ def summarize_timestamps_ns(
     intervals = tuple(
         (right - left) / 1_000.0 for left, right in pairwise(values)
     )
-    return summarize_intervals(
-        intervals,
-        nominal_refresh_hz=nominal_refresh_hz,
-        tolerance_fraction=tolerance_fraction,
+    return replace(
+        summarize_intervals(
+            intervals,
+            nominal_refresh_hz=nominal_refresh_hz,
+            tolerance_fraction=tolerance_fraction,
+        ),
+        timestamp_source=timestamp_source,
     )

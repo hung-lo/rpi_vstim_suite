@@ -2,6 +2,7 @@
 # Replace connector names without changing protocol code if cables are swapped.
 [display]
 backend = "kms"
+ownership = "lease"
 stimulus_connector = "HDMI-A-2"
 preview_connector = "HDMI-A-1"
 width_px = 1024

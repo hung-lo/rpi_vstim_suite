@@ -9,11 +9,13 @@ from collections.abc import Sequence
 from rpi_vstim.core.config import DisplayConfig
 
 from .discovery import (
+    ConnectorInfo,
     DisplayInventory,
     DisplaySelection,
     DisplaySelectionError,
     parse_modetest_connectors,
     select_display,
+    select_connector,
 )
 
 
@@ -49,13 +51,13 @@ def probe_config(
         preview = (
             None
             if config.preview_connector is None
-            else select_display(inventory, config, role="preview")
+            else select_connector(inventory, config, role="preview")
         )
     except DisplaySelectionError as exc:
         raise DisplayProbeError(str(exc)) from exc
     return {
         "stimulus": _selection_dict(stimulus),
-        "preview": None if preview is None else _selection_dict(preview),
+        "preview": None if preview is None else _connector_dict(preview),
     }
 
 
@@ -75,12 +77,21 @@ def _selection_dict(selection: DisplaySelection) -> dict[str, object]:
     }
 
 
+def _connector_dict(connector: ConnectorInfo) -> dict[str, object]:
+    return {
+        "connector": connector.name,
+        "status": connector.status,
+    }
+
+
 def _text_result(result: dict[str, object]) -> str:
     lines = []
     for role in ("stimulus", "preview"):
         value = result[role]
         if value is None:
             lines.append(f"{role}: disabled")
+        elif "mode" not in value:
+            lines.append(f"{role}: {value['connector']} ({value['status']})")
         else:
             lines.append(
                 f"{role}: {value['connector']} {value['mode']}@{value['refresh_hz']:.2f}Hz"
