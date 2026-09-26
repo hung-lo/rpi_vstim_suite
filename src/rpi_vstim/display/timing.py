@@ -25,6 +25,22 @@ class TimingSummary:
     timestamp_source: str | None = None
 
 
+def comparable_callback_timestamp_ns(
+    kernel_timestamp_clock: str,
+    *,
+    callback_monotonic_ns: int | None,
+    callback_realtime_ns: int | None,
+) -> int | None:
+    """Select only the callback clock comparable to the kernel event clock."""
+    if kernel_timestamp_clock == "monotonic":
+        return callback_monotonic_ns
+    if kernel_timestamp_clock == "realtime":
+        return callback_realtime_ns
+    if kernel_timestamp_clock == "unknown":
+        return None
+    raise ValueError(f"unsupported kernel timestamp clock: {kernel_timestamp_clock}")
+
+
 def summarize_intervals(
     intervals_us: Sequence[float],
     *,

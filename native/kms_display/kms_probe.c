@@ -601,7 +601,7 @@ static void page_flip_handler(
         state->events[state->completed].photodiode_on = state->pending_frame.photodiode_on;
         state->events[state->completed].kernel_event_ns =
             (uint64_t)seconds * 1000000000ULL + (uint64_t)useconds * 1000ULL;
-        state->events[state->completed].callback_monotonic_ns = clock_ns(CLOCK_MONOTONIC_RAW);
+        state->events[state->completed].callback_monotonic_ns = clock_ns(CLOCK_MONOTONIC);
         state->events[state->completed].callback_realtime_ns = clock_ns(CLOCK_REALTIME);
         state->events[state->completed].kernel_sequence = frame;
     }
@@ -876,7 +876,7 @@ static void print_result(
     }
     const char *timing_source = use_kernel_timestamps
                                     ? "kernel_event"
-                                    : "callback_monotonic_raw";
+                                    : "callback_monotonic";
     double *intervals = interval_count == 0 ? NULL : calloc(interval_count, sizeof(*intervals));
     double sum = 0.0;
     double maximum = 0.0;

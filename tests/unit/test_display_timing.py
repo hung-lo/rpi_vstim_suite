@@ -1,7 +1,11 @@
 import pytest
 
 from rpi_vstim.display.photodiode import PhotodiodePatch, patch_bounds, patch_value
-from rpi_vstim.display.timing import summarize_intervals, summarize_timestamps_ns
+from rpi_vstim.display.timing import (
+    comparable_callback_timestamp_ns,
+    summarize_intervals,
+    summarize_timestamps_ns,
+)
 
 
 def test_timing_summary_reports_percentiles_and_refresh():
@@ -28,6 +32,22 @@ def test_timestamps_and_invalid_intervals():
     assert summary.timestamp_source == "kernel_event"
     with pytest.raises(ValueError, match="positive"):
         summarize_intervals((0.0,), nominal_refresh_hz=60.0)
+
+
+def test_callback_latency_uses_only_a_comparable_clock_domain():
+    assert comparable_callback_timestamp_ns(
+        "monotonic", callback_monotonic_ns=10, callback_realtime_ns=20
+    ) == 10
+    assert comparable_callback_timestamp_ns(
+        "realtime", callback_monotonic_ns=10, callback_realtime_ns=20
+    ) == 20
+    assert comparable_callback_timestamp_ns(
+        "unknown", callback_monotonic_ns=10, callback_realtime_ns=20
+    ) is None
+    with pytest.raises(ValueError, match="unsupported"):
+        comparable_callback_timestamp_ns(
+            "raw", callback_monotonic_ns=10, callback_realtime_ns=20
+        )
 
 
 def test_timing_summary_exposes_long_and_short_intervals():

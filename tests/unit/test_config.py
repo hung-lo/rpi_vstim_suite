@@ -11,7 +11,7 @@ from rpi_vstim.core.config import Config, ConfigError, config_from_mapping, load
 def test_example_toml_loads_and_preserves_sections():
     config = load_config(Path("config/system.example.toml"))
     assert config.display.backend == "fake"
-    assert config.display.ownership == "direct"
+    assert config.display.ownership == ""
     assert config.display.stimulus_connector == ""
     assert config.display.preview_connector is None
     assert config.hardware.reward_pin_bcm == 19

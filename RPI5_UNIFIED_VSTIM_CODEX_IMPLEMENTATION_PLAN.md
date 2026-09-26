@@ -856,7 +856,7 @@ Requirements:
 - Link to `libdrm`.
 - Release the Python GIL while waiting for and executing frame presentation.
 - Use DRM event timestamps/sequence numbers for frame intervals where available.
-- Record `CLOCK_MONOTONIC_RAW` callback timestamps separately as dispatch-latency diagnostics,
+- Record `CLOCK_MONOTONIC` callback timestamps separately as dispatch-latency diagnostics,
   together with callback realtime timestamps and the verified kernel timestamp clock.
 - Never allocate large buffers during an active presentation.
 - Never read assets from disk during an active presentation.

@@ -6,7 +6,6 @@ reward_state_root = "/mnt/hd/vstim_reward_assignments"
 
 [display]
 backend = "fake"
-ownership = "direct"
 stimulus_connector = ""
 preview_connector = ""
 width_px = 1280
