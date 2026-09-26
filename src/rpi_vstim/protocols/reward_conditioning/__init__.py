@@ -243,7 +243,26 @@ def build_exposure_block(
         if all(left[1] != right[1] for left, right in zip(rows, rows[1:])):
             break
     else:
-        raise RuntimeError("could not construct a non-repeating exposure block")
+        # ponytail: retries cannot guarantee a valid result for every seed.
+        remaining: dict[str, int] = {}
+        exposure_by_image = {image: role for role, image in rows}
+        for role, image in rows:
+            remaining[image] = remaining.get(image, 0) + 1
+        ordered: list[tuple[str, str]] = []
+        previous = ""
+        while remaining:
+            candidates = [(count, image) for image, count in remaining.items() if image != previous]
+            if not candidates:
+                raise RuntimeError("could not construct a non-repeating exposure block")
+            maximum = max(count for count, _ in candidates)
+            choices = [image for count, image in candidates if count == maximum]
+            image = rng.choice(choices)
+            ordered.append((exposure_by_image[image], image))
+            previous = image
+            remaining[image] -= 1
+            if remaining[image] == 0:
+                del remaining[image]
+        rows = ordered
     return tuple(
         RewardTrial(
             str(index + 1),

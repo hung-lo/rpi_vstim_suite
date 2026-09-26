@@ -110,3 +110,12 @@ def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
     assert sum(event.metadata["reward_eligible"] for event in first.events) == 220
     assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)
     assert all(event.metadata["reward_scheduled"] is not None for event in first.events)
+
+
+def test_reward_exposure_fallback_handles_seed_133():
+    assignment = MouseAssignment.create("mouse-1", image_pool(), seed=100)
+    plan = build_plan(
+        RewardConditioningSettings("mouse-1", image_pool(), seed=133, blocks=10), assignment
+    )
+    image_names = [event.metadata["image"] for event in plan.events]
+    assert all(left != right for left, right in zip(image_names, image_names[1:]))
