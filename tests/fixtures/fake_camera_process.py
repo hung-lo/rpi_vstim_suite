@@ -12,7 +12,11 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
-    parser.add_argument("--mode", choices=("normal", "fail", "no-growth", "ignore-terminate"), default="normal")
+    parser.add_argument(
+        "--mode",
+        choices=("normal", "fail", "no-growth", "stall", "ignore-terminate"),
+        default="normal",
+    )
     parser.add_argument("--interval", type=float, default=0.01)
     args = parser.parse_args()
     if args.mode == "fail":
@@ -21,7 +25,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    if args.mode != "no-growth":
+    if args.mode not in {"no-growth", "fail"}:
         output.write_bytes(b"frame\n")
     while True:
         if args.mode == "normal":

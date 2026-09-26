@@ -257,6 +257,7 @@ class _CameraWorker:
             self._terminate(force=True)
         self._reap(self.spec.stop_timeout_s)
         if self.process.poll() is None:
+            self.status.exit_reason = "camera process remained alive after kill"
             self._fail("camera process remained alive after kill")
         elif self.status.exit_status is None:
             self.status.exit_status = int(self.process.poll())
@@ -319,7 +320,8 @@ class _CameraWorker:
     def _fail(self, detail: str) -> None:
         self.status.state = CameraState.FAILED if self.spec.required else CameraState.DEGRADED
         self.status.error = detail
-        self.status.exit_reason = detail
+        if self.status.exit_reason is None:
+            self.status.exit_reason = detail
         self._publish("CAMERA_FAILED", detail)
 
     def _refresh_bytes(self) -> None:

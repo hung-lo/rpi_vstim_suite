@@ -55,3 +55,24 @@ def test_real_subprocess_camera_no_growth_hits_startup_deadline(tmp_path):
     with pytest.raises(CameraStartupError):
         supervisor.start(tmp_path / "session")
     assert supervisor.manifest()[0]["state"] == "FAILED"
+
+
+def test_real_subprocess_camera_growth_then_stall_is_failed_and_reaped(tmp_path):
+    supervisor = LocalCameraSupervisor(
+        (CameraCaptureSpec(**{**process_spec(tmp_path, "stall").__dict__, "stall_timeout_s": 0.03}),)
+    )
+    supervisor.start(tmp_path / "session")
+    import time
+
+    time.sleep(0.05)
+    assert supervisor.poll()[0].state == CameraState.FAILED
+    status = supervisor.stop()[0]
+    assert status.verification_state == "output_nonempty_failed"
+
+
+def test_real_subprocess_camera_ignore_terminate_requires_force_kill(tmp_path):
+    supervisor = LocalCameraSupervisor((process_spec(tmp_path, "ignore-terminate"),))
+    supervisor.start(tmp_path / "session")
+    status = supervisor.stop()[0]
+    assert status.state == CameraState.FAILED
+    assert status.exit_reason == "forced_kill_after_stop_timeout"
