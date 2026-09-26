@@ -10,6 +10,7 @@ from rpi_vstim.display.sequence import (
     FrameTransportBackpressure,
     NaturalImageFrameSource,
     PreparedSequenceFrame,
+    produce_frames,
 )
 
 Image = pytest.importorskip("PIL.Image")
@@ -97,3 +98,47 @@ def test_frame_transport_is_ordered_bounded_and_abortable():
     aborted.abort("producer stopped")
     with pytest.raises(RuntimeError, match="producer stopped"):
         aborted.put(frame)
+
+
+def test_plan_to_transport_replays_deterministically_and_fails_mid_plan(tmp_path):
+    write_image(tmp_path / "image.png", (1, 2, 3))
+    resolver = AssetResolver(tmp_path)
+    plan = SessionPlan(
+        "natural-images",
+        9,
+        with_frame_offsets(
+            (
+                PlannedEvent("image-1", "image", 1, photodiode="on", metadata={"image": "image.png"}),
+                PlannedEvent("tail", "gray", 1, phase="POST"),
+            )
+        ),
+    )
+
+    def make_source():
+        return NaturalImageFrameSource(
+            AssetPreparer(resolver, 2, 2),
+            ProductionFrameRenderer(2, 2, "RGB565"),
+        )
+
+    first_transport = BoundedFrameTransport(2)
+    assert produce_frames(make_source().prepared_frames(plan), first_transport) == 2
+    first = list(first_transport.iter_frames())
+    second_transport = BoundedFrameTransport(2)
+    assert produce_frames(make_source().prepared_frames(plan), second_transport) == 2
+    second = list(second_transport.iter_frames())
+    assert [(frame.frame_index, frame.asset_key, frame.packed) for frame in first] == [
+        (frame.frame_index, frame.asset_key, frame.packed) for frame in second
+    ]
+
+    bad_plan = SessionPlan(
+        "natural-images",
+        9,
+        with_frame_offsets(
+            (
+                PlannedEvent("good", "image", 1, metadata={"image": "image.png"}),
+                PlannedEvent("bad", "image", 1, metadata={"image": "missing.png"}),
+            )
+        ),
+    )
+    with pytest.raises(AssetNotFoundError):
+        list(make_source().prepared_frames(bad_plan))

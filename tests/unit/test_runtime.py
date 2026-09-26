@@ -26,6 +26,11 @@ def test_simulated_session_completes_and_writes_events(tmp_path):
     assert manifest["status"] == "COMPLETE"
     assert manifest["random_seeds"] == {"protocol": 7}
     assert (root / "events.csv").read_text().count("SESSION_FINISHED") == 1
+    assert (root / "preflight_report.json").is_file()
+    assert (root / "cache_manifest.json").is_file()
+    assert (root / "resource_summary.json").is_file()
+    assert json.loads((root / "display_results.json").read_text())["results"]
+    assert json.loads((root / "final_status.json").read_text())["status"] == "COMPLETE"
     cameras = json.loads((root / "camera_manifest.json").read_text())
     assert {camera["state"] for camera in cameras["cameras"]} == {"COMPLETED"}
 
