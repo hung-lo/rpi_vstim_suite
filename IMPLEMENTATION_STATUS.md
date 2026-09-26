@@ -264,7 +264,8 @@ The bounded remote validation report is
   `docs/hardware/pi5_gpio_reward_preflight_2026-09-26.md`.
 - [x] Validate the local AF_UNIX-to-UDP telemetry boundary from an isolated
   Pi Python 3.13.5 venv: loopback demo 8/8, full 200-call burst sampled, and
-  bounded drops/errors were reported without blocking; monitor-Pi acceptance
+  bounded drops/errors were reported without blocking; a 500-call slow-
+  consumer/dropout probe also remained nonblocking; monitor-Pi acceptance
   remains separate.
 - [ ] Validate a real telemetry loopback against the monitor: the checkout now
   has a local UDP transport boundary and bounded in-memory test sink, but the

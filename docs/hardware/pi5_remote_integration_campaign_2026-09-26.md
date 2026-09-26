@@ -193,6 +193,14 @@ The new `session validate` alias also reported a simulated Pi session
 venv were removed; the final Pi health check found labwc alive, no residual
 camera/KMS workers, about 1.35 GiB available RAM, 38.6 C, and `0x0` throttling.
 
+A separate Pi-local slow-consumer probe issued 500 parent publishes to a
+receiver that did not read. Parent-call p95 was `0.0086 ms` and the maximum
+was `0.162 ms`; 171 packets were accepted and 329 were bounded drops, with no
+blocking. A numeric-invalid destination produced one worker error while four
+subsequent parent calls still returned promptly. UDP has no synchronous
+receiver acknowledgement, so this validates best-effort nonblocking behavior,
+not detection of monitor disappearance.
+
 ## H — short resource/leak campaign
 
 Twenty composed real-display/two-camera sessions passed. Each used a fresh
