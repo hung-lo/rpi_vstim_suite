@@ -51,8 +51,6 @@ class FrameTransportBackpressure(TimeoutError):
 class BoundedFrameTransport:
     """Portable bounded queue with explicit finish, abort, and backpressure."""
 
-    _END = object()
-
     def __init__(self, capacity: int) -> None:
         if capacity <= 0:
             raise ValueError("transport capacity must be positive")
@@ -85,8 +83,6 @@ class BoundedFrameTransport:
                 if self._closed:
                     return None
                 raise TimeoutError("no prepared frame available") from exc
-            if item is self._END:
-                return None
             return item
 
     def finish(self) -> None:

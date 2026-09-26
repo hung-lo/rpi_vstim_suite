@@ -42,3 +42,11 @@ def test_flip_analysis_does_not_report_unknown_clock_latency():
     assert analysis.callback_dispatch_latency_ns == ()
     assert analysis.kernel_sequence_gap_count == 2
     assert analysis.frame_metadata_mismatch_count == 1
+
+
+def test_flip_analysis_marks_callback_long_short_pair_separately():
+    trace = events(4)
+    trace[2]["callback_monotonic_ns"] = trace[1]["callback_monotonic_ns"] + 25_000_000
+    trace[3]["callback_monotonic_ns"] = trace[2]["callback_monotonic_ns"] + 8_000_000
+    analysis = analyze_flip_events(trace, nominal_refresh_hz=60.0)
+    assert analysis.paired_callback_displacement_count == 1

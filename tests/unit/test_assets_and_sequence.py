@@ -108,7 +108,9 @@ def test_plan_to_transport_replays_deterministically_and_fails_mid_plan(tmp_path
         9,
         with_frame_offsets(
             (
-                PlannedEvent("image-1", "image", 1, photodiode="on", metadata={"image": "image.png"}),
+                PlannedEvent(
+                    "image-1", "image", 1, photodiode="on", metadata={"image": "image.png"}
+                ),
                 PlannedEvent("tail", "gray", 1, phase="POST"),
             )
         ),

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from rpi_vstim.core.camera import CameraState
-from rpi_vstim.core.config import CameraDeviceConfig
 from rpi_vstim.core.timestamps import monotonic_ns, utc_ns
 
 
@@ -176,7 +175,10 @@ class _CameraWorker:
             raise CameraStartupError(self.spec.camera_id)
         self.status.state = CameraState.RECORDING
         self._publish("CAMERA_STARTED")
-        if self._verify_output_growth and not self._wait_for_output_growth(self.spec.startup_timeout_s):
+        if (
+            self._verify_output_growth
+            and not self._wait_for_output_growth(self.spec.startup_timeout_s)
+        ):
             self._fail("camera output did not appear or grow before startup timeout")
             self._terminate(force=True)
             raise CameraStartupError(self.spec.camera_id)
@@ -210,11 +212,17 @@ class _CameraWorker:
                 self._terminate(force=True)
             self.status.exit_status = self.process.poll()
             if self.status.state == CameraState.RECORDING:
-                self.status.state = CameraState.COMPLETED if self.status.exit_status in (0, None) else CameraState.FAILED
+                self.status.state = (
+                    CameraState.COMPLETED
+                    if self.status.exit_status in (0, None)
+                    else CameraState.FAILED
+                )
         self.status.stop_utc_ns = utc_ns()
         self.status.stop_monotonic_ns = monotonic_ns()
         self._refresh_bytes()
-        self.status.verification_state = "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
+        self.status.verification_state = (
+            "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
+        )
         self._publish("CAMERA_STOPPED")
         return self.status
 
@@ -272,7 +280,12 @@ class LocalCameraSupervisor:
             raise ValueError("session_root is required")
         started: list[_CameraWorker] = []
         for spec in self.specs:
-            output = self.session_root / "camera" / spec.camera_id / f"capture.{spec.output_extension}"
+            output = (
+                self.session_root
+                / "camera"
+                / spec.camera_id
+                / f"capture.{spec.output_extension}"
+            )
             worker = _CameraWorker(
                 spec,
                 output,
