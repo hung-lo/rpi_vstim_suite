@@ -179,6 +179,20 @@ hardware-independent AF_UNIX-to-UDP publisher and loopback demo/benchmark;
 production session wiring, slow-receiver behavior on the Pi, and cumulative
 network state remain unvalidated.
 
+### Post-campaign local transport validation
+
+The pushed software-only follow-up was installed from an isolated temporary
+checkout into a Pi Python 3.13.5 venv with `PYTHONPATH` unset. The loopback
+demo delivered 8/8 schema messages with zero drops or errors. A 200-message
+burst sampled all 200 parent calls with p95 `0.0087 ms` and p99 `0.0193 ms`;
+171 packets were queued/sent, 29 were dropped at the bounded local handoff,
+and one UDP send error was counted. The command completed without blocking or
+crashing, so this is bounded-drop feedback rather than zero-drop acceptance.
+The new `session validate` alias also reported a simulated Pi session
+`COMPLETE` with no missing or corrupt artifacts. The temporary checkout and
+venv were removed; the final Pi health check found labwc alive, no residual
+camera/KMS workers, about 1.35 GiB available RAM, 38.6 C, and `0x0` throttling.
+
 ## H — short resource/leak campaign
 
 Twenty composed real-display/two-camera sessions passed. Each used a fresh
