@@ -7,7 +7,9 @@ completed Stage 0 there as `99aebb3` (`Harden Phase 4 software groundwork`),
 and created the required deep branch from that reviewed HEAD:
 `codex/phase4-deep-integration`.
 
-The final pushed HEAD is `d15b4cc`. Deep-branch commits are:
+The reviewed implementation HEAD before the report commit was `d15b4cc`.
+The report itself is the immediately following final commit. Deep-branch
+commits are:
 
 - `971b394` — `Add frozen source parity coverage`
 - `c45cda4` — `Integrate bounded Phase 4 software boundaries`
@@ -233,5 +235,5 @@ Production-like software boundaries are now in place for bounded assets,
 display transport, local camera supervision, storage/session finalization,
 telemetry, deterministic protocol planning, and hardware-free orchestration.
 The remaining work is simulated or explicitly hardware-gated. The branch is
-`codex/phase4-deep-integration` at `d15b4cc`, pushed upstream, with no merge to
-`main` and no Phase 01 work started.
+`codex/phase4-deep-integration` at the pushed report commit (parent
+`d15b4cc`), with no merge to `main` and no Phase 01 work started.
