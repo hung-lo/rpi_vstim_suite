@@ -11,17 +11,22 @@ from rpi_vstim.core.config import config_from_mapping
 from rpi_vstim.core.runtime import build_simulation_plan
 
 
-def run(seed: int) -> dict[str, object]:
+def run(seed: int, count: int = 1) -> dict[str, object]:
     config = config_from_mapping({"protocol": {"name": "natural-images"}})
-    first = build_simulation_plan(config, protocol_name="natural-images", seed=seed)
-    second = build_simulation_plan(config, protocol_name="natural-images", seed=seed)
-    if first.stable_json() != second.stable_json():
-        raise AssertionError("same seed produced different plan JSON")
+    last = None
+    for current_seed in range(seed, seed + count):
+        first = build_simulation_plan(config, protocol_name="natural-images", seed=current_seed)
+        second = build_simulation_plan(config, protocol_name="natural-images", seed=current_seed)
+        if first.stable_json() != second.stable_json():
+            raise AssertionError(f"same seed produced different plan JSON: {current_seed}")
+        last = first
+    assert last is not None
     return {
         "seed": seed,
-        "stable_json_bytes": len(first.stable_json().encode()),
-        "event_count": len(first.events),
-        "plan_digest": hashlib.sha256(first.stable_json().encode()).hexdigest(),
+        "seeds_checked": count,
+        "stable_json_bytes": len(last.stable_json().encode()),
+        "event_count": len(last.events),
+        "plan_digest": hashlib.sha256(last.stable_json().encode()).hexdigest(),
         "identical": True,
     }
 
@@ -29,8 +34,11 @@ def run(seed: int) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--seeds", type=int, default=100)
     args = parser.parse_args()
-    print(json.dumps(run(args.seed), sort_keys=True))
+    if args.seeds < 1:
+        parser.error("seeds must be positive")
+    print(json.dumps(run(args.seed, args.seeds), sort_keys=True))
 
 
 if __name__ == "__main__":

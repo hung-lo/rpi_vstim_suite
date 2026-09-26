@@ -13,8 +13,9 @@ All runs were hardware-free on the Mac:
   camera FAILED. No threads or subprocesses leaked.
 - 10,000 telemetry messages into a 256-entry sink: 256 retained and 9,744
   dropped, with no unbounded growth.
-- same-seed reproducibility: identical natural-image plan JSON and digest
-  `13678b58239e3f0b96a3a09bdd8a5bc26dae125443203b8b804f579d33c3b74b`.
+- same-seed reproducibility: 100 natural-image plans were each built twice;
+  all matched. The last checked digest was
+  `17ebbe4c4cf2216542743c25d6a42decb98436e17b20ea810e45e5eb10ca8e24`.
 
 These runs validate software bounds and deterministic behavior only. They do
 not validate the Pi display, cameras, SSD, GPIO/reward, or photodiode.
