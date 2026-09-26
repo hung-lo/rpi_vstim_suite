@@ -37,3 +37,6 @@ the interpreter version rather than changing the system Python.
 
 The old repositories and `rpi_rig_monitor` remain separate reference
 repositories. No old Git history is merged here.
+
+See [docs/README.md](docs/README.md) for the current architecture, operator
+checklists, historical hardware evidence, and explicitly deferred gates.
