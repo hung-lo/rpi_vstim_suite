@@ -182,6 +182,7 @@ def test_dual_local_camera_config_parses_stable_identities():
     assert [camera.id for camera in config.cameras.devices] == ["face", "behavior"]
     assert [camera.role for camera in config.cameras.devices] == ["face", "behavior"]
     assert config.cameras.devices[0].stable_device_identifier == "usb-face-serial"
+    assert config.cameras.devices[0].output_naming_policy == "capture"
 
 
 @pytest.mark.parametrize(

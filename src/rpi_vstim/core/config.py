@@ -71,6 +71,14 @@ class CameraDeviceConfig:
     required: bool = False
     backend: str = "auto"
     device: str = ""
+    requested_width_px: int | None = None
+    requested_height_px: int | None = None
+    requested_fps: float | None = None
+    pixel_format_or_codec: str = ""
+    output_extension: str = "h264"
+    output_naming_policy: str = "capture"
+    startup_timeout_s: float = 5.0
+    stop_timeout_s: float = 5.0
 
     @property
     def stable_device_identifier(self) -> str:
@@ -177,6 +185,21 @@ class Config:
         for camera in self.cameras.devices:
             if camera.backend not in supported_camera_backends:
                 raise ConfigError(f"unsupported camera backend: {camera.backend}")
+            if any(
+                value is not None and value <= 0
+                for value in (
+                    camera.requested_width_px,
+                    camera.requested_height_px,
+                    camera.requested_fps,
+                )
+            ):
+                raise ConfigError(f"camera requested dimensions/FPS must be positive: {camera.id}")
+            if camera.startup_timeout_s <= 0 or camera.stop_timeout_s <= 0:
+                raise ConfigError(f"camera timeouts must be positive: {camera.id}")
+            if not camera.output_extension or "/" in camera.output_extension:
+                raise ConfigError(f"camera output_extension is invalid: {camera.id}")
+            if camera.output_naming_policy != "capture":
+                raise ConfigError(f"unsupported camera output_naming_policy: {camera.id}")
             if self.session.experimental and camera.required and not camera.device:
                 raise ConfigError(f"required camera lacks a stable device identity: {camera.id}")
         if self.session.experimental and self.session.simulation:

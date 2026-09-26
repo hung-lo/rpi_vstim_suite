@@ -29,6 +29,18 @@ the cache is bounded and frame preparation occurs before page flips. The
 display-only renderer therefore fits comfortably within the Pi's 2 GB RAM
 budget, while camera buffers and concurrent capture remain unmeasured.
 
+The software budget helper (`rpi_vstim.core.resource_budget`) keeps these
+inputs explicit rather than pretending to predict the whole Pi:
+
+- display dimensions and RGB565/XRGB8888 bytes per pixel;
+- prepared-frame and natural-source cache entry limits;
+- per-camera bounded queue bytes and requested bitrate;
+- telemetry packet count/size and log buffer bytes.
+
+It reports scanout, cache, queue, telemetry, total estimated RAM, and camera
+storage bytes per second. The estimate is a bound for configured software
+components, not a substitute for the measured combined-load baseline below.
+
 The 10,000-frame A2 hardware run used the existing two native dumb buffers.
 The production-renderer smoke used two prepared cached frames and no unbounded
 image accumulation. The real Pi timing report is not integrated camera or

@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ class SessionOutput:
         self.context = context
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
+        self._display_results: list[dict[str, Any]] = []
 
     def write_initial_outputs(self) -> None:
         self.context.session_root.mkdir(parents=True, exist_ok=True)
@@ -78,6 +80,36 @@ class SessionOutput:
     def write_plan(self, plan: Any) -> None:
         value = plan.as_dict() if hasattr(plan, "as_dict") else plan
         atomic_write_json(self.context.session_root / "plan.json", value)
+        if isinstance(value, dict) and value.get("metadata", {}).get("selected_images"):
+            atomic_write_json(
+                self.context.session_root / "selected_image_table.json",
+                {
+                    "images": [
+                        {"index": index, "image": image}
+                        for index, image in enumerate(value["metadata"]["selected_images"], 1)
+                    ]
+                },
+            )
+
+    def write_preflight_report(self, report: Any) -> None:
+        value = asdict(report) if is_dataclass(report) else report
+        atomic_write_json(self.context.session_root / "preflight_report.json", value)
+
+    def write_cache_manifest(self, value: Any) -> None:
+        value = asdict(value) if is_dataclass(value) else value
+        atomic_write_json(self.context.session_root / "cache_manifest.json", value)
+
+    def write_display_result(self, result: Any) -> None:
+        value = asdict(result) if is_dataclass(result) else result
+        self._display_results.append(value)
+        atomic_write_json(
+            self.context.session_root / "display_results.json",
+            {"results": self._display_results},
+        )
+
+    def write_resource_summary(self, value: Any) -> None:
+        value = asdict(value) if is_dataclass(value) else value
+        atomic_write_json(self.context.session_root / "resource_summary.json", value)
 
     def record_event(
         self,
@@ -121,6 +153,7 @@ class SessionOutput:
             self._manifest["cleanup_errors"] = list(cleanup_errors)
         self._manifest["updated_utc_ns"] = utc_ns()
         self._write_manifest()
+        atomic_write_json(self.context.session_root / "final_status.json", self._manifest)
 
     def close(self) -> None:
         if self._events is not None:

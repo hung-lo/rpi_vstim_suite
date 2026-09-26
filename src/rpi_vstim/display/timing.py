@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from statistics import fmean, median, quantiles
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,17 @@ class TimingSummary:
     timestamp_source: str | None = None
 
 
+@dataclass(frozen=True)
+class FlipTraceAnalysis:
+    kernel_summary: TimingSummary | None
+    callback_summary: TimingSummary | None
+    kernel_sequence_gap_count: int
+    frame_index_gap_count: int
+    frame_metadata_mismatch_count: int
+    paired_callback_displacement_count: int
+    callback_dispatch_latency_ns: tuple[int, ...]
+
+
 def comparable_callback_timestamp_ns(
     kernel_timestamp_clock: str,
     *,
@@ -39,6 +51,80 @@ def comparable_callback_timestamp_ns(
     if kernel_timestamp_clock == "unknown":
         return None
     raise ValueError(f"unsupported kernel timestamp clock: {kernel_timestamp_clock}")
+
+
+def analyze_flip_events(
+    events: Sequence[dict[str, Any]],
+    *,
+    nominal_refresh_hz: float,
+    tolerance_fraction: float = 0.05,
+    kernel_timestamp_clock: str = "unknown",
+) -> FlipTraceAnalysis:
+    """Analyze corrected native events without rewriting or mutating a trace."""
+    if not events:
+        return FlipTraceAnalysis(None, None, 0, 0, 0, 0, ())
+    kernel_values = tuple(int(event["kernel_event_ns"]) for event in events)
+    callback_values = tuple(int(event["callback_monotonic_ns"]) for event in events)
+    kernel_summary = (
+        summarize_timestamps_ns(
+            kernel_values,
+            nominal_refresh_hz=nominal_refresh_hz,
+            tolerance_fraction=tolerance_fraction,
+            timestamp_source="kernel_event",
+        )
+        if all(value > 0 for value in kernel_values)
+        else None
+    )
+    callback_summary = summarize_timestamps_ns(
+        callback_values,
+        nominal_refresh_hz=nominal_refresh_hz,
+        tolerance_fraction=tolerance_fraction,
+        timestamp_source="callback_monotonic",
+    )
+    sequence_gaps = sum(
+        right["kernel_sequence"] != left["kernel_sequence"] + 1
+        for left, right in pairwise(events)
+    )
+    frame_gaps = sum(
+        right["frame_index"] != left["frame_index"] + 1
+        for left, right in pairwise(events)
+    )
+    metadata_mismatches = sum(
+        event["buffer_index"] != event["frame_index"] % 2
+        or event["photodiode_state"] != ("on" if event["frame_index"] % 2 == 0 else "off")
+        for event in events
+    )
+    expected = 1_000_000.0 / nominal_refresh_hz
+    callback_intervals = tuple(
+        (right - left) / 1_000.0 for left, right in pairwise(callback_values)
+    )
+    paired = sum(
+        current > expected * (1.0 + tolerance_fraction)
+        and following < expected * (1.0 - tolerance_fraction)
+        for current, following in pairwise(callback_intervals)
+    )
+    latency: list[int] = []
+    for event in events:
+        callback = comparable_callback_timestamp_ns(
+            kernel_timestamp_clock,
+            callback_monotonic_ns=int(event["callback_monotonic_ns"]),
+            callback_realtime_ns=(
+                int(event["callback_realtime_ns"])
+                if event.get("callback_realtime_ns") is not None
+                else None
+            ),
+        )
+        if callback is not None and int(event["kernel_event_ns"]) > 0:
+            latency.append(callback - int(event["kernel_event_ns"]))
+    return FlipTraceAnalysis(
+        kernel_summary,
+        callback_summary,
+        sequence_gaps,
+        frame_gaps,
+        metadata_mismatches,
+        paired,
+        tuple(latency),
+    )
 
 
 def summarize_intervals(

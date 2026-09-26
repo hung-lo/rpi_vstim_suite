@@ -5,12 +5,18 @@ that presents stimuli and controls behavior hardware. Each camera is selected
 by a logical ID/role and stable device identity; `/dev/videoN` numbering alone
 is not a production identity.
 
-Phase 00 provides the configuration schema. Overnight groundwork adds a
-metadata-only fake service that exercises independent per-camera start/stop,
-required/optional failure, degraded state, and session manifests. No SSH camera
-control, cross-Pi transfer, recording, conversion, or device access occurs.
-Future capture uses one independently supervised worker per camera, bounded
-buffering, direct-to-session storage, and post-session verification.
+Phase 00 provides the configuration schema. The overnight software boundary
+adds `LocalCameraSupervisor`: one independently supervised local process per
+camera, deterministic `camera/<id>/capture.<extension>` outputs, bounded
+status flow, startup/output-growth deadlines, clean stop with terminate/kill
+fallback, required/optional policy, crash detection, and per-camera manifests.
+The metadata-only fake service remains available for simulation. No SSH camera
+control, cross-Pi transfer, or physical device access occurs.
+
+Capture command construction is isolated and can target the audited `rpicam-*`
+stack after stable identity resolution. The supervisor does not guess
+`/dev/videoN`, and tests use fake processes only. Real capture, negotiated
+modes, output growth, and timing acceptance remain hardware validation.
 
 ## Later hardware gate
 

@@ -7,6 +7,7 @@ from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
 from rpi_vstim.core.config import Config
 from rpi_vstim.core.lifecycle import LifecycleState, RuntimeServices
 from rpi_vstim.core.session import SessionOutput, new_session
+from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
 from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan as build_natural_plan
@@ -202,6 +203,25 @@ def run_simulated_session(
     )
     session = new_session(config, protocol_name=selected_protocol, session_id=session_id, seed=seed)
     session.write_initial_outputs()
+    session.write_preflight_report(
+        PreflightReport(
+            checks=[
+                {
+                    "name": "simulation_mode",
+                    "passed": True,
+                    "detail": "hardware access disabled",
+                }
+            ]
+        )
+    )
+    session.write_cache_manifest({"bounded": True, "mode": "simulation", "entries": []})
+    session.write_resource_summary(
+        {
+            "mode": "simulation",
+            "camera_count": len(config.cameras.devices),
+            "bounded_queues": True,
+        }
+    )
     lifecycle = services.lifecycle
     degraded: list[str] = []
     error: str | None = None
@@ -257,7 +277,9 @@ def run_simulated_session(
                 transition(target_lifecycle)
             color = (255, 255, 255) if event.photodiode == "on" else (127, 127, 127)
             if event.frame_count:
-                services.display.present_color(color, frames=event.frame_count)
+                session.write_display_result(
+                    services.display.present_color(color, frames=event.frame_count)
+                )
             session.record_event(
                 "PLAN_EVENT",
                 lifecycle=target_lifecycle.value,

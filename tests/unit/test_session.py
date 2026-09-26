@@ -12,6 +12,10 @@ def test_session_writes_common_outputs(tmp_path):
     assert (tmp_path / "test-session" / "session_manifest.json").is_file()
     assert (tmp_path / "test-session" / "resolved_config.json").is_file()
     assert (tmp_path / "test-session" / "provenance.json").is_file()
+    output.write_preflight_report({"passed": True})
+    output.update_status("COMPLETE", lifecycle="COMPLETE")
+    assert (tmp_path / "test-session" / "preflight_report.json").is_file()
+    assert (tmp_path / "test-session" / "final_status.json").is_file()
 
 
 def test_session_persists_seed_and_source_commit(tmp_path, monkeypatch):
