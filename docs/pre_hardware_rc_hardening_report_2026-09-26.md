@@ -7,7 +7,7 @@ Date: 2026-09-26. This report covers the software-only run on
 
 The required parent was `15cd7abc5a147b58d3d355b07f0f6ae675689021` on
 `codex/phase4-deep-integration`. The reviewed implementation HEAD before this
-report was `9dc1f86` and was pushed to
+report was `5975c71` and was pushed to
 `origin/codex/pre-hardware-rc-hardening`. The report is committed separately
 after final review. No prior reviewed history was squashed.
 
@@ -242,7 +242,7 @@ environment until CI or the Pi validates them.
 ## Final summary
 
 - Branch: `codex/pre-hardware-rc-hardening`
-- Reviewed implementation HEAD: `9dc1f86` (report commit follows)
+- Reviewed implementation HEAD: `5975c71` (report correction commit follows)
 - Fast tests: `209 passed in 12.91s`
 - Soak: `10,000 COMPLETE` in `350.381s`
 - Stress: `500` repro pairs, `100,000` frames, `5,000` randomized seeds,
