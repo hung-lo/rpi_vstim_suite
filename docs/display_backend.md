@@ -75,8 +75,12 @@ for interval summaries; callback timestamps remain a separate dispatch
 diagnostic. Compare dispatch latency only within one clock domain:
 `kernel_timestamp_clock = monotonic` uses `callback_monotonic_ns`,
 `realtime` uses `callback_realtime_ns`, and `unknown` does not support an
-absolute latency value. Never subtract timestamps from different clock
-domains. Neither is a physical photodiode onset. Native KMS
+absolute latency value. Matching clock domains do not make the timestamp
+instants equivalent: `kernel_event_ns` is a DRM vblank timestamp, while the
+callback fields are userspace receipt timestamps. A signed callback-minus-
+kernel delta can therefore be negative and remains a driver/timestamp
+diagnostic until independently calibrated. Never subtract timestamps from
+different clock domains. Neither is a physical photodiode onset. Native KMS
 errors distinguish readable/enumerable resources from modesetting ownership;
 when labwc owns the DRM master, the result is an ownership block rather than a
 generic display failure. The corrected HDMI-A-2 10,000-frame run and the

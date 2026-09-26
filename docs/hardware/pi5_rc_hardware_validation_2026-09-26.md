@@ -77,12 +77,34 @@ The trace keeps the three timestamp streams separate:
 - callback-minus-kernel deltas use monotonic-versus-monotonic values only,
   because the capability reports monotonic kernel timestamps.
 
+The audit found no producer, conversion, unit, or subtraction-direction bug:
+the native callback uses `clock_gettime(CLOCK_MONOTONIC)`, converts the DRM
+seconds/useconds pair to nanoseconds as `seconds * 1e9 + useconds * 1e3`, and
+the analyzer computes callback minus kernel after selecting the matching clock.
+The schema names those streams explicitly; the values are integer nanoseconds.
+
+`DRM_CAP_TIMESTAMP_MONOTONIC` establishes the kernel event clock domain, not
+the timestamp instant. A DRM page-flip event carries the kernel's vblank
+timestamp, while `callback_monotonic_ns` is sampled when userspace dispatches
+that event. On VC4, vblank timestamping also uses driver scanout-position
+correction. Therefore a signed callback-minus-kernel value can be negative;
+it is a clock/driver timestamp diagnostic, not callback latency without an
+independent calibration.
+
 For the standalone trace, callback monotonic intervals had mean/median
 `16,716.022/16,716.151 us`, min/max `16,614.003/16,796.540 us`; realtime
 intervals were equivalent. The callback-minus-kernel delta ranged from
 `-663.763` to `+101.899 us` (median `-661.032 us`, mean `-648.778 us`; 295
-negative samples). That negative ordering is a driver/timestamp diagnostic,
-not a positive dispatch-latency claim. No optical timing is inferred.
+negative samples; p95 `-655.661 us`). Excluding the five positive samples,
+the delta median was `-661.035 us`, with 288/295 samples within `10 us` of
+that median. Kernel intervals were `16,054–17,381 us` versus callback
+intervals `16,614.003–16,796.540 us`; 290/299 interval differences were
+within `20 us`, with nine compensating kernel-timestamp excursions. Reversing
+the subtraction would leave five negative samples and would not correct the
+interval excursions, so sign reversal alone is not valid. The stable interval
+relationship provides no evidence of a clock-domain mismatch.
+
+No optical timing is inferred.
 
 ## Live dual-camera identity resolution
 
