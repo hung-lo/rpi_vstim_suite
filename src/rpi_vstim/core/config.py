@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from rpi_vstim.hardware.lick import MIN_CLASSIFIED_LICK_INTERVAL_MS, RELEASE_STABLE_MS
+
 
 class ConfigError(ValueError):
     """Raised for invalid or unsafe configuration."""
@@ -62,6 +64,8 @@ class HardwareConfig:
     suction_pin_bcm: int = 25
     lick_pin_bcm: int = 26
     ttl_pin_bcm: int | None = None
+    release_stable_ms: int = RELEASE_STABLE_MS
+    min_classified_lick_interval_ms: int = MIN_CLASSIFIED_LICK_INTERVAL_MS
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,13 @@ class Config:
             raise ConfigError("BCM pins must be between 0 and 27")
         if len(set(pins.values())) != len(pins):
             raise ConfigError("GPIO pins must be unique")
+        if (
+            not isinstance(self.hardware.release_stable_ms, int)
+            or self.hardware.release_stable_ms <= 0
+            or not isinstance(self.hardware.min_classified_lick_interval_ms, int)
+            or self.hardware.min_classified_lick_interval_ms <= 0
+        ):
+            raise ConfigError("lick timing settings must be positive integers")
         if self.hardware.backend not in {"simulated", "lgpio"}:
             raise ConfigError(f"unsupported hardware backend: {self.hardware.backend}")
         if not isinstance(self.hardware.chip, int) or self.hardware.chip < 0:

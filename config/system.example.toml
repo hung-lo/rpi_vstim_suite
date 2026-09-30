@@ -32,6 +32,8 @@ chip = 0
 reward_pin_bcm = 19
 suction_pin_bcm = 25
 lick_pin_bcm = 26
+release_stable_ms = 25
+min_classified_lick_interval_ms = 70
 
 [cameras]
 enabled_by_default = false

@@ -14,4 +14,9 @@ cannot be blocked by camera failure.
 
 Pin numbers, electrical polarity, pulse widths, water limits, and actuation
 acceptance remain deferred until the authoritative Pi hardware configuration
-is confirmed. No pin mapping is guessed here.
+is confirmed. The current physical mapping correction records BCM19 as the
+reward pump and BCM25 as the vacuum; BCM7 remains unresolved/legacy `reward_4`
+and BCM8 remains unresolved/legacy airpuff until separately tested. GPIO7’s
+temporary vacuum use was test-only rewiring and is not the production map.
+Function mapping and polarity remain separate fields, and polarity is not
+inferred without physical confirmation.

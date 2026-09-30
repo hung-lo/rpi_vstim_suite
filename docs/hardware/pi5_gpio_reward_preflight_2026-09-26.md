@@ -5,6 +5,23 @@ exported, claimed, toggled, or electrically probed during the audit. The
 following is source evidence, not confirmation that the harness is wired this
 way.
 
+## Current physical mapping correction — 2026-09-30
+
+The current rig mapping supplied by the hardware owner is:
+
+| BCM GPIO | Function mapping | Function-mapping status | Polarity status |
+|---:|---|---|---|
+| 19 | reward pump | Current physical mapping confirmed | Not physically validated |
+| 25 | vacuum | Current physical mapping confirmed | Not physically validated |
+| 7 | unresolved / legacy `reward_4` role | Not separately tested | Not evaluated |
+| 8 | unresolved / legacy airpuff role | Not separately tested | Not evaluated |
+
+GPIO7 briefly drove the vacuum only because the vacuum line was temporarily
+rewired there during testing. That temporary wiring was moved back to GPIO25;
+GPIO7 is not the production vacuum mapping. GPIO8 remains unresolved until it
+is separately tested. Function mapping and electrical polarity are independent
+validation fields; no active-high or active-low behavior is inferred here.
+
 ## Current unified checkout
 
 The current configuration model defines these software defaults in
