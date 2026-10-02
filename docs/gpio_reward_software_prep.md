@@ -16,11 +16,11 @@ workers must not own GPIO or run reward logic. Reward/water-limit state,
 lick-edge events, and full production orchestration remain bounded worker
 contracts rather than assumptions in this line-control backend.
 
-The prototype configuration maps BCM19 to the candidate reward role and BCM25
-to the candidate vacuum role, with both electrical initial levels set to LOW.
-Active polarity is intentionally unset: electrical HIGH/LOW is not called
-actuator ON/OFF. GPIO19 and GPIO25 line control can be validated with the
-unconnected LED-style indicators, but reward delivery, suction actuation,
-polarity, water limits, and final-rig acceptance remain deferred. GPIO7,
-GPIO8, GPIO20, GPIO21, cue LEDs, and trigger outputs are outside this backend
-and must not be touched by this validation.
+The prototype configuration preserves the canonical lab BehavBox map: BCM19
+is `reward_left`/`pump1`, and BCM25 is `vacuum`/`pump_en`; both electrical
+initial levels are LOW. The eventual rig must be verified against that
+canonical wiring. Active polarity is intentionally unset: electrical HIGH/LOW
+is not called actuator ON/OFF. Reward delivery, suction actuation, polarity,
+water limits, and safe startup/shutdown with the connected driver board remain
+deferred. GPIO7, GPIO8, GPIO20, GPIO21, cue LEDs, and trigger outputs are
+outside this backend and must not be touched by this validation.

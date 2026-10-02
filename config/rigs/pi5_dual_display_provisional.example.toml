@@ -24,6 +24,7 @@ asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
 # Prototype output-line validation only. The real reward/vacuum circuits are not attached.
 backend = "lgpio"
 chip = 0
+# Canonical lab BehavBox map: reward_left/pump1 and vacuum/pump_en.
 reward_pin_bcm = 19
 suction_pin_bcm = 25
 reward_initial_level = 0

@@ -5,14 +5,14 @@ exported, claimed, toggled, or electrically probed during the audit. The
 following is source evidence, not confirmation that the harness is wired this
 way.
 
-## Current physical mapping correction — 2026-09-30
+## Canonical lab BehavBox mapping — 2026-09-30
 
-The current rig mapping supplied by the hardware owner is:
+The lab uses one canonical BehavBox BCM map across rigs:
 
 | BCM GPIO | Function mapping | Function-mapping status | Polarity status |
 |---:|---|---|---|
-| 19 | reward pump | Current physical mapping confirmed | Not physically validated |
-| 25 | vacuum | Current physical mapping confirmed | Not physically validated |
+| 19 | reward_left / pump1 | Canonical lab map | Not physically validated |
+| 25 | vacuum / pump_en | Canonical lab map | Not physically validated |
 | 7 | unresolved / legacy `reward_4` role | Not separately tested | Not evaluated |
 | 8 | unresolved / legacy airpuff role | Not separately tested | Not evaluated |
 
@@ -34,13 +34,13 @@ The current configuration model defines these software defaults in
 | lick | 26 | `HardwareConfig.lick_pin_bcm`; software default only |
 | TTL | unset | `HardwareConfig.ttl_pin_bcm = None` |
 
-The Pi 5 provisional fixture now defines `[hardware]` for the two candidate
-output lines and uses the native `LgpioBackend` for the dedicated line
-validator. `RewardController`, `SuctionController`, `LickInput`, and
-`TtlOutput` remain broader protocol/worker placeholders, while the ordinary
-desktop/runtime tests continue to use the simulated hardware boundary. No
-current unified GPIO mapping beyond the explicitly tested prototype lines
-should be treated as an authoritative final harness map.
+The Pi 5 fixture now defines `[hardware]` for the two canonical output lines
+and uses the native `LgpioBackend` for the dedicated line validator.
+`RewardController`, `SuctionController`, `LickInput`, and `TtlOutput` remain
+broader protocol/worker placeholders, while ordinary desktop/runtime tests
+continue to use the simulated hardware boundary. The final rig must be
+verified as physically wired to this canonical map; the BCM assignments are
+not awaiting a new breakout-map decision.
 
 ## Frozen/reference repository evidence
 
@@ -128,10 +128,10 @@ this report.
 The prototype validation scope is intentionally limited to the two unconnected
 indicator lines:
 
-| BCM GPIO | Electrical output control | Candidate role | Real circuit | Polarity | Final rig |
+| BCM GPIO | Electrical output control | Canonical role | Real circuit | Polarity | Final rig |
 |---:|---|---|---|---|---|
-| 19 | Physically validated on prototype | reward | Not connected | Not validated | Required |
-| 25 | Physically validated on prototype | vacuum | Not connected | Not validated | Required |
+| 19 | Physically validated on prototype | reward_left / pump1 | Not connected | Not validated | Verify canonical wiring and actuator |
+| 25 | Physically validated on prototype | vacuum / pump_en | Not connected | Not validated | Verify canonical wiring and actuator |
 
 The production-compatible Pi 5 backend uses native `lgpio`, resolves these
 lines from `[hardware]` configuration, claims only the requested semantic
@@ -146,8 +146,8 @@ The real prototype line checks are run independently with
 toggle, three one-second HIGH/LOW cycles, and 50 ms pulses in both electrical
 directions. They are output-line checks only. No reward pump or vacuum circuit
 was connected or actuated, and this evidence must not be promoted to final-rig
-reward/vacuum acceptance. The eventual breakout mapping and polarity remain
-rig-configurable.
+reward/vacuum acceptance. The BCM mapping is canonical; the connected driver
+board's active polarity and actuator behavior remain to be validated.
 
 ### 2026-10-02 Pi results
 
