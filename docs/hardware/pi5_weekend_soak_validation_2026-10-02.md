@@ -40,8 +40,8 @@ GPIO26/27 monitoring using a unique output directory.
 
 - 20/20 cycles completed normally.
 - 20/20 display runs completed 300/300 frames.
-- 20/20 display runs reported contiguous frame and kernel sequences after the
-  validator completion-race fix.
+- 19/20 display runs reported contiguous frame and kernel sequences; one run
+  had three estimated dropped frames in isolated ~33 ms intervals.
 - 20/20 reported one lease acquire, one modeset, one restore, and one lease
   release.
 - 20/20 restored the display.
