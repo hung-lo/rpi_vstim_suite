@@ -344,7 +344,15 @@ def load_config(path: Path | str | None = None) -> Config:
     config_path = Path(path)
     with config_path.open("rb") as handle:
         raw = tomllib.load(handle)
-    return config_from_mapping(raw)
+    config = config_from_mapping(raw)
+    relative_paths = {
+        name: (config_path.parent / value).resolve()
+        for name in ("output_root", "cache_root", "asset_root", "reward_state_root")
+        if not (value := getattr(config.paths, name)).is_absolute()
+    }
+    if relative_paths:
+        config = replace(config, paths=replace(config.paths, **relative_paths))
+    return config
 
 
 def config_json(config: Config) -> str:

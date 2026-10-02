@@ -1,3 +1,7 @@
+[paths]
+# Resolved relative to this config file; keeps the production corpus in the checkout.
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
 [protocol]
 name = "natural-images"
 version = "software-groundwork"

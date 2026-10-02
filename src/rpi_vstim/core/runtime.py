@@ -11,7 +11,11 @@ from rpi_vstim.core.assets import AssetResolver, build_selected_asset_manifest
 from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
-from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan as build_natural_plan
+from rpi_vstim.protocols.natural_images import (
+    NaturalImageSettings,
+    build_plan as build_natural_plan,
+    discover_images,
+)
 from rpi_vstim.protocols.drifting_gratings import (
     DEFAULT_ORIENTATIONS_DEG,
     DriftingGratingSettings,
@@ -100,7 +104,12 @@ def build_simulation_plan(config: Config, *, protocol_name: str | None, seed: in
     name = protocol_name or config.protocol.name
     parameters = config.protocol.parameters
     if name == "natural-images":
-        images = tuple(parameters.get("images", (f"natural_image_{index:04d}.png" for index in range(14))))
+        if "images" in parameters:
+            images = tuple(parameters["images"])
+        elif config.paths.asset_root.is_dir():
+            images = discover_images(config.paths.asset_root)
+        else:
+            images = tuple(f"natural_image_{index:04d}.png" for index in range(14))
         settings = NaturalImageSettings(
             images=images,
             seed=seed,

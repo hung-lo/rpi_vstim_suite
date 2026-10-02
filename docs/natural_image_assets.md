@@ -35,3 +35,14 @@ not the arbitrary natural-image sequence implementation.
 Pillow is an optional `images` extra (`pip install -e '.[images]'`). A target
 without Pillow reports an actionable preparation error rather than silently
 changing image semantics.
+
+The production corpus is in
+`assets/natural_images/stringer_natimg2800_center_crop/`. Validate all 2,800
+files, the static SHA manifest, the frozen crop transform, and the bounded
+preparer with:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/validate_natural_image_assets.py \
+  --asset-root assets/natural_images/stringer_natimg2800_center_crop \
+  --width 1024 --height 600
+```

@@ -15,3 +15,7 @@ calibration_id = ""
 physical_width_cm = 15.40
 physical_height_cm = 8.60
 eye_distance_cm = 16.0
+
+[paths]
+# Resolved relative to this config file; keeps the production corpus in the checkout.
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"

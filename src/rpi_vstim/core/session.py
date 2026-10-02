@@ -138,6 +138,35 @@ class SessionOutput:
             self.context.session_root / "asset_manifest.json",
             versioned(value, "asset_manifest"),
         )
+        entries = {
+            item["relative_path"]: item
+            for item in value.get("entries", [])
+            if isinstance(item, dict) and "relative_path" in item
+        }
+        table_path = self.context.session_root / "selected_image_table.json"
+        if table_path.is_file():
+            table = json.loads(table_path.read_text(encoding="utf-8"))
+            images = [
+                row | {"sha256": entries[row["image"]]["sha256"]}
+                for row in table.get("images", [])
+                if row.get("image") in entries
+            ]
+            table["images"] = images
+            atomic_write_json(table_path, table)
+            provenance_path = self.context.session_root / "provenance.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance.update(
+                {
+                    "asset_manifest_digest": value.get("source_manifest_sha256")
+                    or value.get("manifest_hash"),
+                    "selected_image_filenames": [row["image"] for row in images],
+                    "selected_image_identities": [
+                        {"filename": row["image"], "sha256": row["sha256"]}
+                        for row in images
+                    ],
+                }
+            )
+            atomic_write_json(provenance_path, provenance)
 
     def write_display_result(self, result: Any) -> None:
         if self._display_stream is None:

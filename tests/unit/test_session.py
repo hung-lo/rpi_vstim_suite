@@ -30,3 +30,26 @@ def test_session_persists_seed_and_source_commit(tmp_path, monkeypatch):
     assert manifest["random_seeds"] == {"protocol": 42}
     assert manifest["source_commit"] == "abc123"
     assert provenance["repository_commit"] == "abc123"
+
+
+def test_session_records_selected_asset_identities(tmp_path):
+    config = replace(Config(), paths=replace(Config().paths, output_root=tmp_path))
+    output = new_session(config, session_id="asset-provenance")
+    output.write_initial_outputs()
+    output.write_plan({"metadata": {"selected_images": ["a.png"]}})
+    output.write_asset_manifest(
+        {
+            "manifest_hash": "session-manifest",
+            "source_manifest_sha256": "repository-manifest",
+            "entries": [{"relative_path": "a.png", "sha256": "image-sha"}],
+        }
+    )
+
+    root = tmp_path / "asset-provenance"
+    provenance = json.loads((root / "provenance.json").read_text())
+    table = json.loads((root / "selected_image_table.json").read_text())
+    assert provenance["asset_manifest_digest"] == "repository-manifest"
+    assert provenance["selected_image_identities"] == [
+        {"filename": "a.png", "sha256": "image-sha"}
+    ]
+    assert table["images"][0]["sha256"] == "image-sha"

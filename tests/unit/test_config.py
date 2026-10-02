@@ -19,6 +19,16 @@ def test_example_toml_loads_and_preserves_sections():
     assert config.protocol.name == "natural-images"
 
 
+def test_load_config_resolves_relative_paths_from_config_file(tmp_path):
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    config_path = tmp_path / "config" / "natural.toml"
+    config_path.parent.mkdir()
+    config_path.write_text('[paths]\nasset_root = "../assets"\n')
+
+    assert load_config(config_path).paths.asset_root == asset_root.resolve()
+
+
 def test_default_display_is_neutral_for_simulation():
     assert Config().display.backend == "fake"
     assert Config().display.ownership == ""

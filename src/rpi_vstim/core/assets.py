@@ -65,6 +65,7 @@ class AssetManifest:
     target_height_px: int | None = None
     transform: str | None = None
     background_value: int | None = None
+    source_manifest_sha256: str | None = None
 
     @classmethod
     def build(
@@ -76,6 +77,7 @@ class AssetManifest:
         target_height_px: int | None = None,
         transform: str | None = None,
         background_value: int | None = None,
+        source_manifest_sha256: str | None = None,
     ) -> "AssetManifest":
         occurrence_map = dict(selected_occurrences)
         canonical = json.dumps(
@@ -86,6 +88,7 @@ class AssetManifest:
                 "target_height_px": target_height_px,
                 "transform": transform,
                 "background_value": background_value,
+                "source_manifest_sha256": source_manifest_sha256,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -100,6 +103,7 @@ class AssetManifest:
             target_height_px,
             transform,
             background_value,
+            source_manifest_sha256,
         )
 
     def entry(self, relative_path: str) -> AssetMetadata:
@@ -110,25 +114,30 @@ class AssetManifest:
 
     def as_dict(self) -> dict[str, object]:
         occurrences = dict(self.selected_occurrences)
-        return {
+        entries = []
+        for entry in self.entries:
+            item = entry.as_dict() | {
+                "selected_occurrence_count": occurrences.get(entry.relative_path, 0),
+                "target_width_px": self.target_width_px,
+                "target_height_px": self.target_height_px,
+                "transform": self.transform,
+                "background_value": self.background_value,
+            }
+            if self.source_manifest_sha256 is not None:
+                item["source_manifest_sha256"] = self.source_manifest_sha256
+            entries.append(item)
+        result = {
             "schema_version": self.schema_version,
             "created_utc_ns": self.created_utc_ns,
             "manifest_hash": self.manifest_hash,
-            "entries": [
-                entry.as_dict()
-                | {
-                    "selected_occurrence_count": occurrences.get(entry.relative_path, 0),
-                    "target_width_px": self.target_width_px,
-                    "target_height_px": self.target_height_px,
-                    "transform": self.transform,
-                    "background_value": self.background_value,
-                }
-                for entry in self.entries
-            ],
+            "entries": entries,
             "selected_occurrences": occurrences,
             "prepared_memory_bytes": self.prepared_memory_bytes,
             "duplicate_content_groups": self.duplicate_content_groups,
         }
+        if self.source_manifest_sha256 is not None:
+            result["source_manifest_sha256"] = self.source_manifest_sha256
+        return result
 
     @property
     def prepared_memory_bytes(self) -> int:
@@ -166,6 +175,12 @@ class AssetResolver:
         self.source_reads = 0
         if not self.root.is_dir():
             raise AssetNotFoundError(f"asset root is not a directory: {self.root}")
+        manifest_path = self.root / "MANIFEST.sha256"
+        self.source_manifest_sha256 = (
+            hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            if manifest_path.is_file()
+            else None
+        )
 
     def discover(self) -> tuple[str, ...]:
         return tuple(
@@ -250,6 +265,7 @@ class AssetResolver:
             target_height_px=target_height_px,
             transform=transform,
             background_value=background_value,
+            source_manifest_sha256=self.source_manifest_sha256,
         )
 
 

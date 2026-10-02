@@ -2,13 +2,24 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 import sys
+from pathlib import Path
 
 from .timestamps import utc_ns
 
 
 def resolve_source_commit() -> str:
-    return os.environ.get("RPI_VSTIM_SOURCE_COMMIT", "unknown")
+    if value := os.environ.get("RPI_VSTIM_SOURCE_COMMIT"):
+        return value
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[3],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
 
 
 def collect_provenance(*, source_commit: str | None = None) -> dict[str, object]:
