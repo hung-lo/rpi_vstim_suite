@@ -51,11 +51,13 @@ gray(30) -> 0000(30) -> gray(30) -> 0700(30) -> gray(30)
 -> 1400(30) -> gray(30) -> 2100(30) -> gray(30) -> 2799(30) -> gray(30)
 ```
 
-It completed 330/330 frames with one continuous ownership interval, one
-modeset, one restore, one lease release, contiguous logical/kernel sequences,
-zero missed/dropped/doubled frames, zero intervals outside tolerance, and
+The reproducible run from repository commit `3a2a11a` and asset manifest
+digest `dca481282f9f6a1d0a281f4639fa96661b00f35748e0972f96205553898aa8fe`
+completed 330/330 frames with one continuous ownership interval, one modeset,
+one restore, one lease release, contiguous logical/kernel sequences, zero
+missed/dropped/doubled frames, zero intervals outside tolerance, and
 photodiode metadata valid. The run artifact was
-`/home/pi/tmp_task_runs/continuous-kms-real-natural-20261002`.
+`/home/pi/tmp_task_runs/continuous-kms-real-natural-3a2a11a-20261002`.
 
 ## Human acceptance gate
 
