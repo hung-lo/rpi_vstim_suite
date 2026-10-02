@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -80,14 +81,21 @@ def _camera_process(index: int, output: Path, duration_ms: int) -> subprocess.Po
     return subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
-def _stop_process(process: subprocess.Popen[Any]) -> int | None:
+def _stop_process(process: subprocess.Popen[Any], *, stop_signal: signal.Signals = signal.SIGTERM) -> int | None:
     if process.poll() is None:
-        process.terminate()
+        process.send_signal(stop_signal)
     try:
         return process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
         return process.wait(timeout=5)
+
+
+def _finish_process(process: subprocess.Popen[Any], timeout: float = 5) -> int | None:
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return _stop_process(process)
 
 
 def _run_integrated(config_path: Path, args: argparse.Namespace, monitor: LgpioLickMonitor, root: Path) -> dict[str, object]:
@@ -132,8 +140,10 @@ def _run_integrated(config_path: Path, args: argparse.Namespace, monitor: LgpioL
             processes.append(display_process)
             print("INTEGRATED: perform a few LEFT contacts, then a few RIGHT contacts now", flush=True)
             time.sleep(duration_s)
-        camera_statuses = [_stop_process(process) for process in camera_processes]
-        display_status = _stop_process(display_process) if display_process is not None else None
+        camera_statuses = [
+            _stop_process(process, stop_signal=signal.SIGINT) for process in camera_processes
+        ]
+        display_status = _finish_process(display_process) if display_process is not None else None
     finally:
         for process in processes:
             if process.poll() is None:
