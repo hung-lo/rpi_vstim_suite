@@ -11,11 +11,11 @@ plane, and supported formats without modesetting. The normal path is a short
 alternating-pattern test with a configurable photodiode patch. `--frame-file`
 accepts exactly two packed frames (logical frame 0/on followed by logical frame
 1/off), allowing the bounded production renderer to feed the same native leased
-KMS path. It is a bounded two-frame smoke/validation transport, not the
-finished natural-image sequence transport. The Python wrapper currently uses a
-short-lived temporary file for this diagnostic path; production protocol
-rendering must not depend on it. It does not involve cameras, GPIO, storage,
-or telemetry.
+KMS path. `--stream` instead reads contiguous packed frame states from stdin,
+acquires/modesets once, page-flips the complete stream, and restores/releases
+once at EOF or interruption. The Python wrapper uses a bounded producer queue
+for this path. The two-frame path remains a smoke diagnostic. It does not
+involve cameras, GPIO, storage, or telemetry.
 
 Build on Debian Trixie with:
 

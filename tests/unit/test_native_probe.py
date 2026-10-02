@@ -1,4 +1,5 @@
 import json
+import struct
 import subprocess
 
 import pytest
@@ -9,7 +10,9 @@ from rpi_vstim.display.native_probe import (
     NativeKmsOwnershipError,
     display_result_from_probe,
     run_native_probe,
+    run_native_sequence,
 )
+from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 
 
 def test_native_probe_wrapper_builds_bounded_command(monkeypatch, tmp_path):
@@ -59,6 +62,79 @@ def test_native_probe_wrapper_builds_bounded_command(monkeypatch, tmp_path):
     assert "--frame-file" in calls["command"]
     assert calls["kwargs"]["timeout"] >= 10.0
     assert "--probe-only" not in calls["command"]
+
+
+def test_native_sequence_uses_one_stream_process_and_preserves_frame_metadata(monkeypatch, tmp_path):
+    captured = bytearray()
+
+    class Pipe:
+        def write(self, data):
+            captured.extend(data)
+            return len(data)
+
+        def close(self):
+            return None
+
+    class ReadPipe:
+        def __init__(self, value):
+            self.value = value
+
+        def read(self):
+            return self.value
+
+    class Process:
+        returncode = 0
+        stdin = Pipe()
+        stdout = ReadPipe(b'{"completed_frame_count": 2}')
+        stderr = ReadPipe(b"")
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self):
+            return self.returncode
+
+    calls = []
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.Popen",
+        lambda command, **kwargs: (calls.append((command, kwargs)) or Process()),
+    )
+    frames = (
+        DisplaySequenceFrame(
+            DisplaySequenceMetadata(0, "gray", "gray", "gray", "off", 8, 0),
+            b"0" * 8,
+        ),
+        DisplaySequenceFrame(
+            DisplaySequenceMetadata(1, "image", "image", "image", "on", 8, 1),
+            b"1" * 8,
+        ),
+    )
+    result = run_native_sequence(
+        DisplayConfig(width_px=2, height_px=2, refresh_hz=59.82),
+        frames,
+        binary=tmp_path / "kms_probe",
+        lease=True,
+    )
+    assert result["producer_frame_count"] == 2
+    assert len(calls) == 1
+    assert "--stream" in calls[0][0]
+    assert "--lease" in calls[0][0]
+    magic, version, frame_bytes = struct.unpack_from("<8sII", captured)
+    assert magic == b"RPIKMS1\0"
+    assert version == 1
+    assert frame_bytes == 8
+    first_index, first_producer, first_state, first_size = struct.unpack_from(
+        "<QQBQ7x", captured, 16
+    )
+    assert (first_index, first_producer, first_state, first_size) == (0, 0, 0, 8)
+    second_offset = 16 + 32 + 8
+    second_index, second_producer, second_state, second_size = struct.unpack_from(
+        "<QQBQ7x", captured, second_offset
+    )
+    assert (second_index, second_producer, second_state, second_size) == (1, 1, 1, 8)
 
 
 def test_native_probe_can_request_read_only_mode(monkeypatch, tmp_path):

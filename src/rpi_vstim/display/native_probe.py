@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import json
 import os
+from queue import Full, Queue
+import struct
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 from rpi_vstim.core.config import DisplayConfig
 
 from .models import DisplayResult
+from .transport import DisplaySequenceFrame
+
+_STREAM_MAGIC = b"RPIKMS1\0"
+_STREAM_VERSION = 1
+_STREAM_HEADER = struct.Struct("<8sII")
+_STREAM_FRAME_HEADER = struct.Struct("<QQBQ7x")
+# 32 packed frames cover bounded image preparation latency at 60 Hz without
+# retaining an unbounded experiment session in memory.
+_STREAM_QUEUE_CAPACITY = 32
 
 
 class NativeKmsError(RuntimeError):
@@ -110,6 +123,163 @@ def run_native_probe(
         raise NativeKmsError("native KMS probe returned invalid JSON") from exc
     if not isinstance(payload, dict):
         raise NativeKmsError("native KMS probe returned a non-object result")
+    return payload
+
+
+def run_native_sequence(
+    config: DisplayConfig,
+    frames: Iterable[DisplaySequenceFrame],
+    *,
+    binary: Path | str | None = None,
+    patch_size: int = 50,
+    patch_corner: str = "bottom_right",
+    patch_on: int = 255,
+    patch_off: int = 0,
+    lease: bool = False,
+) -> dict[str, Any]:
+    """Run one continuous leased KMS session for a bounded frame stream."""
+    if patch_size <= 0 or not 0 <= patch_on <= 255 or not 0 <= patch_off <= 255:
+        raise ValueError("invalid photodiode configuration")
+    bytes_per_pixel = {"RGB565": 2, "XRGB8888": 4}.get(config.pixel_format)
+    if bytes_per_pixel is None:
+        raise ValueError(f"unsupported pixel format: {config.pixel_format}")
+    frame_bytes = config.width_px * config.height_px * bytes_per_pixel
+    executable = Path(binary) if binary is not None else default_binary()
+    command = [
+        str(executable),
+        "--connector",
+        config.stimulus_connector,
+        "--width",
+        str(config.width_px),
+        "--height",
+        str(config.height_px),
+        "--refresh",
+        f"{config.refresh_hz:g}",
+        "--tolerance",
+        f"{config.refresh_tolerance_hz if config.require_exact_refresh else 1000000:g}",
+        "--format",
+        config.pixel_format,
+        "--patch-size",
+        str(patch_size),
+        "--patch-corner",
+        patch_corner,
+        "--patch-on",
+        str(patch_on),
+        "--patch-off",
+        str(patch_off),
+        "--stream",
+        "--json",
+    ]
+    if lease:
+        command.append("--lease")
+
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+    )
+    frame_queue: Queue[DisplaySequenceFrame | None] = Queue(maxsize=_STREAM_QUEUE_CAPACITY)
+    stop_producer = Event()
+    producer_error: list[BaseException] = []
+    writer_error: list[BaseException] = []
+    frame_count = 0
+    producer_sequence = 0
+
+    def produce_frames() -> None:
+        try:
+            for frame in frames:
+                while not stop_producer.is_set():
+                    try:
+                        frame_queue.put(frame, timeout=0.1)
+                        break
+                    except Full:
+                        continue
+                if stop_producer.is_set():
+                    return
+        except BaseException as exc:
+            producer_error.append(exc)
+        finally:
+            while not stop_producer.is_set():
+                try:
+                    frame_queue.put(None, timeout=0.1)
+                    return
+                except Full:
+                    continue
+
+    def write_frames() -> None:
+        nonlocal frame_count, producer_sequence
+        assert process.stdin is not None
+        try:
+            process.stdin.write(_STREAM_HEADER.pack(_STREAM_MAGIC, _STREAM_VERSION, frame_bytes))
+            while True:
+                frame = frame_queue.get()
+                if frame is None:
+                    if producer_error:
+                        raise NativeKmsError(
+                            f"display sequence producer failed: {producer_error[0]}"
+                        )
+                    break
+                metadata = frame.metadata
+                payload = bytes(frame.payload)
+                if metadata.logical_frame_index != frame_count:
+                    raise ValueError("display sequence frame indices are not contiguous")
+                if metadata.producer_sequence != producer_sequence:
+                    raise ValueError("display sequence producer sequence is not contiguous")
+                if metadata.payload_size != len(payload) or len(payload) != frame_bytes:
+                    raise ValueError("display sequence payload size does not match display")
+                if metadata.photodiode_state not in {"on", "off"}:
+                    raise ValueError("display sequence photodiode state is invalid")
+                process.stdin.write(
+                    _STREAM_FRAME_HEADER.pack(
+                        metadata.logical_frame_index,
+                        metadata.producer_sequence,
+                        1 if metadata.photodiode_state == "on" else 0,
+                        len(payload),
+                    )
+                )
+                process.stdin.write(payload)
+                frame_count += 1
+                producer_sequence += 1
+        except BaseException as exc:
+            writer_error.append(exc)
+            stop_producer.set()
+            if process.poll() is None:
+                process.kill()
+        finally:
+            process.stdin.close()
+
+    producer = Thread(target=produce_frames, name="rpi-vstim-kms-stream-producer")
+    writer = Thread(target=write_frames, name="rpi-vstim-kms-stream-writer")
+    producer.start()
+    writer.start()
+    writer.join()
+    stop_producer.set()
+    producer.join()
+    assert process.stdout is not None
+    assert process.stderr is not None
+    stdout = process.stdout.read()
+    stderr = process.stderr.read()
+    process.wait()
+    if writer_error:
+        raise NativeKmsError(f"native KMS sequence input failed: {writer_error[0]}")
+    if process.returncode != 0:
+        detail = (stderr or stdout).decode(errors="replace").strip()
+        message = f"native KMS sequence failed ({process.returncode}): {detail}"
+        lowered = detail.lower()
+        if "modesetting authority" in lowered or "drm master" in lowered:
+            raise NativeKmsOwnershipError(message)
+        raise NativeKmsError(message)
+    try:
+        payload = json.loads(stdout.decode())
+    except json.JSONDecodeError as exc:
+        raise NativeKmsError("native KMS sequence returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise NativeKmsError("native KMS sequence returned a non-object result")
+    if int(payload.get("completed_frame_count", -1)) != frame_count:
+        raise NativeKmsError("native KMS sequence completed a different frame count")
+    payload["producer_frame_count"] = frame_count
     return payload
 
 

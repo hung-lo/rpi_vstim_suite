@@ -29,8 +29,10 @@ hardware gate.
 `AssetPreparer` retains only a bounded LRU of prepared RGB888 assets. The
 natural-image frame source streams plan events and uses explicit immutable
 asset keys; frame indices remain timing/provenance identifiers, never content
-identity. The validated two-frame KMS raw-file path remains a smoke transport,
-not the arbitrary natural-image sequence implementation.
+identity. Real presentation uses `KmsDisplayBackend.present_sequence()` and a
+bounded packed-frame producer queue, so one native KMS process owns the lease
+through all gray/image epochs. The older two-frame KMS raw-file path remains a
+single-epoch smoke transport only.
 
 Pillow is an optional `images` extra (`pip install -e '.[images]'`). A target
 without Pillow reports an actionable preparation error rather than silently

@@ -7,6 +7,7 @@ from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.display.frame_program import FrameProgram
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
+from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 from rpi_vstim.hardware.simulated import SimulatedHardwareBackend
 
 
@@ -194,4 +195,63 @@ def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypa
     assert len(captured["frame_bytes"][0]) == 2 * 2 * 2 * 2
     assert captured["frame_bytes"][0] != captured["frame_bytes"][1]
     assert not Path(captured["frame_path"]).exists()
+    display.close()
+
+
+def test_kms_present_sequence_has_one_continuous_ownership_interval(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {"connector": "HDMI-A-2", "mode": "2x2", "refresh_hz": 59.82},
+            "preview": None,
+        },
+    )
+    calls = []
+
+    def fake_sequence(config, frames, **kwargs):
+        captured = list(frames)
+        calls.append((captured, kwargs))
+        return {
+            "connector": "HDMI-A-2",
+            "selected_mode": "2x2@59.82",
+            "pixel_format": "RGB565",
+            "requested_frame_count": 3,
+            "completed_frame_count": 3,
+            "ownership_lifecycle": {
+                "lease_acquire_count": 1,
+                "modeset_count": 1,
+                "restore_count": 1,
+                "lease_release_count": 1,
+            },
+        }
+
+    monkeypatch.setattr("rpi_vstim.display.kms.run_native_sequence", fake_sequence)
+    display = KmsDisplayBackend(use_lease=True)
+    display.open(
+        DisplayConfig(
+            ownership="lease",
+            stimulus_connector="HDMI-A-2",
+            width_px=2,
+            height_px=2,
+        )
+    )
+    frames = tuple(
+        DisplaySequenceFrame(
+            DisplaySequenceMetadata(index, event, event, event, state, 8, index),
+            bytes((index,)) * 8,
+        )
+        for index, (event, state) in enumerate(
+            (("gray", "off"), ("image", "on"), ("gray", "off"))
+        )
+    )
+    result = display.present_sequence(frames)
+    assert len(calls) == 1
+    assert [frame.metadata.logical_frame_index for frame in calls[0][0]] == [0, 1, 2]
+    assert [frame.metadata.photodiode_state for frame in calls[0][0]] == ["off", "on", "off"]
+    assert result["ownership_lifecycle"] == {
+        "lease_acquire_count": 1,
+        "modeset_count": 1,
+        "restore_count": 1,
+        "lease_release_count": 1,
+    }
     display.close()

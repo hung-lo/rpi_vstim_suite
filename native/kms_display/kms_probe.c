@@ -28,6 +28,11 @@
 
 #define MAX_FRAMES 10000U
 #define POLL_TIMEOUT_MS 2000
+#define STREAM_MAGIC "RPIKMS1\0"
+#define STREAM_MAGIC_BYTES 8U
+#define STREAM_VERSION 1U
+#define STREAM_FRAME_HEADER_BYTES 32U
+#define DIAGNOSTIC_SAMPLE_CAPACITY 4096U
 
 static volatile sig_atomic_t stop_requested;
 
@@ -49,10 +54,26 @@ typedef struct {
     bool probe_only;
     bool lease;
     bool lease_discover;
+    bool stream;
     bool color_set;
     unsigned int color[3];
     const char *frame_file;
 } Options;
+
+typedef struct {
+    uint64_t count;
+    double sum;
+    double minimum;
+    double maximum;
+    double mean;
+    double m2;
+    unsigned int outside_tolerance;
+    unsigned int long_intervals;
+    unsigned int short_intervals;
+    unsigned int estimated_dropped;
+    double samples[DIAGNOSTIC_SAMPLE_CAPACITY];
+    size_t sample_count;
+} IntervalStats;
 
 typedef struct {
     unsigned int frame_index;
@@ -102,12 +123,37 @@ typedef struct {
 
 typedef struct {
     FlipEvent *events;
-    unsigned int capacity;
-    unsigned int completed;
+    unsigned int event_capacity;
+    uint64_t completed;
     unsigned int missed;
     bool pending;
     KmsFrameMetadata pending_frame;
+    bool all_kernel_timestamps;
+    bool frame_indices_contiguous;
+    bool kernel_sequences_contiguous;
+    bool photodiode_metadata_valid;
+    bool have_previous_frame;
+    bool have_previous_kernel_sequence;
+    unsigned int previous_frame_index;
+    uint32_t previous_kernel_sequence;
+    uint64_t previous_kernel_event_ns;
+    uint64_t previous_callback_monotonic_ns;
+    uint64_t first_kernel_event_ns;
+    uint64_t last_kernel_event_ns;
+    uint64_t first_callback_monotonic_ns;
+    uint64_t last_callback_monotonic_ns;
+    uint64_t first_callback_realtime_ns;
+    uint64_t last_callback_realtime_ns;
+    IntervalStats kernel_intervals;
+    IntervalStats callback_intervals;
+    double expected_interval_us;
 } FlipState;
+
+typedef struct {
+    uint64_t frame_index;
+    uint64_t producer_sequence;
+    bool photodiode_on;
+} StreamFrameMetadata;
 
 static void signal_handler(int signal_number) {
     (void)signal_number;
@@ -590,21 +636,231 @@ static int load_frame_file(const Options *options, DumbBuffer buffers[2]) {
     return 0;
 }
 
+static int read_full_fd(int fd, void *destination, size_t size, bool allow_eof) {
+    size_t offset = 0;
+    while (offset < size) {
+        ssize_t result = read(fd, (char *)destination + offset, size - offset);
+        if (result == 0) {
+            if (offset == 0 && allow_eof) {
+                return 1;
+            }
+            return -1;
+        }
+        if (result < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        offset += (size_t)result;
+    }
+    return 0;
+}
+
+static int read_stream_header(const Options *options, size_t *frame_bytes) {
+    uint8_t header[16];
+    if (read_full_fd(STDIN_FILENO, header, sizeof(header), false) != 0) {
+        fprintf(stderr, "continuous KMS stream ended before its header\n");
+        return -1;
+    }
+    if (memcmp(header, STREAM_MAGIC, STREAM_MAGIC_BYTES) != 0) {
+        fprintf(stderr, "continuous KMS stream has an invalid magic value\n");
+        return -1;
+    }
+    uint32_t version = 0;
+    uint32_t declared_bytes = 0;
+    memcpy(&version, header + 8, sizeof(version));
+    memcpy(&declared_bytes, header + 12, sizeof(declared_bytes));
+    size_t row_bytes = (size_t)options->width * format_bpp(options->format) / 8U;
+    size_t expected_bytes = row_bytes * (size_t)options->height;
+    if (version != STREAM_VERSION || declared_bytes != expected_bytes) {
+        fprintf(stderr,
+                "continuous KMS stream header mismatch: version=%u bytes=%u expected=%zu\n",
+                version, declared_bytes, expected_bytes);
+        return -1;
+    }
+    *frame_bytes = expected_bytes;
+    return 0;
+}
+
+static int validate_stream_patch(
+    const Options *options, const DumbBuffer *buffer, bool photodiode_on
+) {
+    unsigned int patch_x = strstr(options->patch_corner, "left") != NULL
+                               ? 0 : options->width > options->patch_size
+                               ? options->width - options->patch_size : 0;
+    unsigned int patch_y = strstr(options->patch_corner, "top") != NULL
+                               ? 0 : options->height > options->patch_size
+                               ? options->height - options->patch_size : 0;
+    unsigned int value = photodiode_on ? options->patch_on : options->patch_off;
+    if (options->format == DRM_FORMAT_RGB565) {
+        uint16_t expected = rgb565(value, value, value);
+        uint16_t actual = *(uint16_t *)((char *)buffer->map +
+                                        (size_t)patch_y * buffer->pitch +
+                                        (size_t)patch_x * sizeof(uint16_t));
+        return actual == expected ? 0 : -1;
+    }
+    uint32_t expected = (value << 16) | (value << 8) | value;
+    uint32_t actual = *(uint32_t *)((char *)buffer->map +
+                                    (size_t)patch_y * buffer->pitch +
+                                    (size_t)patch_x * sizeof(uint32_t));
+    return actual == expected ? 0 : -1;
+}
+
+static int load_stream_frame(
+    const Options *options,
+    DumbBuffer *buffer,
+    uint64_t expected_frame_index,
+    uint64_t expected_producer_sequence,
+    StreamFrameMetadata *metadata,
+    size_t frame_bytes
+) {
+    uint8_t header[STREAM_FRAME_HEADER_BYTES];
+    int header_result = read_full_fd(STDIN_FILENO, header, sizeof(header), true);
+    if (header_result != 0) {
+        if (header_result > 0) {
+            return 1;
+        }
+        fprintf(stderr, "continuous KMS stream ended inside a frame header\n");
+        return -1;
+    }
+    uint64_t frame_index = 0;
+    uint64_t producer_sequence = 0;
+    uint64_t payload_bytes = 0;
+    memcpy(&frame_index, header, sizeof(frame_index));
+    memcpy(&producer_sequence, header + 8, sizeof(producer_sequence));
+    memcpy(&payload_bytes, header + 17, sizeof(payload_bytes));
+    uint8_t photodiode = header[16];
+    if (frame_index != expected_frame_index || producer_sequence != expected_producer_sequence ||
+        frame_index > UINT_MAX || photodiode > 1 || payload_bytes != frame_bytes) {
+        fprintf(stderr,
+                "continuous KMS stream frame metadata is not contiguous or has wrong size\n");
+        return -1;
+    }
+    size_t row_bytes = (size_t)options->width * format_bpp(options->format) / 8U;
+    for (unsigned int row_index = 0; row_index < options->height; ++row_index) {
+        char *destination = (char *)buffer->map + (size_t)row_index * buffer->pitch;
+        if (read_full_fd(STDIN_FILENO, destination, row_bytes, false) != 0) {
+            fprintf(stderr, "continuous KMS stream ended inside frame payload\n");
+            return -1;
+        }
+        if (buffer->pitch > row_bytes) {
+            memset(destination + row_bytes, 0, buffer->pitch - row_bytes);
+        }
+    }
+    bool photodiode_on = photodiode != 0;
+    if (validate_stream_patch(options, buffer, photodiode_on) != 0) {
+        fprintf(stderr, "continuous KMS stream photodiode payload does not match metadata\n");
+        return -1;
+    }
+    metadata->frame_index = frame_index;
+    metadata->producer_sequence = producer_sequence;
+    metadata->photodiode_on = photodiode_on;
+    return 0;
+}
+
+static void interval_stats_init(IntervalStats *stats) {
+    memset(stats, 0, sizeof(*stats));
+    stats->minimum = HUGE_VAL;
+}
+
+static void interval_stats_add(
+    IntervalStats *stats, uint64_t left_ns, uint64_t right_ns, double expected_us
+) {
+    if (right_ns < left_ns) {
+        return;
+    }
+    double interval_us = (double)(right_ns - left_ns) / 1000.0;
+    stats->count++;
+    stats->sum += interval_us;
+    if (interval_us < stats->minimum) {
+        stats->minimum = interval_us;
+    }
+    if (interval_us > stats->maximum) {
+        stats->maximum = interval_us;
+    }
+    double delta = interval_us - stats->mean;
+    stats->mean += delta / (double)stats->count;
+    stats->m2 += delta * (interval_us - stats->mean);
+    if (stats->sample_count < DIAGNOSTIC_SAMPLE_CAPACITY) {
+        stats->samples[stats->sample_count++] = interval_us;
+    } else {
+        stats->samples[stats->count % DIAGNOSTIC_SAMPLE_CAPACITY] = interval_us;
+    }
+    const double tolerance = 0.05;
+    if (fabs(interval_us - expected_us) > expected_us * tolerance) {
+        stats->outside_tolerance++;
+    }
+    if (interval_us > expected_us * (1.0 + tolerance)) {
+        stats->long_intervals++;
+        double frame_count = floor(interval_us / expected_us + 0.5);
+        if (frame_count > 1.0) {
+            stats->estimated_dropped += (unsigned int)frame_count - 1U;
+        }
+    } else if (interval_us < expected_us * (1.0 - tolerance)) {
+        stats->short_intervals++;
+    }
+}
+
 static void page_flip_handler(
     int fd, unsigned int frame, unsigned int seconds, unsigned int useconds, void *data
 ) {
     (void)fd;
     FlipState *state = data;
-    if (state->completed < state->capacity) {
+    uint64_t kernel_event_ns = (uint64_t)seconds * 1000000000ULL +
+                               (uint64_t)useconds * 1000ULL;
+    uint64_t callback_monotonic_ns = clock_ns(CLOCK_MONOTONIC);
+    uint64_t callback_realtime_ns = clock_ns(CLOCK_REALTIME);
+    if (state->have_previous_frame &&
+        state->pending_frame.frame_index != state->previous_frame_index + 1U) {
+        state->frame_indices_contiguous = false;
+    }
+    if (state->have_previous_kernel_sequence &&
+        frame != state->previous_kernel_sequence + 1U) {
+        state->kernel_sequences_contiguous = false;
+    }
+    if (state->completed > 0) {
+        if (state->previous_kernel_event_ns != 0 && kernel_event_ns != 0) {
+            interval_stats_add(
+                &state->kernel_intervals,
+                state->previous_kernel_event_ns,
+                kernel_event_ns,
+                state->expected_interval_us
+            );
+        }
+        interval_stats_add(
+            &state->callback_intervals,
+            state->previous_callback_monotonic_ns,
+            callback_monotonic_ns,
+            state->expected_interval_us
+        );
+    }
+    if (state->completed < state->event_capacity) {
         state->events[state->completed].frame_index = state->pending_frame.frame_index;
         state->events[state->completed].buffer_index = state->pending_frame.buffer_index;
         state->events[state->completed].photodiode_on = state->pending_frame.photodiode_on;
-        state->events[state->completed].kernel_event_ns =
-            (uint64_t)seconds * 1000000000ULL + (uint64_t)useconds * 1000ULL;
-        state->events[state->completed].callback_monotonic_ns = clock_ns(CLOCK_MONOTONIC);
-        state->events[state->completed].callback_realtime_ns = clock_ns(CLOCK_REALTIME);
+        state->events[state->completed].kernel_event_ns = kernel_event_ns;
+        state->events[state->completed].callback_monotonic_ns = callback_monotonic_ns;
+        state->events[state->completed].callback_realtime_ns = callback_realtime_ns;
         state->events[state->completed].kernel_sequence = frame;
     }
+    if (state->completed == 0) {
+        state->all_kernel_timestamps = kernel_event_ns != 0;
+        state->first_kernel_event_ns = kernel_event_ns;
+        state->first_callback_monotonic_ns = callback_monotonic_ns;
+        state->first_callback_realtime_ns = callback_realtime_ns;
+    } else if (kernel_event_ns == 0) {
+        state->all_kernel_timestamps = false;
+    }
+    state->last_kernel_event_ns = kernel_event_ns;
+    state->last_callback_monotonic_ns = callback_monotonic_ns;
+    state->last_callback_realtime_ns = callback_realtime_ns;
+    state->previous_frame_index = state->pending_frame.frame_index;
+    state->previous_kernel_sequence = frame;
+    state->previous_kernel_event_ns = kernel_event_ns;
+    state->previous_callback_monotonic_ns = callback_monotonic_ns;
+    state->have_previous_frame = true;
+    state->have_previous_kernel_sequence = true;
     state->completed++;
     state->pending = false;
 }
@@ -865,64 +1121,18 @@ static void print_result(
     bool restored,
     bool aborted
 ) {
-    unsigned int completed = flips->completed > flips->capacity ? flips->capacity : flips->completed;
-    size_t interval_count = completed > 1 ? completed - 1U : 0U;
-    bool use_kernel_timestamps = completed > 0;
-    for (unsigned int index = 0; index < completed; ++index) {
-        if (flips->events[index].kernel_event_ns == 0) {
-            use_kernel_timestamps = false;
-            break;
-        }
-    }
+    uint64_t completed = flips->completed;
+    bool use_kernel_timestamps = completed > 0 && flips->all_kernel_timestamps;
     const char *timing_source = use_kernel_timestamps
                                     ? "kernel_event"
                                     : "callback_monotonic";
-    double *intervals = interval_count == 0 ? NULL : calloc(interval_count, sizeof(*intervals));
-    double sum = 0.0;
-    double maximum = 0.0;
-    double minimum = HUGE_VAL;
-    unsigned int outside = 0;
-    unsigned int long_intervals = 0;
-    unsigned int short_intervals = 0;
-    unsigned int estimated_dropped = 0;
+    const IntervalStats *stats = use_kernel_timestamps
+                                     ? &flips->kernel_intervals
+                                     : &flips->callback_intervals;
+    size_t interval_count = stats->sample_count;
     const double interval_tolerance = 0.05;
-    for (size_t index = 0; index < interval_count; ++index) {
-        uint64_t left_timestamp = use_kernel_timestamps
-                                      ? flips->events[index].kernel_event_ns
-                                      : flips->events[index].callback_monotonic_ns;
-        uint64_t right_timestamp = use_kernel_timestamps
-                                       ? flips->events[index + 1].kernel_event_ns
-                                       : flips->events[index + 1].callback_monotonic_ns;
-        double interval = (double)(right_timestamp - left_timestamp) / 1000.0;
-        intervals[index] = interval;
-        sum += interval;
-        if (interval > maximum) {
-            maximum = interval;
-        }
-        if (interval < minimum) {
-            minimum = interval;
-        }
-        double expected = 1000000.0 / mode_refresh(&state->mode);
-        if (fabs(interval - expected) > expected * interval_tolerance) {
-            outside++;
-        }
-        if (interval > expected * (1.0 + interval_tolerance)) {
-            long_intervals++;
-            double frame_count = floor(interval / expected + 0.5);
-            if (frame_count > 1.0) {
-                estimated_dropped += (unsigned int)frame_count - 1U;
-            }
-        } else if (interval < expected * (1.0 - interval_tolerance)) {
-            short_intervals++;
-        }
-    }
-    double mean = interval_count == 0 ? 0.0 : sum / (double)interval_count;
-    double variance = 0.0;
-    for (size_t index = 0; index < interval_count; ++index) {
-        double delta = intervals[index] - mean;
-        variance += delta * delta;
-    }
-    double stddev = interval_count == 0 ? 0.0 : sqrt(variance / (double)interval_count);
+    double mean = stats->count == 0 ? 0.0 : stats->mean;
+    double stddev = stats->count == 0 ? 0.0 : sqrt(stats->m2 / (double)stats->count);
     double estimated_refresh = mean == 0.0 ? 0.0 : 1000000.0 / mean;
     if (options->json) {
         printf("{\n  \"device\": ");
@@ -950,48 +1160,73 @@ static void print_result(
         json_string(kernel_timestamp_clock(state));
         printf(",\n  \"pixel_format\": ");
         json_string(options->format_name);
-        printf(",\n  \"requested_frame_count\": %u,\n  \"completed_frame_count\": %u,\n",
-               options->frames, completed);
+        printf(",\n  \"requested_frame_count\": %" PRIu64 ",\n  \"completed_frame_count\": %" PRIu64 ",\n",
+               options->stream ? completed : (uint64_t)options->frames, completed);
         printf("  \"first_page_flip_kernel_event_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[0].kernel_event_ns : 0);
+               flips->first_kernel_event_ns);
         printf("  \"last_page_flip_kernel_event_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[completed - 1U].kernel_event_ns : 0);
+               flips->last_kernel_event_ns);
         printf("  \"first_page_flip_callback_monotonic_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[0].callback_monotonic_ns : 0);
+               flips->first_callback_monotonic_ns);
         printf("  \"last_page_flip_callback_monotonic_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[completed - 1U].callback_monotonic_ns : 0);
+               flips->last_callback_monotonic_ns);
         printf("  \"first_page_flip_callback_realtime_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[0].callback_realtime_ns : 0);
+               flips->first_callback_realtime_ns);
         printf("  \"last_page_flip_callback_realtime_ns\": %" PRIu64 ",\n",
-               completed ? flips->events[completed - 1U].callback_realtime_ns : 0);
+               flips->last_callback_realtime_ns);
         printf("  \"mean_vblank_interval_us\": %.6f,\n  \"std_vblank_interval_us\": %.6f,\n",
                mean, stddev);
         printf("  \"minimum_vblank_interval_us\": %.6f,\n  \"maximum_vblank_interval_us\": %.6f,\n",
-               interval_count ? minimum : 0.0, maximum);
+               stats->count ? stats->minimum : 0.0, stats->maximum);
         printf("  \"p95_vblank_interval_us\": %.6f,\n  \"p99_vblank_interval_us\": %.6f,\n",
-               percentile(intervals, interval_count, 0.95),
-               percentile(intervals, interval_count, 0.99));
+               percentile(stats->samples, interval_count, 0.95),
+               percentile(stats->samples, interval_count, 0.99));
         printf("  \"estimated_refresh_hz\": %.9g,\n"
                "  \"interval_tolerance_fraction\": %.6g,\n"
                "  \"intervals_outside_tolerance\": %u,\n"
                "  \"long_interval_count\": %u,\n"
                "  \"short_interval_count\": %u,\n"
                "  \"estimated_dropped_frame_count\": %u,\n",
-               estimated_refresh, interval_tolerance, outside, long_intervals,
-               short_intervals, estimated_dropped);
+               estimated_refresh, interval_tolerance, stats->outside_tolerance,
+               stats->long_intervals, stats->short_intervals, stats->estimated_dropped);
         printf("  \"photodiode\": {\"corner\": ");
         json_string(options->patch_corner);
         printf(", \"size_px\": %u, \"on_value\": %u, \"off_value\": %u, "
-               "\"frame_state\": \"logical_frame_0=on,logical_frame_1=off,"
-               "initial_modeset=off_preroll\"},\n",
+               "\"frame_state\": ",
                options->patch_size, options->patch_on, options->patch_off);
+        json_string(options->stream
+                        ? "stream_metadata"
+                        : "logical_frame_0=on,logical_frame_1=off,initial_modeset=off_preroll");
+        printf("},\n");
         printf("  \"frame_source\": ");
-        json_string(options->frame_file == NULL ? "synthetic-alternating" : "external-raw-pair");
+        json_string(options->stream
+                        ? "continuous-packed-stream"
+                        : options->frame_file == NULL ? "synthetic-alternating" : "external-raw-pair");
         printf(",\n");
-        printf("  \"missed_vblank_count\": %u,\n  \"aborted\": %s,\n  \"restored\": %s,\n",
-               flips->missed, aborted ? "true" : "false", restored ? "true" : "false");
+        printf("  \"missed_vblank_count\": %u,\n"
+               "  \"frame_index_contiguous\": %s,\n"
+               "  \"kernel_sequence_contiguous\": %s,\n"
+               "  \"photodiode_metadata_valid\": %s,\n"
+               "  \"estimated_doubled_frame_count\": %u,\n"
+               "  \"aborted\": %s,\n  \"restored\": %s,\n",
+               flips->missed,
+               flips->frame_indices_contiguous ? "true" : "false",
+               flips->kernel_sequences_contiguous ? "true" : "false",
+               flips->photodiode_metadata_valid ? "true" : "false",
+               stats->short_intervals,
+               aborted ? "true" : "false", restored ? "true" : "false");
+        printf("  \"ownership_lifecycle\": {\"lease_acquire_count\": %u,"
+               " \"modeset_count\": 1, \"restore_count\": %u,"
+               " \"lease_release_count\": %u},\n",
+               options->lease ? 1U : 0U, restored ? 1U : 0U, options->lease ? 1U : 0U);
+        printf("  \"flip_event_count\": %" PRIu64 ",\n  \"flip_events_stored\": %u,\n",
+               completed,
+               flips->event_capacity < completed ? flips->event_capacity : (unsigned int)completed);
         printf("  \"flip_events\": [");
-        for (unsigned int index = 0; index < completed; ++index) {
+        unsigned int stored_events = flips->event_capacity < completed
+                                         ? flips->event_capacity
+                                         : (unsigned int)completed;
+        for (unsigned int index = 0; index < stored_events; ++index) {
             if (index != 0) {
                 putchar(',');
             }
@@ -1012,17 +1247,18 @@ static void print_result(
         printf("device=%s connector=%s crtc=%u mode=%s@%.6g format=%s\n",
                state->device, options->connector, state->crtc_id,
                state->mode.name, mode_refresh(&state->mode), options->format_name);
-        printf("frames=%u/%u source=%s kernel_clock=%s mean_us=%.3f p95_us=%.3f p99_us=%.3f min_us=%.3f max_us=%.3f "
+        printf("frames=%" PRIu64 "/%" PRIu64 " source=%s kernel_clock=%s mean_us=%.3f p95_us=%.3f p99_us=%.3f min_us=%.3f max_us=%.3f "
                "estimated_hz=%.6f outside_tolerance=%u long_intervals=%u short_intervals=%u "
                "estimated_dropped=%u missed=%u restored=%s aborted=%s\n",
-               completed, options->frames, timing_source, kernel_timestamp_clock(state), mean,
-               percentile(intervals, interval_count, 0.95),
-               percentile(intervals, interval_count, 0.99),
-               interval_count ? minimum : 0.0, maximum, estimated_refresh,
-               outside, long_intervals, short_intervals, estimated_dropped,
+               completed, options->stream ? completed : (uint64_t)options->frames,
+               timing_source, kernel_timestamp_clock(state), mean,
+               percentile(stats->samples, interval_count, 0.95),
+               percentile(stats->samples, interval_count, 0.99),
+               stats->count ? stats->minimum : 0.0, stats->maximum, estimated_refresh,
+               stats->outside_tolerance, stats->long_intervals, stats->short_intervals,
+               stats->estimated_dropped,
                flips->missed, restored ? "true" : "false", aborted ? "true" : "false");
     }
-    free(intervals);
 }
 
 static void usage(const char *program) {
@@ -1042,6 +1278,7 @@ static void usage(const char *program) {
             "  --patch-off VALUE   photodiode off value (default 0)\n"
             "  --color R,G,B       hold background color while toggling patch\n"
             "  --frame-file PATH   two packed frames, even/on then odd/off\n"
+            "  --stream            read one continuous packed frame stream from stdin\n"
             "  --lease             acquire a Wayland DRM lease for the connector\n"
             "  --lease-discover    enumerate lease offers without requesting a lease\n"
             "  --probe-only        enumerate resources without modesetting\n"
@@ -1124,6 +1361,7 @@ int main(int argc, char **argv) {
         {"patch-off", required_argument, NULL, 'b'},
         {"color", required_argument, NULL, 'o'},
         {"frame-file", required_argument, NULL, 'F'},
+        {"stream", no_argument, NULL, 's'},
         {"lease", no_argument, NULL, 'L'},
         {"lease-discover", no_argument, NULL, 'D'},
         {"probe-only", no_argument, NULL, 'P'},
@@ -1131,7 +1369,7 @@ int main(int argc, char **argv) {
         {"help", no_argument, NULL, '?'}
     };
     int option;
-    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:F:LDPj", long_options, NULL)) != -1) {
+    while ((option = getopt_long(argc, argv, "d:c:w:h:r:t:f:n:q:p:a:b:o:F:sLDPj", long_options, NULL)) != -1) {
         char *end = NULL;
         switch (option) {
         case 'd': options.device = optarg; break;
@@ -1157,6 +1395,7 @@ int main(int argc, char **argv) {
             options.color_set = true;
             break;
         case 'F': options.frame_file = optarg; break;
+        case 's': options.stream = true; break;
         case 'L': options.lease = true; break;
         case 'D': options.lease_discover = true; break;
         case 'P': options.probe_only = true; break;
@@ -1170,8 +1409,9 @@ int main(int argc, char **argv) {
         }
     }
     if (options.format == 0 || options.width == 0 || options.height == 0 ||
-        options.refresh <= 0.0 || options.tolerance < 0.0 || options.frames == 0 ||
-        options.frames > MAX_FRAMES || options.patch_size == 0 ||
+        options.refresh <= 0.0 || options.tolerance < 0.0 ||
+        (!options.stream && (options.frames == 0 || options.frames > MAX_FRAMES)) ||
+        options.patch_size == 0 ||
         options.patch_on > 255 || options.patch_off > 255 ||
         (strcmp(options.patch_corner, "top_left") != 0 &&
          strcmp(options.patch_corner, "top_right") != 0 &&
@@ -1192,6 +1432,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "--lease-discover cannot be combined with --device\n");
         return 2;
     }
+    if (options.stream && (options.frame_file != NULL || options.color_set || options.probe_only)) {
+        fprintf(stderr, "--stream cannot be combined with --frame-file, --color, or --probe-only\n");
+        return 2;
+    }
 
     if (options.lease_discover) {
         DrmLeaseDiscovery discovery = {0};
@@ -1206,13 +1450,20 @@ int main(int argc, char **argv) {
     }
 
     KmsState state = {.fd = -1};
-    FlipState flips = {0};
+    FlipState flips = {
+        .all_kernel_timestamps = true,
+        .frame_indices_contiguous = true,
+        .kernel_sequences_contiguous = true,
+        .photodiode_metadata_valid = true,
+    };
     DumbBuffer buffers[2] = {0};
     DrmLease lease = {.fd = -1, .state = DRM_LEASE_FAILED};
     bool restored = false;
     bool aborted = false;
     int exit_code = 1;
     install_signal_handlers();
+    interval_stats_init(&flips.kernel_intervals);
+    interval_stats_init(&flips.callback_intervals);
 
     if (options.lease) {
         char lease_error[256] = {0};
@@ -1234,17 +1485,31 @@ int main(int argc, char **argv) {
         exit_code = 0;
         goto cleanup;
     }
-    flips.capacity = options.frames;
-    flips.events = calloc(flips.capacity, sizeof(*flips.events));
-    if (flips.events == NULL) {
-        fprintf(stderr, "cannot allocate bounded flip-event buffer\n");
+    flips.event_capacity = options.stream ? 0U : options.frames;
+    if (flips.event_capacity > 0) {
+        flips.events = calloc(flips.event_capacity, sizeof(*flips.events));
+        if (flips.events == NULL) {
+            fprintf(stderr, "cannot allocate bounded flip-event buffer\n");
+            goto cleanup;
+        }
+    }
+    flips.expected_interval_us = 1000000.0 / mode_refresh(&state.mode);
+    size_t stream_frame_bytes = 0;
+    if (options.stream && read_stream_header(&options, &stream_frame_bytes) != 0) {
         goto cleanup;
     }
     if (create_dumb_buffer(&options, &state, &buffers[0]) != 0 ||
         create_dumb_buffer(&options, &state, &buffers[1]) != 0) {
         goto cleanup;
     }
-    if (options.frame_file == NULL) {
+    StreamFrameMetadata stream_metadata[2] = {0};
+    if (options.stream) {
+        if (load_stream_frame(&options, &buffers[0], 0, 0, &stream_metadata[0], stream_frame_bytes) != 0 ||
+            load_stream_frame(&options, &buffers[1], 1, 1, &stream_metadata[1], stream_frame_bytes) != 0) {
+            fprintf(stderr, "continuous KMS stream requires at least two complete frames\n");
+            goto cleanup;
+        }
+    } else if (options.frame_file == NULL) {
         fill_buffer(&options, &buffers[0], 0);
         fill_buffer(&options, &buffers[1], 1);
     } else if (load_frame_file(&options, buffers) != 0) {
@@ -1267,7 +1532,52 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
     state.modeset_active = true;
-    for (unsigned int frame = 0; frame < options.frames; ++frame) {
+    if (options.stream) {
+        uint64_t frame = 0;
+        while (true) {
+            StreamFrameMetadata *metadata = &stream_metadata[frame % 2U];
+            flips.pending_frame = (KmsFrameMetadata){
+                .frame_index = (unsigned int)metadata->frame_index,
+                .buffer_index = (unsigned int)(frame % 2U),
+                .photodiode_on = metadata->photodiode_on,
+            };
+            flips.pending = true;
+            if (drmModePageFlip(
+                    state.fd,
+                    state.crtc_id,
+                    buffers[flips.pending_frame.buffer_index].framebuffer,
+                    DRM_MODE_PAGE_FLIP_EVENT, &flips) != 0) {
+                flips.missed++;
+                int flip_errno = errno;
+                fprintf(stderr, "continuous KMS page flip failed at frame %" PRIu64 ": %s\n",
+                        frame, strerror(flip_errno));
+                flips.pending = false;
+                goto cleanup;
+            }
+            if (wait_for_flip(&state, &flips) != 0) {
+                goto cleanup;
+            }
+            if (frame == 0) {
+                frame = 1;
+                continue;
+            }
+            int next_frame_result = load_stream_frame(
+                    &options,
+                    &buffers[(frame + 1U) % 2U],
+                    frame + 1U,
+                    frame + 1U,
+                    &stream_metadata[(frame + 1U) % 2U],
+                    stream_frame_bytes
+                );
+            if (next_frame_result != 0) {
+                if (next_frame_result > 0) {
+                    break;
+                }
+                goto cleanup;
+            }
+            frame++;
+        }
+    } else for (unsigned int frame = 0; frame < options.frames; ++frame) {
         flips.pending_frame = kms_frame_metadata(frame);
         flips.pending = true;
         if (drmModePageFlip(
@@ -1313,7 +1623,7 @@ cleanup:
     destroy_dumb_buffer(&state, &buffers[1]);
     destroy_dumb_buffer(&state, &buffers[0]);
     if (exit_code != 0 && options.json) {
-        fprintf(stderr, "KMS probe failed; restored=%s completed=%u\n",
+        fprintf(stderr, "KMS probe failed; restored=%s completed=%" PRIu64 "\n",
                 restored ? "true" : "false", flips.completed);
     }
     free(flips.events);

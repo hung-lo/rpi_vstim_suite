@@ -1,11 +1,12 @@
 # Native sequence transport boundary
 
-The software adapter in `rpi_vstim.display.transport` defines the later native
-ABI without requiring DRM headers on the Mac. A producer submits contiguous
-`producer_sequence` values and immutable packed payloads. The consumer obtains
-a lease, owns the slot until acknowledgement, and then releases the slot for
-reuse. `capacity` bounds ready plus in-flight slots; `finish` drains to EOF and
-`abort` clears immediately with a reason.
+The software adapter in `rpi_vstim.display.transport` defines the frame-state
+boundary without requiring DRM headers on the Mac. A producer submits
+contiguous `producer_sequence` values and immutable packed payloads. The
+native KMS adapter consumes the same states through a bounded pipe-backed
+producer queue and keeps one DRM lease/modeset alive until EOF or interruption.
+`capacity` bounds the software transport; the native stream queue is fixed at
+32 packed frames.
 
 The native implementation should preserve these invariants:
 
@@ -16,8 +17,10 @@ The native implementation should preserve these invariants:
 4. consumer acknowledgement is idempotent;
 5. abort wakes both sides and prevents later publish/consume; and
 6. display timing metadata is carried beside the payload, never inferred from
-   slot order after a drop.
+   slot order after a drop; and
+7. ordinary gray/image boundaries never restore or release the compositor.
 
-The existing native DRM code remains hardware-specific. A Pi build must still
-validate the actual dumb-buffer/GBM import path, page-flip completion, connector
-ownership, and recovery after an interrupted consumer.
+The native DRM code remains hardware-specific. A Pi build must still validate
+the actual dumb-buffer path, page-flip completion, connector ownership,
+continuous frame/index/kernel-sequence accounting, and recovery after an
+interrupted consumer.

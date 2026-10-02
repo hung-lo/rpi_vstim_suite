@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from rpi_vstim.core.config import DisplayConfig
@@ -11,9 +12,10 @@ from rpi_vstim.core.config import DisplayConfig
 from .diagnostics import probe_config
 from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
-from .native_probe import display_result_from_probe, run_native_probe
+from .native_probe import display_result_from_probe, run_native_probe, run_native_sequence
 from .photodiode import PhotodiodePatch
 from .renderer import ProductionFrameRenderer
+from .transport import DisplaySequenceFrame
 
 
 class KmsDisplayBackend:
@@ -109,6 +111,26 @@ class KmsDisplayBackend:
         finally:
             if frame_path is not None:
                 frame_path.unlink(missing_ok=True)
+
+    def present_sequence(self, frames: Iterable[DisplaySequenceFrame]) -> dict[str, object]:
+        if self.config is None:
+            raise RuntimeError("display is not open")
+        try:
+            payload = run_native_sequence(
+                self.config,
+                frames,
+                binary=self.native_binary,
+                patch_size=self.photodiode.size_px,
+                patch_corner=self.photodiode.corner,
+                patch_on=self.photodiode.on_value,
+                patch_off=self.photodiode.off_value,
+                lease=self.use_lease,
+            )
+            self.last_probe_payload = payload
+            return payload
+        except Exception:
+            self.close()
+            raise
 
     def _present(
         self,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import math
 
 from rpi_vstim.core.config import DisplayConfig
@@ -7,6 +8,7 @@ from rpi_vstim.core.timestamps import monotonic_ns, utc_ns
 
 from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
+from .transport import DisplaySequenceFrame
 
 
 class FakeDisplayBackend:
@@ -60,6 +62,31 @@ class FakeDisplayBackend:
             raise RuntimeError("display is not open")
         program = FrameProgram(self.config.width_px, self.config.height_px, self.config.refresh_hz, self.config.pixel_format, frames)
         return self.present(program, sequence_id=f"color:{rgb}")
+
+    def present_sequence(self, frames: Iterable[DisplaySequenceFrame]) -> dict[str, object]:
+        count = 0
+        for frame in frames:
+            metadata = frame.metadata
+            if metadata.logical_frame_index != count:
+                raise ValueError("display sequence frame indices are not contiguous")
+            if metadata.producer_sequence != count:
+                raise ValueError("display sequence producer sequence is not contiguous")
+            if metadata.payload_size != len(frame.payload):
+                raise ValueError("display sequence payload size does not match payload")
+            count += 1
+        if count == 0:
+            raise ValueError("display sequence must contain at least one frame")
+        return {
+            "backend_name": self.name,
+            "requested_frame_count": count,
+            "completed_frame_count": count,
+            "ownership_lifecycle": {
+                "lease_acquire_count": 0,
+                "modeset_count": 0,
+                "restore_count": 0,
+                "lease_release_count": 0,
+            },
+        }
 
     def close(self) -> None:
         self.config = None

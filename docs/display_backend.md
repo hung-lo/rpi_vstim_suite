@@ -1,10 +1,10 @@
 # Display backend
 
 The display contract is backend-neutral. `FakeDisplayBackend` remains the
-backend used by software simulation. The Phase 3 slice adds a native
-libdrm-backed `KmsDisplayBackend` for bounded alternating-pattern/color and
-prepared-frame-pair presentation, with explicit timing results and fail-closed
-connector/mode selection.
+backend used by software simulation. The native libdrm-backed
+`KmsDisplayBackend` supports bounded single-epoch smoke calls and the
+continuous `present_sequence()` path used for real protocols, with explicit
+timing results and fail-closed connector/mode selection.
 
 ## Configurable display roles
 
@@ -61,12 +61,14 @@ DRM master; diagnose that ownership first.
 ## Timing boundary
 
 The native layer owns dumb-buffer allocation, synchronous page-flip events,
-kernel event timestamps, callback-dispatch diagnostics, abort handling, and restoration of the original
-CRTC state. `ProductionFrameRenderer` converts prepared RGB888 frames into
-bounded RGB565 or XRGB8888 scanout buffers, applies the photodiode patch before
-submission, and passes a two-frame packed pair to the same native leased KMS
-path. The pair is prepared outside the page-flip loop; no per-frame Python
-allocation occurs in that timing-critical loop.
+kernel event timestamps, callback-dispatch diagnostics, abort handling, and
+restoration of the original CRTC state. A continuous stream acquires the lease
+once, modesets once, consumes packed frame states through two scanout buffers,
+and restores/releases once after EOF or interruption. No gray/image epoch
+reacquires DRM ownership. `ProductionFrameRenderer` converts prepared RGB888
+frames into bounded RGB565 or XRGB8888 payloads and applies the photodiode
+patch before submission; the bounded Python producer queue never represents an
+entire experiment in memory.
 
 Python timing helpers report median, p95, p99, min/max, estimated refresh, and
 intervals outside tolerance, long/short intervals, and estimated dropped

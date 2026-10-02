@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tracemalloc
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -21,6 +22,7 @@ from rpi_vstim.core.assets import AssetPreparer, AssetResolver
 from rpi_vstim.core.config import Config, load_config
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
+from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 from rpi_vstim.display.renderer import ProductionFrameRenderer
 
 EXPECTED_NAMES = tuple(f"natimg_center_{index:04d}.png" for index in range(2800))
@@ -275,27 +277,82 @@ def show_subset(
             config.photodiode.off_value,
         ),
     )
-    results = []
+    epochs = []
+    frame_count = 0
+
+    def stream_frames() -> Iterator[DisplaySequenceFrame]:
+        nonlocal frame_count
+        if display.renderer is None:
+            raise RuntimeError("KMS renderer was not initialized")
+        gray_rgb = bytes((127,)) * (config.display.width_px * config.display.height_px * 3)
+
+        def epoch(
+            event_id: str,
+            sequence_id: str,
+            asset_key: str,
+            payload: bytes,
+            state: str,
+            count: int,
+        ) -> Iterator[DisplaySequenceFrame]:
+            nonlocal frame_count
+            epochs.append({
+                "event_id": event_id,
+                "sequence_id": sequence_id,
+                "asset_key": asset_key,
+                "start_frame": frame_count,
+                "frame_count": count,
+                "photodiode_state": state,
+            })
+            for _ in range(count):
+                metadata = DisplaySequenceMetadata(
+                    logical_frame_index=frame_count,
+                    event_id=event_id,
+                    sequence_id=sequence_id,
+                    asset_key=asset_key,
+                    photodiode_state=state,
+                    payload_size=len(payload),
+                    producer_sequence=frame_count,
+                )
+                yield DisplaySequenceFrame(metadata, payload)
+                frame_count += 1
+
+        gray = display.renderer.prepare_payload(
+            gray_rgb,
+            photodiode_state="off",
+            asset_key="gray:127",
+        )
+        yield from epoch("initial-gray", "initial-gray", "gray:127", gray, "off", gray_frames)
+        for index, name in enumerate(names):
+            prepared = preparer.prepare(name)
+            payload = display.renderer.prepare_payload(
+                prepared.rgb888,
+                photodiode_state="on",
+                asset_key=f"{name}:on",
+            )
+            yield from epoch(name, name, name, payload, "on", frames)
+            if index < len(names) - 1:
+                yield from epoch(
+                    f"iti-{index + 1}",
+                    f"iti-{index + 1}",
+                    "gray:127",
+                    gray,
+                    "off",
+                    gray_frames,
+                )
+        yield from epoch("final-gray", "final-gray", "gray:127", gray, "off", gray_frames)
+
     try:
         display.open(config.display)
-        results.append(display.present_color((127, 127, 127), frames=gray_frames))
-        for name in names:
-            prepared = preparer.prepare(name)
-            results.append(
-                display.present_rgb_pair(
-                    prepared.rgb888,
-                    prepared.rgb888,
-                    frames=frames,
-                    sequence_id=name,
-                )
-            )
-        results.append(display.present_color((127, 127, 127), frames=gray_frames))
+        result = display.present_sequence(stream_frames())
     finally:
         display.close()
+    result["epochs"] = epochs
+    result["epoch_count"] = len(epochs)
+    result["frame_state_count"] = frame_count
     payload = {
         "session_root": str(session_root),
         "selected_images": selected,
-        "display_results": [result.__dict__ for result in results],
+        "display_results": [result],
     }
     (session_root / "display_results.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"

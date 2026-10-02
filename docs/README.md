@@ -28,6 +28,10 @@ the camera monitor. Physical KMS, camera topology and capture, experiment SSD
 identity/throughput, GPIO/reward/lick, and photodiode validation are deferred
 until the rig is available. The SD card is not production-storage acceptance.
 
+The current Phase 4 continuous-KMS natural-image issue and validation status is
+tracked in
+[pi5_phase4_continuous_kms_natural_image_2026-10-02.md](hardware/pi5_phase4_continuous_kms_natural_image_2026-10-02.md).
+
 The [source parity matrix](source_parity_matrix.md) records frozen-reference
 behavior and intentional differences. Frozen reference repositories remain
 read-only inputs.
