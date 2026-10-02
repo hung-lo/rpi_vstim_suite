@@ -327,23 +327,28 @@ def main() -> int:
     width = args.width or (config.display.width_px if args.config else DEFAULT_DISPLAY_SIZE[0])
     height = args.height or (config.display.height_px if args.config else DEFAULT_DISPLAY_SIZE[1])
     archive_report = inspect_archive(args.archive) if args.archive else None
-    report = validate_assets(root, width=width, height=height, pixel_format=args.pixel_format)
-    report["asset_root"] = str(root.resolve())
-    report["archive"] = archive_report
     if args.display:
         if not args.config:
             parser.error("--display requires --config")
         indices = tuple(int(value) for value in args.indices.split(","))
         names = tuple(EXPECTED_NAMES[index] for index in indices)
-        report["display_session"] = show_subset(
-            config,
-            root,
-            names,
-            frames=args.frames,
-            gray_frames=args.gray_frames,
-            session_root=args.session_root,
-            binary=args.binary,
-        )
+        report = {
+            "asset_root": str(root.resolve()),
+            "archive": archive_report,
+            "display_session": show_subset(
+                config,
+                root,
+                names,
+                frames=args.frames,
+                gray_frames=args.gray_frames,
+                session_root=args.session_root,
+                binary=args.binary,
+            ),
+        }
+    else:
+        report = validate_assets(root, width=width, height=height, pixel_format=args.pixel_format)
+        report["asset_root"] = str(root.resolve())
+        report["archive"] = archive_report
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
     return 0
 
