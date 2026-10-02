@@ -19,6 +19,15 @@ def test_example_toml_loads_and_preserves_sections():
     assert config.protocol.name == "natural-images"
 
 
+def test_pi5_provisional_gpio_roles_are_configured_without_polarity_claims():
+    config = load_config(Path("config/rigs/pi5_dual_display_provisional.example.toml"))
+    assert config.hardware.backend == "lgpio"
+    assert config.hardware.output_line("reward").bcm_pin == 19
+    assert config.hardware.output_line("vacuum").bcm_pin == 25
+    assert config.hardware.output_line("reward").active_level is None
+    assert config.hardware.output_line("vacuum").active_level is None
+
+
 def test_load_config_resolves_relative_paths_from_config_file(tmp_path):
     asset_root = tmp_path / "assets"
     asset_root.mkdir()

@@ -19,3 +19,13 @@ eye_distance_cm = 16.0
 [paths]
 # Resolved relative to this config file; keeps the production corpus in the checkout.
 asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
+[hardware]
+# Prototype output-line validation only. The real reward/vacuum circuits are not attached.
+backend = "lgpio"
+chip = 0
+reward_pin_bcm = 19
+suction_pin_bcm = 25
+reward_initial_level = 0
+suction_initial_level = 0
+# Active polarity is intentionally unset until the final circuits are validated.

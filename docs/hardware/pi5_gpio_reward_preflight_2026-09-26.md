@@ -34,12 +34,13 @@ The current configuration model defines these software defaults in
 | lick | 26 | `HardwareConfig.lick_pin_bcm`; software default only |
 | TTL | unset | `HardwareConfig.ttl_pin_bcm = None` |
 
-The Pi preflight display/camera fixture does not define `[hardware]`, so it
-inherits those defaults. Its backend remains non-actuating: the current
-`LgpioBackend`, `RewardController`, `SuctionController`, `LickInput`, and
-`TtlOutput` are placeholders, while the exercised runtime used the simulated
-hardware boundary. No current unified GPIO mapping should be treated as an
-authoritative harness map.
+The Pi 5 provisional fixture now defines `[hardware]` for the two candidate
+output lines and uses the native `LgpioBackend` for the dedicated line
+validator. `RewardController`, `SuctionController`, `LickInput`, and
+`TtlOutput` remain broader protocol/worker placeholders, while the ordinary
+desktop/runtime tests continue to use the simulated hardware boundary. No
+current unified GPIO mapping beyond the explicitly tested prototype lines
+should be treated as an authoritative final harness map.
 
 ## Frozen/reference repository evidence
 
@@ -121,3 +122,51 @@ legacy agreement is not enough to establish the physical harness assignment.
 Until those checks are complete, reward, suction, lick, TTL, active-high, and
 active-low behavior remain unvalidated. No undocumented wiring is inferred by
 this report.
+
+## Prototype GPIO output-line validation — 2026-10-02
+
+The prototype validation scope is intentionally limited to the two unconnected
+indicator lines:
+
+| BCM GPIO | Electrical output control | Candidate role | Real circuit | Polarity | Final rig |
+|---:|---|---|---|---|---|
+| 19 | Physically validated on prototype | reward | Not connected | Not validated | Required |
+| 25 | Physically validated on prototype | vacuum | Not connected | Not validated | Required |
+
+The production-compatible Pi 5 backend uses native `lgpio`, resolves these
+lines from `[hardware]` configuration, claims only the requested semantic
+role, starts at the configured electrical level, records monotonic transition
+timestamps/readback when available, and releases ownership on normal,
+exception, or SIGINT cleanup. `reward_active_level` and
+`suction_active_level` remain unset; HIGH and LOW therefore mean only
+electrical levels, never actuator ON/OFF.
+
+The real prototype line checks are run independently with
+`scripts/validate_gpio_output.py`: one role per process, no simultaneous
+toggle, three one-second HIGH/LOW cycles, and 50 ms pulses in both electrical
+directions. They are output-line checks only. No reward pump or vacuum circuit
+was connected or actuated, and this evidence must not be promoted to final-rig
+reward/vacuum acceptance. The eventual breakout mapping and polarity remain
+rig-configurable.
+
+### 2026-10-02 Pi results
+
+The checks ran on the prototype Pi 5 using the native `lgpio` backend and
+`config/rigs/pi5_dual_display_provisional.example.toml`:
+
+- GPIO19 / `reward`: three visually confirmed blinks; every HIGH/LOW readback
+  matched; final electrical LOW; clean release; no warnings.
+- GPIO25 / `vacuum`: three visually confirmed blinks; every HIGH/LOW readback
+  matched; final electrical LOW; clean release; no warnings.
+- Both lines independently produced LOW→HIGH and HIGH→LOW 50 ms pulses. The
+  measured userspace intervals were approximately 50.07–50.08 ms; this is not
+  a microsecond-precision timing claim.
+- Normal start/stop, intentional exception cleanup, and SIGINT cleanup passed
+  independently for both lines. Each interruption reported `release_success`.
+- A fresh process reacquired each line after cleanup, confirming no lingering
+  GPIO consumer.
+
+The first attempted claim exposed that this Pi's `lgpio` build implements the
+four-argument `gpio_claim_output(handle, flags, gpio, level)` form; the
+backend was corrected before any line cycle ran. No other BCM GPIO was
+acquired, toggled, or tested.

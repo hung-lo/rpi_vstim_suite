@@ -62,10 +62,36 @@ class HardwareConfig:
     chip: int = 0
     reward_pin_bcm: int = 19
     suction_pin_bcm: int = 25
+    reward_initial_level: int = 0
+    suction_initial_level: int = 0
+    reward_active_level: int | None = None
+    suction_active_level: int | None = None
     lick_pin_bcm: int = 26
     ttl_pin_bcm: int | None = None
     release_stable_ms: int = RELEASE_STABLE_MS
     min_classified_lick_interval_ms: int = MIN_CLASSIFIED_LICK_INTERVAL_MS
+
+    def output_line(self, role: str):
+        """Resolve only the supported electrical output roles from rig config."""
+        from rpi_vstim.hardware.models import OutputLineConfig
+
+        if role == "reward":
+            return OutputLineConfig(
+                role,
+                self.chip,
+                self.reward_pin_bcm,
+                self.reward_initial_level,
+                self.reward_active_level,
+            )
+        if role in {"vacuum", "suction"}:
+            return OutputLineConfig(
+                "vacuum",
+                self.chip,
+                self.suction_pin_bcm,
+                self.suction_initial_level,
+                self.suction_active_level,
+            )
+        raise ConfigError(f"unsupported output role: {role}")
 
 
 @dataclass(frozen=True)
@@ -164,6 +190,18 @@ class Config:
             pins["ttl"] = self.hardware.ttl_pin_bcm
         if any(not isinstance(pin, int) or pin < 0 or pin > 27 for pin in pins.values()):
             raise ConfigError("BCM pins must be between 0 and 27")
+        for name, level in {
+            "reward_initial_level": self.hardware.reward_initial_level,
+            "suction_initial_level": self.hardware.suction_initial_level,
+        }.items():
+            if type(level) is not int or level not in (0, 1):
+                raise ConfigError(f"{name} must be electrical LOW (0) or HIGH (1)")
+        for name, level in {
+            "reward_active_level": self.hardware.reward_active_level,
+            "suction_active_level": self.hardware.suction_active_level,
+        }.items():
+            if level is not None and (type(level) is not int or level not in (0, 1)):
+                raise ConfigError(f"{name} must be 0, 1, or unset")
         if len(set(pins.values())) != len(pins):
             raise ConfigError("GPIO pins must be unique")
         if (
