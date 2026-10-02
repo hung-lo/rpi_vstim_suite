@@ -130,3 +130,20 @@ The branch is suitable for that final in-person physical smoke, but the
 observed four isolated display timing gaps under concurrent camera load should
 remain an open reliability observation before claiming zero-drop long-run
 acceptance.
+
+## Final integrated physical lick attempt — 2026-10-02
+
+The requested integrated run started the production KMS display on HDMI-A-2 /
+connector 42, both real cameras, and the GPIO26/27 raw/classified monitor.
+The display completed 4,200/4,200 frames with contiguous frame and kernel
+sequences, zero estimated drops/doubles, one acquire/modeset/restore/release
+lifecycle, and successful restoration. Both camera streams decoded cleanly
+(2,119 and 2,120 encoded packets), and GPIO26/27 ended LOW and released with
+no orphan processes.
+
+The operator phase schedule was presented as LEFT 10, pause, RIGHT 10, but the
+session recorded zero raw edges and zero classified events on both channels.
+Therefore this attempt is **not accepted** as physical lick integration and
+does not demonstrate event-log alignment, cross-talk performance, or physical
+10/10 counts. The run's `accepted` result was false; no classifier or wiring
+conclusion is drawn from the absence of edges.

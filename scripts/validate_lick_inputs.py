@@ -33,6 +33,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--right-seconds", type=float, default=25.0)
     parser.add_argument("--final-seconds", type=float, default=3.0)
     parser.add_argument("--channel", choices=("both", "left", "right"), default="both")
+    parser.add_argument("--expected-licks", type=int, default=20)
     parser.add_argument("--integrated", action="store_true")
     parser.add_argument("--integrated-seconds", type=float, default=10.0)
     parser.add_argument("--display-binary", type=Path, default=Path("native/kms_display/kms_probe"))
@@ -175,6 +176,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     )
     if any(value <= 0 for value in durations):
         raise ValueError("validation durations must be positive")
+    if args.expected_licks < 0:
+        raise ValueError("expected lick count must not be negative")
     args.output_root.mkdir(parents=True, exist_ok=True)
     raw_path = args.output_root / "raw_edges.jsonl"
     classified_path = args.output_root / "classified_licks.jsonl"
@@ -207,7 +210,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 phases["idle"] = (phases["idle"][0], time.monotonic_ns())
                 if args.channel in {"both", "left"}:
                     phases["left"] = (time.monotonic_ns(), 0)
-                    print("LEFT: perform exactly 20 contacts now", flush=True)
+                    print(f"LEFT: perform exactly {args.expected_licks} contacts now", flush=True)
                     time.sleep(args.left_seconds)
                     phases["left"] = (phases["left"][0], time.monotonic_ns())
                 if args.channel == "both":
@@ -217,7 +220,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                     phases["pause"] = (phases["pause"][0], time.monotonic_ns())
                 if args.channel in {"both", "right"}:
                     phases["right"] = (time.monotonic_ns(), 0)
-                    print("RIGHT: perform exactly 20 contacts now", flush=True)
+                    print(f"RIGHT: perform exactly {args.expected_licks} contacts now", flush=True)
                     time.sleep(args.right_seconds)
                     phases["right"] = (phases["right"][0], time.monotonic_ns())
                 phases["final"] = (time.monotonic_ns(), 0)
@@ -236,6 +239,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "active_level": config.hardware.lick_active_level,
             "release_stable_ms": config.hardware.release_stable_ms,
             "min_classified_lick_interval_ms": config.hardware.min_classified_lick_interval_ms,
+            "expected_licks_per_selected_channel": args.expected_licks,
             "raw_edge_count": raw_by_channel,
             "classified_lick_count": classified_by_channel,
             "raw_edge_count_total": len(recorder.raw_edges),
@@ -261,8 +265,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         }
         if not args.integrated:
             expected = {
-                "lick_left": 20 if args.channel in {"both", "left"} else 0,
-                "lick_right": 20 if args.channel in {"both", "right"} else 0,
+                "lick_left": args.expected_licks if args.channel in {"both", "left"} else 0,
+                "lick_right": args.expected_licks if args.channel in {"both", "right"} else 0,
             }
             result["accepted"] = (
                 classified_by_channel == expected

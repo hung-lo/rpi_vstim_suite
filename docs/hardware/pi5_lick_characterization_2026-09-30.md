@@ -123,3 +123,13 @@ lick contacts occurred during this integrated smoke window, so its raw and
 classified lick counts were both zero; this does not claim physical integrated
 event logging acceptance. The separate dual-input monitor test and the 20/20
 physical runs verify the raw/classified stream separation and classification.
+
+## Integrated physical lick attempt — 2026-10-02
+
+An integrated attempt ran the HDMI-A-2 / connector 42 KMS display, both real
+cameras, and GPIO26/27 logging while presenting LEFT 10, pause, and RIGHT 10
+operator phases. The display and camera paths completed cleanly and both lick
+inputs returned LOW and released, but the capture contained zero raw GPIO edges
+and zero classified licks. This attempt is not physical lick acceptance; the
+10/10 integrated event-log check must be repeated while the operator is
+actually making the requested contacts.
