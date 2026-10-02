@@ -43,3 +43,22 @@ def test_invalid_lick_timing_is_rejected():
 def test_requested_defaults_are_explicit():
     assert MIN_CLASSIFIED_LICK_INTERVAL_MS == 70
     assert RELEASE_STABLE_MS == 25
+
+
+def test_recorded_bounce_shaped_bursts_produce_one_lick_each():
+    classifier = LickClassifier()
+    ms = 1_000_000
+    classified = 0
+    for burst in range(20):
+        base = burst * 200 * ms
+        for level, offset in ((1, 30), (0, 35), (1, 40), (0, 45), (1, 50), (0, 100)):
+            classified += classifier.process_edge(level, base + offset * ms)
+    assert classified == 20
+
+
+def test_first_contact_starts_a_fresh_release_timer():
+    classifier = LickClassifier()
+    ms = 1_000_000
+    assert classifier.process_edge(1, 5_000 * ms)
+    assert not classifier.process_edge(0, 5_001 * ms)
+    assert not classifier.process_edge(1, 5_001 * ms + 1_000)

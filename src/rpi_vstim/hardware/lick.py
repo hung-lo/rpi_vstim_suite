@@ -1,6 +1,7 @@
 """Lick contact debouncing and physiological event classification."""
 
 MIN_CLASSIFIED_LICK_INTERVAL_MS = 70
+# Measured 2026-09-30: nearly all GPIO26/27 bounce gaps were under 20 ms.
 RELEASE_STABLE_MS = 25
 
 
@@ -46,6 +47,9 @@ class LickClassifier:
             ):
                 return False
             self._latched = False
+            self._low_since_ns = None
+        else:
+            # The initial idle timestamp is not the release time for this contact.
             self._low_since_ns = None
 
         self._latched = True

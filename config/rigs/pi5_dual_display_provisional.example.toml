@@ -30,3 +30,9 @@ suction_pin_bcm = 25
 reward_initial_level = 0
 suction_initial_level = 0
 # Active polarity is intentionally unset until the final circuits are validated.
+lick_pin_bcm = 26
+lick_right_pin_bcm = 27
+lick_idle_level = 0
+lick_active_level = 1
+release_stable_ms = 25
+min_classified_lick_interval_ms = 70

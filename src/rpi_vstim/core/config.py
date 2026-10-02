@@ -67,6 +67,9 @@ class HardwareConfig:
     reward_active_level: int | None = None
     suction_active_level: int | None = None
     lick_pin_bcm: int = 26
+    lick_right_pin_bcm: int = 27
+    lick_idle_level: int = 0
+    lick_active_level: int = 1
     ttl_pin_bcm: int | None = None
     release_stable_ms: int = RELEASE_STABLE_MS
     min_classified_lick_interval_ms: int = MIN_CLASSIFIED_LICK_INTERVAL_MS
@@ -185,6 +188,7 @@ class Config:
             "reward": self.hardware.reward_pin_bcm,
             "suction": self.hardware.suction_pin_bcm,
             "lick": self.hardware.lick_pin_bcm,
+            "lick_right": self.hardware.lick_right_pin_bcm,
         }
         if self.hardware.ttl_pin_bcm is not None:
             pins["ttl"] = self.hardware.ttl_pin_bcm
@@ -202,6 +206,8 @@ class Config:
         }.items():
             if level is not None and (type(level) is not int or level not in (0, 1)):
                 raise ConfigError(f"{name} must be 0, 1, or unset")
+        if (self.hardware.lick_idle_level, self.hardware.lick_active_level) != (0, 1):
+            raise ConfigError("lick inputs must be configured idle LOW (0) and active HIGH (1)")
         if len(set(pins.values())) != len(pins):
             raise ConfigError("GPIO pins must be unique")
         if (

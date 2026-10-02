@@ -80,3 +80,46 @@ The short integrated run used only GPIO26 and GPIO27 while starting both
 
 Temporary outputs were written under `/tmp/rpi-vstim-integrated-lick-e8k9gj5z`
 on the Pi.
+
+## Classified dual-input validation — 2026-10-02
+
+The production input monitor now owns BCM26 and BCM27 together, records every
+raw both-edge alert, and classifies at most one event per released contact
+burst. The canonical configuration is:
+
+| Channel | BCM GPIO | Idle | Active | Release stable | Minimum classified interval |
+|---|---:|---:|---:|---:|---:|
+| lick_left | 26 | LOW | HIGH | 25 ms | 70 ms |
+| lick_right | 27 | LOW | HIGH | 25 ms | 70 ms |
+
+The first separated software run exposed and fixed a state-machine bug: the
+initial idle timestamp could be reused as the first release timestamp. The
+recorded raw traces replayed as 20 LEFT and 20 RIGHT after the fix. A fresh
+physical validation then passed:
+
+| Run | Classified | Raw edges | Cross-talk | Final level | Released |
+|---|---:|---:|---:|---|---|
+| LEFT on GPIO26 | 20 | 289 | 0 | LOW on both | Yes |
+| RIGHT on GPIO27 | 20 | 256 | 0 | LOW on both | Yes |
+
+Both runs used the corrected classifier with no reward/vacuum output access;
+GPIO15 was not requested, configured, or touched. Raw edges and classified
+events were written to separate JSONL streams, and callback errors were empty.
+
+## Integrated display/camera smoke — 2026-10-02
+
+A short run also started the leased display renderer and both camera workers
+while the dual lick monitor held BCM26/27. The completed display portion used
+HDMI-A-2 / connector 42 for 300 frames and reported:
+
+- contiguous frame and kernel sequences;
+- zero missed, dropped, doubled, short, or long intervals;
+- one lease acquire, one modeset, one restore, and one lease release;
+- final display restoration successful;
+- photodiode metadata valid.
+
+The cameras produced H.264 output (974,848 and 942,080 bytes). No physical
+lick contacts occurred during this integrated smoke window, so its raw and
+classified lick counts were both zero; this does not claim physical integrated
+event logging acceptance. The separate dual-input monitor test and the 20/20
+physical runs verify the raw/classified stream separation and classification.
