@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tomllib
 from dataclasses import asdict, dataclass, field, fields, replace
@@ -14,6 +15,25 @@ from rpi_vstim.hardware.lick import MIN_CLASSIFIED_LICK_INTERVAL_MS, RELEASE_STA
 
 class ConfigError(ValueError):
     """Raised for invalid or unsafe configuration."""
+
+
+_LEGACY_REWARD_FIELDS = {
+    "reward_num_pulses",
+    "reward_pulse_count",
+    "reward_pulse_on_sec",
+    "reward_pulse_off_sec",
+    "pulse_index",
+}
+
+
+def _legacy_reward_fields(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        return set(value).intersection(_LEGACY_REWARD_FIELDS) | set().union(
+            *(_legacy_reward_fields(item) for item in value.values())
+        )
+    if isinstance(value, (list, tuple)):
+        return set().union(*(_legacy_reward_fields(item) for item in value))
+    return set()
 
 
 @dataclass(frozen=True)
@@ -66,6 +86,9 @@ class HardwareConfig:
     suction_initial_level: int = 0
     reward_active_level: int | None = None
     suction_active_level: int | None = None
+    reward_open_duration_ms: float | None = None
+    reward_target_ul: float | None = None
+    reward_calibration_profile: Path | None = None
     lick_pin_bcm: int = 26
     lick_right_pin_bcm: int = 27
     lick_idle_level: int = 0
@@ -80,12 +103,14 @@ class HardwareConfig:
 
         if role == "reward":
             return OutputLineConfig(
-                role,
+                "reward_left",
                 self.chip,
                 self.reward_pin_bcm,
                 self.reward_initial_level,
                 self.reward_active_level,
             )
+        if role == "reward_left":
+            return self.output_line("reward")
         if role in {"vacuum", "suction"}:
             return OutputLineConfig(
                 "vacuum",
@@ -221,6 +246,26 @@ class Config:
             raise ConfigError(f"unsupported hardware backend: {self.hardware.backend}")
         if not isinstance(self.hardware.chip, int) or self.hardware.chip < 0:
             raise ConfigError("hardware chip must be a non-negative integer")
+        if self.hardware.reward_open_duration_ms is not None and (
+            type(self.hardware.reward_open_duration_ms) not in (int, float)
+            or not math.isfinite(self.hardware.reward_open_duration_ms)
+            or self.hardware.reward_open_duration_ms <= 0
+        ):
+            raise ConfigError("reward_open_duration_ms must be finite and positive")
+        if self.hardware.reward_target_ul is not None and (
+            type(self.hardware.reward_target_ul) not in (int, float)
+            or not math.isfinite(self.hardware.reward_target_ul)
+            or self.hardware.reward_target_ul <= 0
+        ):
+            raise ConfigError("reward_target_ul must be positive")
+        if (self.hardware.reward_target_ul is None) != (
+            self.hardware.reward_calibration_profile is None
+        ):
+            raise ConfigError(
+                "reward_target_ul and reward_calibration_profile must be provided together"
+            )
+        if self.hardware.reward_open_duration_ms is not None and self.hardware.reward_target_ul is not None:
+            raise ConfigError("choose reward_open_duration_ms or calibrated reward_target_ul")
         if not 1 <= self.telemetry.port <= 65535:
             raise ConfigError("telemetry port must be between 1 and 65535")
         if self.telemetry.required and not self.telemetry.enabled:
@@ -313,9 +358,15 @@ def _replace_section(current: Any, values: dict[str, Any], section: str) -> Any:
     if unknown:
         raise ConfigError(f"unknown {section} setting(s): {', '.join(sorted(unknown))}")
     converted = dict(values)
-    for name in known & {"output_root", "cache_root", "asset_root", "reward_state_root"}:
+    for name in known & {
+        "output_root",
+        "cache_root",
+        "asset_root",
+        "reward_state_root",
+        "reward_calibration_profile",
+    }:
         if name in converted:
-            converted[name] = Path(converted[name])
+            converted[name] = None if converted[name] is None else Path(converted[name])
     return replace(current, **converted)
 
 
@@ -360,6 +411,13 @@ def config_from_mapping(raw: dict[str, Any]) -> Config:
         raise ConfigError(f"unknown top-level setting(s): {', '.join(sorted(unknown))}")
     if "gpio" in raw and "hardware" in raw:
         raise ConfigError("use only one of [gpio] or [hardware]")
+    found = sorted(_legacy_reward_fields(raw))
+    if found:
+        raise ConfigError(
+            "legacy six-pulse reward setting(s) are not accepted: "
+            + ", ".join(found)
+            + "; use reward_open_duration_ms or a calibrated reward_target_ul/profile"
+        )
     config = Config()
     for name in ("paths", "photodiode", "telemetry", "session"):
         if name in raw:
@@ -394,6 +452,15 @@ def load_config(path: Path | str | None = None) -> Config:
         for name in ("output_root", "cache_root", "asset_root", "reward_state_root")
         if not (value := getattr(config.paths, name)).is_absolute()
     }
+    calibration_profile = config.hardware.reward_calibration_profile
+    if calibration_profile is not None and not calibration_profile.is_absolute():
+        config = replace(
+            config,
+            hardware=replace(
+                config.hardware,
+                reward_calibration_profile=(config_path.parent / calibration_profile).resolve(),
+            ),
+        )
     if relative_paths:
         config = replace(config, paths=replace(config.paths, **relative_paths))
     return config

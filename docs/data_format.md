@@ -23,3 +23,11 @@ roles carry frozen-source trajectory metadata and ten-block software plans use
 an exact 90/10 schedule per eligible role. A session is not complete unless
 its final status explicitly records the terminal lifecycle and any degraded or
 cleanup errors.
+
+When hardware reward delivery is enabled, the event log records one
+`reward_command`, one `reward_valve_on`, one `reward_valve_off`, and one
+`reward_complete` for each behavioral reward. Each event carries the semantic
+role, configured BCM identity, requested continuous-open duration, monotonic
+timestamp, and command/session/trial identity; off/complete events also carry
+the measured software ON interval. Raw GPIO transitions are not represented as
+a six-pulse behavioral reward.

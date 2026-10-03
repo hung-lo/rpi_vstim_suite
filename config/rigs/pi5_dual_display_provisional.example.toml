@@ -30,6 +30,10 @@ suction_pin_bcm = 25
 reward_initial_level = 0
 suction_initial_level = 0
 # Active polarity is intentionally unset until the final circuits are validated.
+# After physical polarity and water calibration are complete, choose one:
+# reward_open_duration_ms = 100.0
+# reward_target_ul = 3.0
+# reward_calibration_profile = "../../calibrations/reward/rig-specific.json"
 lick_pin_bcm = 26
 lick_right_pin_bcm = 27
 lick_idle_level = 0

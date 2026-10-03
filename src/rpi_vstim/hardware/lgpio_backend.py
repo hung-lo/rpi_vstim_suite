@@ -52,7 +52,7 @@ class LgpioBackend:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        normalized = tuple("vacuum" if role == "suction" else role for role in roles)
+        normalized = tuple(self._normalize_role(role) for role in roles)
         if not normalized or len(set(normalized)) != len(normalized):
             raise ValueError("GPIO output roles must be unique and non-empty")
         if any(role not in self._allowed_roles for role in normalized):
@@ -71,6 +71,10 @@ class LgpioBackend:
     def started(self) -> bool:
         return self._chip_handle is not None
 
+    @staticmethod
+    def _normalize_role(role: str) -> str:
+        return {"suction": "vacuum", "reward_left": "reward"}.get(role, role)
+
     def _load_api(self) -> Any:
         if self._api is not None:
             return self._api
@@ -82,10 +86,14 @@ class LgpioBackend:
         return lgpio
 
     def _line(self, role: str) -> OutputLineConfig:
-        normalized = "vacuum" if role == "suction" else role
+        normalized = self._normalize_role(role)
         if normalized not in self._roles:
             raise LgpioBackendError(f"GPIO role is not owned by this session: {role}")
         return self._hardware_config.output_line(normalized)
+
+    def line_config(self, role: str) -> OutputLineConfig:
+        """Return the resolved line without exposing GPIO numbers to callers."""
+        return self._line(role)
 
     @staticmethod
     def _level(level: int) -> int:

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import csv
+import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, TextIO
@@ -51,8 +50,9 @@ class SessionContext:
 
 
 class SessionOutput:
-    def __init__(self, context: SessionContext) -> None:
+    def __init__(self, context: SessionContext, reward_resolution: Any | None = None) -> None:
         self.context = context
+        self._reward_resolution = reward_resolution
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
         self._display_stream: TextIO | None = None
@@ -73,7 +73,10 @@ class SessionOutput:
             self.context.session_root / "resolved_config.json",
             versioned(self.context.resolved_config, "config"),
         )
-        atomic_write_json(self.context.session_root / "provenance.json", self.context.host_provenance)
+        provenance = dict(self.context.host_provenance)
+        if self._reward_resolution is not None:
+            provenance.update(self._reward_resolution.provenance_dict())
+        atomic_write_json(self.context.session_root / "provenance.json", provenance)
         self._manifest = {
             "schema_version": 2,
             "data_format_version": "phase4-v1",
@@ -195,6 +198,18 @@ class SessionOutput:
             versioned(value, "resource_summary"),
         )
 
+    def write_reward_provenance(self, resolution: Any) -> None:
+        """Persist the frozen reward duration and calibration identity."""
+        provenance_path = self.context.session_root / "provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        values = (
+            resolution.provenance_dict()
+            if hasattr(resolution, "provenance_dict")
+            else dict(resolution)
+        )
+        provenance.update(values)
+        atomic_write_json(provenance_path, provenance)
+
     def record_event(
         self,
         event: str,
@@ -213,6 +228,15 @@ class SessionOutput:
                 "timestamp_utc_ns": utc_ns(),
                 "detail": detail,
             }
+        )
+
+    def record_reward_event(self, event: Any) -> None:
+        """Write a hardware reward event without changing the CSV schema."""
+        value = event.as_dict() if hasattr(event, "as_dict") else dict(event)
+        self.record_event(
+            str(value["event"]),
+            sequence_id=str(value.get("command_id", "")),
+            detail=json.dumps(value, sort_keys=True, separators=(",", ":")),
         )
 
     def update_status(
@@ -289,7 +313,15 @@ def new_session(
         source_commit=source_commit,
         host_provenance=collect_provenance(source_commit=source_commit),
     )
-    return SessionOutput(context)
+    reward_resolution = None
+    if (
+        config.hardware.reward_open_duration_ms is not None
+        or config.hardware.reward_target_ul is not None
+    ):
+        from rpi_vstim.hardware.reward import resolve_reward_duration
+
+        reward_resolution = resolve_reward_duration(config)
+    return SessionOutput(context, reward_resolution)
 
 
 def _jsonable(value: Any) -> Any:

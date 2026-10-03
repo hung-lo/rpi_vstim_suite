@@ -248,7 +248,7 @@ Preserve:
 
 - Gray-screen session.
 - Open-loop reward delivery.
-- Existing default reward pulse and volume configuration.
+- Configured single-continuous-open reward duration or calibrated volume profile.
 - Randomized 8-12 s training intervals unless overridden by a validated config.
 - Suction scheduling.
 - Lick capture and retrieval-success calculation.
@@ -1052,9 +1052,9 @@ Before an experimental run:
 - Confirm all outputs initialize low.
 - Confirm no pin collision.
 - Confirm worker starts and reports ready.
-- Confirm reward/suction durations and pulse counts are finite and within configured safety ranges.
+- Confirm continuous reward-open and suction durations are finite and within configured safety ranges.
 - Confirm maximum session water cap.
-- Confirm suction does not overlap an unsafe reward train.
+- Confirm suction does not overlap an unsafe reward opening.
 - Confirm Ctrl-C and worker failure force outputs low.
 - Confirm simulation mode is visibly labeled and cannot be confused with experimental mode.
 
@@ -1935,7 +1935,7 @@ Do not copy the Box151 compensation into the Pi 5 profile. Derive and version a 
 
 With no mouse and controlled water collection:
 
-- Validate reward pulse train.
+- Validate one continuous reward opening and its rig-specific volume calibration.
 - Validate volume calibration.
 - Validate reward onset relative to physical photodiode onset.
 - Validate suction onset/duration.
