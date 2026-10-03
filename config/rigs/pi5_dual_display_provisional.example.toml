@@ -40,3 +40,14 @@ lick_idle_level = 0
 lick_active_level = 1
 release_stable_ms = 25
 min_classified_lick_interval_ms = 70
+
+[operator_controls]
+# Disabled on the prototype until the conditioned button input is validated.
+bait_button_enabled = false
+bait_button_gpio = 23
+# Set these only after measuring the physical button circuit:
+# bait_button_idle_level = 0
+# bait_button_active_level = 1
+# bait_reward_ul = 3.0
+minimum_interval_ms = 1000
+bait_button_release_stable_ms = 25

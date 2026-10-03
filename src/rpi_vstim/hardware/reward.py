@@ -92,14 +92,18 @@ def _validate_output_config(config: Config) -> Any:
     return line
 
 
-def resolve_reward_duration(config: Config) -> RewardDurationResolution:
+def resolve_reward_duration(
+    config: Config,
+    *,
+    target_volume_ul: float | None = None,
+) -> RewardDurationResolution:
     """Resolve and freeze one calibrated or explicit duration for a session."""
     _validate_output_config(config)
     hardware = config.hardware
-    if hardware.reward_open_duration_ms is not None:
+    if target_volume_ul is None and hardware.reward_open_duration_ms is not None:
         return RewardDurationResolution(float(hardware.reward_open_duration_ms))
     profile_path = hardware.reward_calibration_profile
-    target_volume = hardware.reward_target_ul
+    target_volume = hardware.reward_target_ul if target_volume_ul is None else target_volume_ul
     if profile_path is None or target_volume is None:
         raise RewardConfigurationError(
             "configure reward_open_duration_ms or reward_target_ul with a calibration profile"

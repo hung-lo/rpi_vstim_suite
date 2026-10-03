@@ -50,9 +50,15 @@ class SessionContext:
 
 
 class SessionOutput:
-    def __init__(self, context: SessionContext, reward_resolution: Any | None = None) -> None:
+    def __init__(
+        self,
+        context: SessionContext,
+        reward_resolution: Any | None = None,
+        operator_bait_provenance: dict[str, Any] | None = None,
+    ) -> None:
         self.context = context
         self._reward_resolution = reward_resolution
+        self._operator_bait_provenance = operator_bait_provenance or {}
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
         self._display_stream: TextIO | None = None
@@ -76,6 +82,7 @@ class SessionOutput:
         provenance = dict(self.context.host_provenance)
         if self._reward_resolution is not None:
             provenance.update(self._reward_resolution.provenance_dict())
+        provenance.update(self._operator_bait_provenance)
         atomic_write_json(self.context.session_root / "provenance.json", provenance)
         self._manifest = {
             "schema_version": 2,
@@ -314,14 +321,33 @@ def new_session(
         host_provenance=collect_provenance(source_commit=source_commit),
     )
     reward_resolution = None
+    operator_bait_provenance: dict[str, Any] = {}
+    if (
+        config.hardware.reward_open_duration_ms is not None
+        or config.hardware.reward_target_ul is not None
+        or config.operator_controls.bait_button_enabled
+    ):
+        from rpi_vstim.hardware.reward import resolve_reward_duration
+
     if (
         config.hardware.reward_open_duration_ms is not None
         or config.hardware.reward_target_ul is not None
     ):
-        from rpi_vstim.hardware.reward import resolve_reward_duration
-
         reward_resolution = resolve_reward_duration(config)
-    return SessionOutput(context, reward_resolution)
+    if config.operator_controls.bait_button_enabled:
+        bait_resolution = resolve_reward_duration(
+            config,
+            target_volume_ul=config.operator_controls.bait_reward_ul,
+        )
+        operator_bait_provenance = {
+            "operator_bait_reward_target_ul": bait_resolution.target_volume_ul,
+            "operator_bait_resolved_open_duration_ms": bait_resolution.open_duration_ms,
+            "operator_bait_calibration_id": bait_resolution.calibration_id,
+            "operator_bait_calibration_file_sha256": bait_resolution.calibration_sha256,
+            "operator_bait_calibration_created_at": bait_resolution.calibration_created_at,
+            "operator_bait_delivery_mode": bait_resolution.delivery_mode,
+        }
+    return SessionOutput(context, reward_resolution, operator_bait_provenance)
 
 
 def _jsonable(value: Any) -> Any:

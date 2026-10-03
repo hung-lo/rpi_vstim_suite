@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from rpi_vstim.hardware.lick import MIN_CLASSIFIED_LICK_INTERVAL_MS, RELEASE_STABLE_MS
+from rpi_vstim.hardware.policy import (
+    LICK_CENTER_GPIO_BCM,
+    OPERATOR_BAIT_GPIO_BCM,
+    RESERVED_GPIO_BCM,
+    reserved_gpio_message,
+)
 
 
 class ConfigError(ValueError):
@@ -81,6 +87,10 @@ class HardwareConfig:
     backend: str = "simulated"
     chip: int = 0
     reward_pin_bcm: int = 19
+    reward_right_pin_bcm: int = 20
+    reward_center_pin_bcm: int = 21
+    reward_4_pin_bcm: int = 7
+    airpuff_pin_bcm: int = 8
     suction_pin_bcm: int = 25
     reward_initial_level: int = 0
     suction_initial_level: int = 0
@@ -91,6 +101,7 @@ class HardwareConfig:
     reward_calibration_profile: Path | None = None
     lick_pin_bcm: int = 26
     lick_right_pin_bcm: int = 27
+    lick_center_pin_bcm: int = LICK_CENTER_GPIO_BCM
     lick_idle_level: int = 0
     lick_active_level: int = 1
     ttl_pin_bcm: int | None = None
@@ -120,6 +131,22 @@ class HardwareConfig:
                 self.suction_active_level,
             )
         raise ConfigError(f"unsupported output role: {role}")
+
+
+@dataclass(frozen=True)
+class OperatorControlsConfig:
+    bait_button_enabled: bool = False
+    bait_button_gpio: int = OPERATOR_BAIT_GPIO_BCM
+    bait_button_idle_level: int | None = None
+    bait_button_active_level: int | None = None
+    bait_reward_ul: float | None = None
+    minimum_interval_ms: int = 1000
+    bait_button_release_stable_ms: int = RELEASE_STABLE_MS
+
+    @property
+    def manual_bait_min_interval_ms(self) -> int:
+        """Backward-compatible descriptive alias for the operator lockout."""
+        return self.minimum_interval_ms
 
 
 @dataclass(frozen=True)
@@ -182,6 +209,7 @@ class Config:
     display: DisplayConfig = field(default_factory=DisplayConfig)
     photodiode: PhotodiodeConfig = field(default_factory=PhotodiodeConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    operator_controls: OperatorControlsConfig = field(default_factory=OperatorControlsConfig)
     cameras: CamerasConfig = field(default_factory=CamerasConfig)
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
@@ -209,16 +237,27 @@ class Config:
             raise ConfigError("display geometry must be positive")
         if self.photodiode.size_px <= 0 or not 0 <= self.photodiode.on_value <= 255 or not 0 <= self.photodiode.off_value <= 255:
             raise ConfigError("invalid photodiode settings")
+        if self.operator_controls.bait_button_gpio != OPERATOR_BAIT_GPIO_BCM:
+            raise ConfigError("operator bait button must use canonical BCM GPIO23")
         pins = {
             "reward": self.hardware.reward_pin_bcm,
+            "reward_right": self.hardware.reward_right_pin_bcm,
+            "reward_center": self.hardware.reward_center_pin_bcm,
+            "reward_4": self.hardware.reward_4_pin_bcm,
+            "airpuff": self.hardware.airpuff_pin_bcm,
             "suction": self.hardware.suction_pin_bcm,
             "lick": self.hardware.lick_pin_bcm,
             "lick_right": self.hardware.lick_right_pin_bcm,
+            "lick_center": self.hardware.lick_center_pin_bcm,
         }
         if self.hardware.ttl_pin_bcm is not None:
             pins["ttl"] = self.hardware.ttl_pin_bcm
+        pins["operator_bait_button"] = self.operator_controls.bait_button_gpio
         if any(not isinstance(pin, int) or pin < 0 or pin > 27 for pin in pins.values()):
             raise ConfigError("BCM pins must be between 0 and 27")
+        reserved = RESERVED_GPIO_BCM.intersection(pins.values())
+        if reserved:
+            raise ConfigError(reserved_gpio_message(min(reserved)))
         for name, level in {
             "reward_initial_level": self.hardware.reward_initial_level,
             "suction_initial_level": self.hardware.suction_initial_level,
@@ -246,6 +285,40 @@ class Config:
             raise ConfigError(f"unsupported hardware backend: {self.hardware.backend}")
         if not isinstance(self.hardware.chip, int) or self.hardware.chip < 0:
             raise ConfigError("hardware chip must be a non-negative integer")
+        controls = self.operator_controls
+        for name, level in {
+            "bait_button_idle_level": controls.bait_button_idle_level,
+            "bait_button_active_level": controls.bait_button_active_level,
+        }.items():
+            if level is not None and (type(level) is not int or level not in (0, 1)):
+                raise ConfigError(f"{name} must be 0, 1, or unset")
+        if controls.bait_button_enabled:
+            if controls.bait_button_idle_level is None or controls.bait_button_active_level is None:
+                raise ConfigError(
+                    "enabled operator bait button requires explicit idle and active levels"
+                )
+            if controls.bait_button_idle_level == controls.bait_button_active_level:
+                raise ConfigError("operator bait button idle and active levels must differ")
+            if (
+                controls.bait_reward_ul is None
+                or type(controls.bait_reward_ul) not in (int, float)
+                or not math.isfinite(controls.bait_reward_ul)
+                or controls.bait_reward_ul <= 0
+            ):
+                raise ConfigError("enabled operator bait button requires positive bait_reward_ul")
+        elif controls.bait_reward_ul is not None and (
+            type(controls.bait_reward_ul) not in (int, float)
+            or not math.isfinite(controls.bait_reward_ul)
+            or controls.bait_reward_ul <= 0
+        ):
+            raise ConfigError("bait_reward_ul must be positive when configured")
+        if (
+            not isinstance(controls.minimum_interval_ms, int)
+            or controls.minimum_interval_ms <= 0
+            or not isinstance(controls.bait_button_release_stable_ms, int)
+            or controls.bait_button_release_stable_ms <= 0
+        ):
+            raise ConfigError("operator bait timing settings must be positive integers")
         if self.hardware.reward_open_duration_ms is not None and (
             type(self.hardware.reward_open_duration_ms) not in (int, float)
             or not math.isfinite(self.hardware.reward_open_duration_ms)
@@ -381,6 +454,19 @@ def _replace_display(current: DisplayConfig, values: dict[str, Any]) -> DisplayC
     return _replace_section(current, values, "display")
 
 
+def _replace_operator_controls(
+    current: OperatorControlsConfig, values: dict[str, Any]
+) -> OperatorControlsConfig:
+    values = dict(values)
+    if "manual_bait_min_interval_ms" in values:
+        if "minimum_interval_ms" in values:
+            raise ConfigError(
+                "configure only one of minimum_interval_ms or manual_bait_min_interval_ms"
+            )
+        values["minimum_interval_ms"] = values.pop("manual_bait_min_interval_ms")
+    return _replace_section(current, values, "operator_controls")
+
+
 def _replace_cameras(current: CamerasConfig, values: dict[str, Any]) -> CamerasConfig:
     known = {item.name for item in fields(current)}
     unknown = set(values) - known
@@ -405,7 +491,18 @@ def _replace_cameras(current: CamerasConfig, values: dict[str, Any]) -> CamerasC
 
 
 def config_from_mapping(raw: dict[str, Any]) -> Config:
-    allowed = {"paths", "display", "photodiode", "gpio", "hardware", "cameras", "telemetry", "session", "protocol"}
+    allowed = {
+        "paths",
+        "display",
+        "photodiode",
+        "gpio",
+        "hardware",
+        "operator_controls",
+        "cameras",
+        "telemetry",
+        "session",
+        "protocol",
+    }
     unknown = set(raw) - allowed
     if unknown:
         raise ConfigError(f"unknown top-level setting(s): {', '.join(sorted(unknown))}")
@@ -424,6 +521,13 @@ def config_from_mapping(raw: dict[str, Any]) -> Config:
             config = replace(config, **{name: _replace_section(getattr(config, name), raw[name], name)})
     if "display" in raw:
         config = replace(config, display=_replace_display(config.display, raw["display"]))
+    if "operator_controls" in raw:
+        config = replace(
+            config,
+            operator_controls=_replace_operator_controls(
+                config.operator_controls, raw["operator_controls"]
+            ),
+        )
     if "cameras" in raw:
         config = replace(config, cameras=_replace_cameras(config.cameras, raw["cameras"]))
     hardware_section = raw.get("hardware", raw.get("gpio"))

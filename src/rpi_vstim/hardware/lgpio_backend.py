@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 from .models import HardwareStatus, OutputLineConfig
+from .policy import RESERVED_GPIO_BCM, reserved_gpio_message
 
 
 class LgpioUnavailableError(RuntimeError):
@@ -89,7 +90,10 @@ class LgpioBackend:
         normalized = self._normalize_role(role)
         if normalized not in self._roles:
             raise LgpioBackendError(f"GPIO role is not owned by this session: {role}")
-        return self._hardware_config.output_line(normalized)
+        line = self._hardware_config.output_line(normalized)
+        if line.bcm_pin in RESERVED_GPIO_BCM:
+            raise LgpioBackendError(reserved_gpio_message(line.bcm_pin))
+        return line
 
     def line_config(self, role: str) -> OutputLineConfig:
         """Return the resolved line without exposing GPIO numbers to callers."""
@@ -115,7 +119,7 @@ class LgpioBackend:
             self._check_result(handle, "open GPIO chip")
             self._chip_handle = handle
             for role in self._roles:
-                line = self._hardware_config.output_line(role)
+                line = self._line(role)
                 self._check_result(
                     api.gpio_claim_output(
                         self._chip_handle,

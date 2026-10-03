@@ -5,6 +5,23 @@ exported, claimed, toggled, or electrically probed during the audit. The
 following is source evidence, not confirmation that the harness is wired this
 way.
 
+## Superseding canonical lab policy — 2026-10-03
+
+The lab-wide map supersedes the earlier preflight snapshot below:
+
+| Role | BCM GPIO | Status |
+|---|---:|---|
+| `lick_left`, `lick_right`, `lick_center` | 26, 27, 15 | canonical inputs |
+| `reward_left`, `reward_right`, `reward_center`, `reward_4`, `airpuff` | 19, 20, 21, 7, 8 | canonical outputs |
+| `vacuum` | 25 | canonical output |
+| `operator_bait_button` | 23 | input-only operator control |
+| reserved output | 24 | unused |
+| `irig_output` / PCB `DIO4` | 9 | reserved exclusively for future IRIG |
+
+The current software rejects GPIO9 and GPIO24 for ordinary output use and does
+not implement IRIG generation. The earlier source-audit material remains below
+as historical evidence and must not override this canonical policy.
+
 ## Canonical lab BehavBox mapping — 2026-09-30
 
 The lab uses one canonical BehavBox BCM map across rigs:

@@ -38,6 +38,16 @@ lick_active_level = 1
 release_stable_ms = 25
 min_classified_lick_interval_ms = 70
 
+[operator_controls]
+bait_button_enabled = false
+bait_button_gpio = 23
+# Configure measured button polarity before enabling:
+# bait_button_idle_level = 0
+# bait_button_active_level = 1
+# bait_reward_ul = 3.0
+minimum_interval_ms = 1000
+bait_button_release_stable_ms = 25
+
 [cameras]
 enabled_by_default = false
 record_to_session = true

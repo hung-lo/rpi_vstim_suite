@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from rpi_vstim.core.config import HardwareConfig
-from rpi_vstim.hardware.lgpio_backend import LgpioBackend
+from rpi_vstim.hardware.lgpio_backend import LgpioBackend, LgpioBackendError
 
 
 class FakeLgpio:
@@ -122,3 +122,20 @@ def test_context_cleanup_runs_for_keyboard_interrupt():
     assert not backend.started
     assert ("free", 7, 19) in api.calls
     assert ("close", 7) in api.calls
+
+
+def test_reserved_gpio9_cannot_be_claimed_by_normal_output_backend():
+    api = FakeLgpio()
+    config = replace(HardwareConfig(), reward_pin_bcm=9)
+    backend = LgpioBackend(config, roles=("reward",), api=api)
+
+    with pytest.raises(LgpioBackendError, match="GPIO9.*IRIG"):
+        backend.start()
+
+    assert not any(call[0] == "claim" for call in api.calls)
+    assert ("close", 7) in api.calls
+
+
+def test_irig_role_is_not_a_normal_output_role():
+    with pytest.raises(ValueError, match="only reward and vacuum"):
+        LgpioBackend(HardwareConfig(), roles=("irig_output",))

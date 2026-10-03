@@ -22,6 +22,17 @@ workers must not own GPIO or run reward logic. Reward/water-limit state,
 lick-edge events, and full production orchestration remain bounded worker
 contracts rather than assumptions in this line-control backend.
 
+The operator bait input is an input-only GPIO23 (`operator_bait_button`). It
+creates a software request; it never electrically drives GPIO19. The request
+must be handled by `ManualBaitService` and the existing `RewardController`,
+so manual baiting uses the same calibration, polarity, timing, cleanup, event,
+and provenance path as task rewards. GPIO15 remains `lick_center` and is not
+used for baiting. GPIO24 remains reserved/unused.
+
+GPIO9 / DIO4 is reserved exclusively for a future `irig_output`. IRIG
+generation is not implemented here, and normal output backends reject both
+GPIO9 and the reserved GPIO24 rather than claiming them.
+
 The prototype configuration preserves the canonical lab BehavBox map: BCM19
 is `reward_left`/`pump1`, and BCM25 is `vacuum`/`pump_en`; both electrical
 initial levels are LOW. The eventual rig must be verified against that
