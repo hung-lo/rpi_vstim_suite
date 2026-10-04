@@ -79,7 +79,7 @@ for legacy semantic names and BCM numbers:
 | trigger input | 23 | `DIO1` | input |
 | trigger output | 24 | `DIO2` | output |
 | user-configurable output | 4 | `Camera` | not a reward/suction line |
-| reserved IRIG output | 9 | `DIO3` | explicitly reserved; not BehavBox-owned |
+| historical reserved IRIG output | 9 | `DIO3` | source-audit reference only; superseded by the canonical `DIO4`/GPIO9 policy above |
 
 The older `/home/pi/RPi4_behavior_boxes/essential/behavbox.py` independently
 constructs reward outputs on 19, 20, 21, 7, 8, and 25, and lick inputs on 26,

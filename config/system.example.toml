@@ -47,6 +47,9 @@ bait_button_gpio = 23
 # bait_reward_ul = 3.0
 minimum_interval_ms = 1000
 bait_button_release_stable_ms = 25
+# Optional cumulative operator-bait water budget; unset means no configured cap.
+# max_manual_bait_water_ul = 300.0
+bait_auto_suction = false
 
 [cameras]
 enabled_by_default = false

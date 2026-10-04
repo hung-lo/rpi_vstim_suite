@@ -8,5 +8,5 @@ LICK_CENTER_GPIO_BCM = 15
 
 def reserved_gpio_message(pin: int) -> str:
     if pin == IRIG_OUTPUT_GPIO_BCM:
-        return "BCM GPIO9 / DIO4 is reserved exclusively for future IRIG output"
+        return "BCM GPIO9 is reserved for IRIG output."
     return f"BCM GPIO{pin} is reserved and currently unused"

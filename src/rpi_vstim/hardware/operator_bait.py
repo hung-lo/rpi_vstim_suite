@@ -9,6 +9,7 @@ from typing import Any, Self
 
 from .policy import OPERATOR_BAIT_GPIO_BCM
 from .reward import RewardController, RewardDelivery, resolve_reward_duration
+from .water import WaterAccounting, WaterLimitError
 
 
 class OperatorBaitError(RuntimeError):
@@ -25,9 +26,10 @@ class RawOperatorBaitEdge:
 
 @dataclass(frozen=True)
 class ManualBaitRequest:
-    bcm_pin: int
+    bcm_pin: int | None
     timestamp_ns: int
     request_index: int
+    source: str = "physical_button"
 
 
 class OperatorBaitStateMachine:
@@ -258,10 +260,12 @@ class ManualBaitService:
         *,
         session_id: str = "",
         event_sink: Callable[[Any], None] | None = None,
+        water_accounting: WaterAccounting | None = None,
     ) -> None:
         self.controller = controller
         self.session_id = session_id
         self._event_sink = event_sink
+        self.water_accounting = water_accounting
 
     @classmethod
     def from_config(
@@ -271,6 +275,7 @@ class ManualBaitService:
         *,
         session_id: str = "",
         event_sink: Callable[[Any], None] | None = None,
+        water_accounting: WaterAccounting | None = None,
     ) -> ManualBaitService:
         controls = config.operator_controls
         if not controls.bait_button_enabled or controls.bait_reward_ul is None:
@@ -282,14 +287,46 @@ class ManualBaitService:
                 config.hardware,
                 duration_ms=resolution.open_duration_ms,
                 event_sink=event_sink,
+                resolution=resolution,
             ),
             session_id=session_id,
             event_sink=event_sink,
+            water_accounting=water_accounting or WaterAccounting(
+                controls.max_manual_bait_water_ul
+            ),
         )
 
     def handle_request(self, request: ManualBaitRequest) -> RewardDelivery:
-        if request.bcm_pin != OPERATOR_BAIT_GPIO_BCM:
+        if request.source not in {"physical_button", "terminal", "remote_cli"}:
+            raise OperatorBaitError(f"unsupported manual bait source: {request.source}")
+        if request.source == "physical_button" and request.bcm_pin != OPERATOR_BAIT_GPIO_BCM:
             raise OperatorBaitError("manual bait request is not from canonical BCM GPIO23")
+        if request.source != "physical_button" and request.bcm_pin not in (None, 0):
+            raise OperatorBaitError("non-button manual bait requests must not claim a GPIO")
+        resolution = getattr(self.controller, "resolution", None)
+        target_volume_ul = getattr(resolution, "target_volume_ul", None)
+        duration_ms = getattr(resolution, "open_duration_ms", None)
+        if duration_ms is None:
+            duration_ms = getattr(self.controller, "duration_ms", None)
+        if self.water_accounting is not None:
+            if target_volume_ul is None:
+                raise OperatorBaitError(
+                    "manual bait water accounting requires a calibrated target volume"
+                )
+            try:
+                self.water_accounting.reserve_manual_bait(target_volume_ul)
+            except WaterLimitError as exc:
+                if self._event_sink is not None:
+                    self._event_sink(
+                        {
+                            "event": "manual_bait_rejected",
+                            "source": request.source,
+                            "reason": str(exc),
+                            "target_volume_ul": target_volume_ul,
+                            "monotonic_ns": request.timestamp_ns,
+                        }
+                    )
+                raise
         if self._event_sink is not None:
             self._event_sink(
                 {
@@ -299,9 +336,22 @@ class ManualBaitService:
                     "monotonic_ns": request.timestamp_ns,
                     "request_index": request.request_index,
                     "session_id": self.session_id,
+                    "source": request.source,
+                    "reason": "operator_bait",
+                    "target_volume_ul": target_volume_ul,
+                    "resolved_open_duration_ms": duration_ms,
+                    "calibration_id": getattr(resolution, "calibration_id", ""),
+                    "calibration_sha256": getattr(resolution, "calibration_sha256", ""),
                 }
             )
-        return self.controller.deliver(
-            command_id=f"manual-bait-{request.request_index}",
-            session_id=self.session_id,
-        )
+        try:
+            return self.controller.deliver(
+                command_id=f"manual-bait-{request.request_index}",
+                session_id=self.session_id,
+                source=request.source,
+                reason="operator_bait",
+            )
+        except BaseException:
+            if self.water_accounting is not None and target_volume_ul is not None:
+                self.water_accounting.rollback_manual_bait(target_volume_ul)
+            raise

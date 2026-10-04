@@ -48,6 +48,9 @@ class PathsConfig:
     cache_root: Path = Path("/mnt/hd/vstim_cache")
     asset_root: Path = Path("/home/pi/stimulus_assets")
     reward_state_root: Path = Path("/mnt/hd/vstim_reward_assignments")
+    reward_hardware_lock_path: Path = Path("/tmp/rpi-vstim-reward.lock")
+    operator_control_socket: Path = Path("/tmp/rpi-vstim-operator.sock")
+    operator_event_log: Path = Path("/tmp/rpi-vstim-operator-events.jsonl")
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,8 @@ class OperatorControlsConfig:
     bait_reward_ul: float | None = None
     minimum_interval_ms: int = 1000
     bait_button_release_stable_ms: int = RELEASE_STABLE_MS
+    max_manual_bait_water_ul: float | None = None
+    bait_auto_suction: bool = False
 
     @property
     def manual_bait_min_interval_ms(self) -> int:
@@ -319,6 +324,14 @@ class Config:
             or controls.bait_button_release_stable_ms <= 0
         ):
             raise ConfigError("operator bait timing settings must be positive integers")
+        if controls.max_manual_bait_water_ul is not None and (
+            type(controls.max_manual_bait_water_ul) not in (int, float)
+            or not math.isfinite(controls.max_manual_bait_water_ul)
+            or controls.max_manual_bait_water_ul <= 0
+        ):
+            raise ConfigError("max_manual_bait_water_ul must be finite and positive")
+        if type(controls.bait_auto_suction) is not bool:
+            raise ConfigError("bait_auto_suction must be true or false")
         if self.hardware.reward_open_duration_ms is not None and (
             type(self.hardware.reward_open_duration_ms) not in (int, float)
             or not math.isfinite(self.hardware.reward_open_duration_ms)
@@ -436,6 +449,9 @@ def _replace_section(current: Any, values: dict[str, Any], section: str) -> Any:
         "cache_root",
         "asset_root",
         "reward_state_root",
+        "reward_hardware_lock_path",
+        "operator_control_socket",
+        "operator_event_log",
         "reward_calibration_profile",
     }:
         if name in converted:
@@ -553,7 +569,15 @@ def load_config(path: Path | str | None = None) -> Config:
     config = config_from_mapping(raw)
     relative_paths = {
         name: (config_path.parent / value).resolve()
-        for name in ("output_root", "cache_root", "asset_root", "reward_state_root")
+        for name in (
+            "output_root",
+            "cache_root",
+            "asset_root",
+            "reward_state_root",
+            "reward_hardware_lock_path",
+            "operator_control_socket",
+            "operator_event_log",
+        )
         if not (value := getattr(config.paths, name)).is_absolute()
     }
     calibration_profile = config.hardware.reward_calibration_profile

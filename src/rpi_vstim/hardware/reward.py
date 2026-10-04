@@ -32,6 +32,11 @@ class RewardEvent:
     command_id: str = ""
     session_id: str = ""
     trial_id: str = ""
+    source: str = "task"
+    reason: str = "task_reward"
+    target_volume_ul: float | None = None
+    calibration_id: str = ""
+    calibration_sha256: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -44,6 +49,11 @@ class RewardEvent:
             "command_id": self.command_id,
             "session_id": self.session_id,
             "trial_id": self.trial_id,
+            "source": self.source,
+            "reason": self.reason,
+            "target_volume_ul": self.target_volume_ul,
+            "calibration_id": self.calibration_id,
+            "calibration_sha256": self.calibration_sha256,
         }
 
 
@@ -145,6 +155,7 @@ class RewardController:
         clock_ns: Callable[[], int] = time.monotonic_ns,
         sleep: Callable[[float], None] = time.sleep,
         event_sink: Callable[[RewardEvent], None] | None = None,
+        resolution: RewardDurationResolution | None = None,
     ) -> None:
         self._backend = backend
         self._line = hardware_config.output_line(REWARD_ROLE)
@@ -160,7 +171,7 @@ class RewardController:
         self._clock_ns = clock_ns
         self._sleep = sleep
         self._event_sink = event_sink
-        self._resolution = RewardDurationResolution(self._duration_ms)
+        self._resolution = resolution or RewardDurationResolution(self._duration_ms)
 
     @classmethod
     def from_config(
@@ -180,6 +191,7 @@ class RewardController:
             clock_ns=clock_ns,
             sleep=sleep,
             event_sink=event_sink,
+            resolution=resolution,
         )
         controller._resolution = resolution
         return controller
@@ -203,6 +215,8 @@ class RewardController:
         command_id: str = "",
         session_id: str = "",
         trial_id: str = "",
+        source: str = "task",
+        reason: str = "task_reward",
     ) -> RewardDelivery:
         events: list[RewardEvent] = []
         common = {
@@ -212,6 +226,11 @@ class RewardController:
             "command_id": command_id,
             "session_id": session_id,
             "trial_id": trial_id,
+            "source": source,
+            "reason": reason,
+            "target_volume_ul": self._resolution.target_volume_ul,
+            "calibration_id": self._resolution.calibration_id,
+            "calibration_sha256": self._resolution.calibration_sha256,
         }
         self._emit(RewardEvent("reward_command", monotonic_ns=self._clock_ns(), **common), events)
         try:

@@ -149,7 +149,12 @@ def test_manual_bait_service_calls_the_existing_reward_controller_once():
 
     assert result == "delivery"
     assert reward.calls == [
-        {"command_id": "manual-bait-4", "session_id": "session-1"}
+        {
+            "command_id": "manual-bait-4",
+            "session_id": "session-1",
+            "source": "physical_button",
+            "reason": "operator_bait",
+        }
     ]
     assert events == [
         {
@@ -159,6 +164,12 @@ def test_manual_bait_service_calls_the_existing_reward_controller_once():
             "monotonic_ns": 123,
             "request_index": 4,
             "session_id": "session-1",
+            "source": "physical_button",
+            "reason": "operator_bait",
+            "target_volume_ul": None,
+            "resolved_open_duration_ms": None,
+            "calibration_id": "",
+            "calibration_sha256": "",
         }
     ]
 
@@ -178,7 +189,7 @@ def test_canonical_pin_policy_and_irig_reservation_are_enforced():
     config = enabled_config()
     assert config.hardware.lick_center_pin_bcm == 15
     assert config.operator_controls.bait_button_gpio == 23
-    with pytest.raises(ConfigError, match="GPIO9.*reserved exclusively"):
+    with pytest.raises(ConfigError, match="BCM GPIO9 is reserved for IRIG output"):
         config_from_mapping({"hardware": {"ttl_pin_bcm": 9}})
     with pytest.raises(ConfigError, match="reserved"):
         config_from_mapping({"hardware": {"reward_pin_bcm": 9}})

@@ -78,7 +78,11 @@ def main(argv: list[str] | None = None) -> int:
     events: list[RewardEvent] = []
     conditions: list[CalibrationCondition] = []
 
-    with LgpioBackend(config.hardware, roles=("reward_left",)) as backend:
+    with LgpioBackend(
+        config.hardware,
+        roles=("reward_left",),
+        ownership_path=config.paths.reward_hardware_lock_path,
+    ) as backend:
         if backend.read_level("reward_left") != config.hardware.reward_initial_level:
             raise SystemExit("reward line is not at its configured inactive electrical level")
         warmup = args.warmup_duration_ms or args.durations_ms[0]

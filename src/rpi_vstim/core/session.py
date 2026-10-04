@@ -340,6 +340,9 @@ def new_session(
             target_volume_ul=config.operator_controls.bait_reward_ul,
         )
         operator_bait_provenance = {
+            "operator_bait_button_gpio": config.operator_controls.bait_button_gpio,
+            "operator_bait_max_water_ul": config.operator_controls.max_manual_bait_water_ul,
+            "operator_bait_auto_suction": config.operator_controls.bait_auto_suction,
             "operator_bait_reward_target_ul": bait_resolution.target_volume_ul,
             "operator_bait_resolved_open_duration_ms": bait_resolution.open_duration_ms,
             "operator_bait_calibration_id": bait_resolution.calibration_id,

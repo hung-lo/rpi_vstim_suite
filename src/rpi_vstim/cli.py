@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import socket
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +21,20 @@ from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
 from .display.photodiode import PhotodiodePatch
+from .hardware.lgpio_backend import LgpioBackend
+from .hardware.operator_bait import LgpioOperatorBaitMonitor
+from .hardware.operator_control import (
+    JsonlEventLog,
+    OperatorControlError,
+    OperatorControlService,
+    send_manual_bait,
+)
+from .hardware.water_service import (
+    WaterHoldStateMachine,
+    WaterServiceController,
+    validate_service_button_gpio,
+    validate_service_seconds,
+)
 from .protocols import available_protocols, get_protocol
 from .telemetry.benchmark import run_benchmark
 from .telemetry.payloads import TelemetryMessage
@@ -91,6 +107,29 @@ def build_parser() -> argparse.ArgumentParser:
     render_smoke_command.add_argument("--frames", type=int, default=300)
     render_smoke_command.add_argument("--lease", action="store_true")
     render_smoke_command.add_argument("--json", action="store_true", dest="as_json")
+
+    operator = commands.add_parser("operator", help="headless operator controls")
+    operator_commands = operator.add_subparsers(dest="operator_command", required=True)
+    operator_bait = operator_commands.add_parser("bait", help="request one calibrated manual bait")
+    operator_bait.add_argument("--config", type=Path)
+    operator_bait.add_argument("--json", action="store_true", dest="as_json")
+    operator_service = operator_commands.add_parser(
+        "service", help="run the GPIO23/keyboard/manual-bait service"
+    )
+    operator_service.add_argument("--config", type=Path)
+    operator_service.add_argument("--session-id", default="operator-control")
+    operator_service.add_argument("--no-keyboard", action="store_true")
+
+    water = commands.add_parser("water", help="operator-only plumbing controls")
+    water_commands = water.add_subparsers(dest="water_command", required=True)
+    water_prime = water_commands.add_parser("prime", help="open reward_left continuously for a duration")
+    water_prime.add_argument("--seconds", type=float, required=True)
+    water_prime.add_argument("--config", type=Path)
+    water_prime.add_argument("--json", action="store_true", dest="as_json")
+    water_service = water_commands.add_parser(
+        "service", help="hold GPIO23 to open reward_left for plumbing service"
+    )
+    water_service.add_argument("--config", type=Path)
 
     config = commands.add_parser("config", help="validate configuration")
     config_commands = config.add_subparsers(dest="config_command", required=True)
@@ -191,6 +230,138 @@ def _representative_rgb888(width_px: int, height_px: int, phase: int) -> bytes:
     return bytes(frame)
 
 
+def _run_operator_service(args: argparse.Namespace) -> int:
+    try:
+        config = load_config(args.config)
+        stopped = False
+
+        def stop_signal(_signum: int, _frame: object) -> None:
+            nonlocal stopped
+            stopped = True
+
+        previous = signal.signal(signal.SIGTERM, stop_signal)
+        try:
+            service = OperatorControlService(
+                config,
+                session_id=args.session_id,
+                enable_keyboard=not args.no_keyboard,
+            )
+            service.run_forever(stop=lambda: stopped)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+    except KeyboardInterrupt:
+        return 130
+    except (ConfigError, OSError, OperatorControlError, RuntimeError, ValueError) as exc:
+        print(f"operator service failed: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _run_water_prime(args: argparse.Namespace) -> int:
+    backend = None
+    try:
+        validate_service_seconds(args.seconds)
+        def stop_signal(_signum: int, _frame: object) -> None:
+            raise KeyboardInterrupt
+
+        config = load_config(args.config)
+        previous = signal.signal(signal.SIGTERM, stop_signal)
+        backend = LgpioBackend(
+            config.hardware,
+            roles=("reward_left",),
+            ownership_path=config.paths.reward_hardware_lock_path,
+        )
+        backend.start()
+        logger = JsonlEventLog(config.paths.operator_event_log)
+        controller = WaterServiceController(
+            backend,
+            config.hardware,
+            event_sink=logger,
+        )
+        events = controller.prime(args.seconds, source="terminal")
+        payload = {
+            "ok": True,
+            "delivery_mode": "continuous_open_service",
+            "requested_seconds": args.seconds,
+            "events": [event.as_dict() for event in events],
+        }
+        signal.signal(signal.SIGTERM, previous)
+    except KeyboardInterrupt:
+        print("water prime interrupted; GPIO19 was closed", file=sys.stderr)
+        return 130
+    except (ConfigError, OSError, OperatorControlError, RuntimeError, ValueError) as exc:
+        print(f"water prime failed: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        if "previous" in locals():
+            signal.signal(signal.SIGTERM, previous)
+        if backend is not None:
+            backend.stop()
+    print(json.dumps(payload, sort_keys=True) if args.as_json else "water prime complete")
+    return 0
+
+
+def _run_water_service(args: argparse.Namespace) -> int:
+    backend = None
+    monitor = None
+    hold = None
+    stopped = False
+    try:
+        config = load_config(args.config)
+        backend = LgpioBackend(
+            config.hardware,
+            roles=("reward_left",),
+            ownership_path=config.paths.reward_hardware_lock_path,
+        )
+        backend.start()
+        logger = JsonlEventLog(config.paths.operator_event_log)
+        controller = WaterServiceController(backend, config.hardware, event_sink=logger)
+        controls = config.operator_controls
+        validate_service_button_gpio(controls.bait_button_gpio)
+        if controls.bait_button_idle_level is None or controls.bait_button_active_level is None:
+            raise ConfigError("water service requires explicit GPIO23 idle and active levels")
+        hold = WaterHoldStateMachine(
+            controller,
+            idle_level=controls.bait_button_idle_level,
+            active_level=controls.bait_button_active_level,
+            release_stable_ms=controls.bait_button_release_stable_ms,
+        )
+        monitor = LgpioOperatorBaitMonitor(
+            config,
+            on_raw_edge=lambda edge: hold.handle_level(edge.level, edge.timestamp_ns),
+        )
+        monitor.start()
+
+        def stop_signal(_signum: int, _frame: object) -> None:
+            nonlocal stopped
+            stopped = True
+
+        previous = signal.signal(signal.SIGTERM, stop_signal)
+        try:
+            while not stopped:
+                hold.check_timeout()
+                time.sleep(0.02)
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+    except KeyboardInterrupt:
+        return 130
+    except (ConfigError, OSError, OperatorControlError, RuntimeError, ValueError) as exc:
+        print(f"water service failed: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        try:
+            if hold is not None:
+                hold.close()
+        finally:
+            try:
+                if monitor is not None:
+                    monitor.stop()
+            finally:
+                if backend is not None:
+                    backend.stop()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "list-protocols":
@@ -233,6 +404,21 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(payload, sort_keys=True))
         return 0
+    if args.command == "operator" and args.operator_command == "bait":
+        try:
+            config = load_config(args.config)
+            payload = send_manual_bait(config.paths.operator_control_socket)
+        except (ConfigError, OSError, OperatorControlError, ValueError) as exc:
+            print(f"operator bait failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(payload, sort_keys=True) if args.as_json else payload.get("status", "accepted"))
+        return 0 if payload.get("ok") else 2
+    if args.command == "operator" and args.operator_command == "service":
+        return _run_operator_service(args)
+    if args.command == "water" and args.water_command == "prime":
+        return _run_water_prime(args)
+    if args.command == "water" and args.water_command == "service":
+        return _run_water_service(args)
     if args.command == "virtual-run":
         try:
             config = load_config(None)

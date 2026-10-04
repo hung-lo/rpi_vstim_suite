@@ -6,9 +6,11 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Self
 
 from .models import HardwareStatus, OutputLineConfig
+from .ownership import RewardHardwareOwnership
 from .policy import RESERVED_GPIO_BCM, reserved_gpio_message
 
 
@@ -52,6 +54,7 @@ class LgpioBackend:
         api: Any | None = None,
         clock_ns: Callable[[], int] = time.monotonic_ns,
         sleep: Callable[[float], None] = time.sleep,
+        ownership_path: Path | None = Path("/tmp/rpi-vstim-reward.lock"),
     ) -> None:
         normalized = tuple(self._normalize_role(role) for role in roles)
         if not normalized or len(set(normalized)) != len(normalized):
@@ -63,6 +66,11 @@ class LgpioBackend:
         self._api = api
         self._clock_ns = clock_ns
         self._sleep = sleep
+        self._ownership = (
+            RewardHardwareOwnership(ownership_path)
+            if ownership_path is not None and "reward" in normalized
+            else None
+        )
         self._chip_handle: int | None = None
         self._claimed: dict[str, OutputLineConfig] = {}
         self.transitions: list[OutputTransition] = []
@@ -115,6 +123,8 @@ class LgpioBackend:
             return HardwareStatus("lgpio", True, True)
         api = self._load_api()
         try:
+            if self._ownership is not None:
+                self._ownership.acquire()
             handle = api.gpiochip_open(self._hardware_config.chip)
             self._check_result(handle, "open GPIO chip")
             self._chip_handle = handle
@@ -212,6 +222,8 @@ class LgpioBackend:
                 errors.append(exc)
         self._claimed.clear()
         self._chip_handle = None
+        if self._ownership is not None:
+            self._ownership.release()
         if errors:
             raise LgpioBackendError(str(errors[0]))
 
