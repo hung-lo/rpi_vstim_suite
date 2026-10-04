@@ -151,7 +151,7 @@ def test_manual_bait_service_calls_the_existing_reward_controller_once():
     assert result == "delivery"
     assert reward.calls == [
         {
-            "command_id": "manual-bait-4",
+            "command_id": "manual-bait-000004",
             "session_id": "session-1",
             "source": "physical_button",
             "reason": "operator_bait",

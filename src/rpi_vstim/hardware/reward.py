@@ -30,14 +30,26 @@ class RewardDeliveryError(RuntimeError):
         self,
         message: str,
         *,
-        activation_started: bool,
+        activation_started: bool | None = None,
+        activation_attempted: bool | None = None,
+        may_have_activated: bool | None = None,
+        activation_confirmed: bool | None = None,
         inactive_confirmed: bool,
         cleanup_error: BaseException | None = None,
+        original_error: BaseException | None = None,
     ) -> None:
         super().__init__(message)
-        self.activation_started = activation_started
+        if activation_attempted is None:
+            activation_attempted = bool(activation_started)
+        if may_have_activated is None:
+            may_have_activated = activation_attempted
+        self.activation_attempted = activation_attempted
+        self.may_have_activated = may_have_activated
+        self.activation_confirmed = activation_confirmed
+        self.activation_started = may_have_activated
         self.inactive_confirmed = inactive_confirmed
         self.cleanup_error = cleanup_error
+        self.original_error = original_error
 
 
 class RewardBusyError(RuntimeError):
@@ -71,6 +83,8 @@ class BoundedEventHandoff:
         self._stop = threading.Event()
         self.dropped_count = 0
         self.error_count = 0
+        self._close_lock = threading.Lock()
+        self._closed = False
         self._thread = threading.Thread(target=self._run, name="rpi-vstim-events", daemon=True)
         self._thread.start()
 
@@ -104,10 +118,26 @@ class BoundedEventHandoff:
             time.sleep(0.001)
         return self._queue.unfinished_tasks == 0
 
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "dropped_count": self.dropped_count,
+            "error_count": self.error_count,
+            "unfinished_count": self._queue.unfinished_tasks,
+            "writer_alive": self._thread.is_alive(),
+            "closed": self._closed,
+        }
+
     def close(self, timeout_s: float = 5.0) -> None:
-        self.flush(timeout_s)
-        self._stop.set()
-        self._thread.join(timeout=max(0.0, timeout_s))
+        with self._close_lock:
+            if self._closed:
+                return
+            deadline = time.monotonic() + timeout_s
+            flushed = self.flush(max(0.0, deadline - time.monotonic()))
+            self._stop.set()
+            self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            if not flushed or self._thread.is_alive():
+                raise RuntimeError("reward event handoff did not close cleanly")
+            self._closed = True
 
 
 def ensure_event_handoff(
@@ -315,6 +345,9 @@ class RewardController:
     def event_handoff(self) -> BoundedEventHandoff | None:
         return self._event_handoff
 
+    def event_handoff_diagnostics(self) -> dict[str, object]:
+        return self._event_handoff.diagnostics() if self._event_handoff is not None else {}
+
     def close_events(self) -> None:
         if self._event_handoff is not None:
             self._event_handoff.close()
@@ -382,11 +415,15 @@ class RewardController:
             "calibration_sha256": resolution.calibration_sha256,
         }
         self._emit(RewardEvent("reward_command", monotonic_ns=self._clock_ns(), **common), events)
-        activation_started = False
+        activation_attempted = False
+        activation_confirmed = False
         on_ns = self._clock_ns()
         try:
+            # A backend can activate the line and then raise. Count this as
+            # possibly delivered water and always attempt deactivation.
+            activation_attempted = True
             on_transition = self._backend.set_level(REWARD_ROLE, self._line.active_level)
-            activation_started = True
+            activation_confirmed = True
             on_ns = getattr(on_transition, "completed_monotonic_ns", None)
             if on_ns is None:
                 on_ns = self._clock_ns()
@@ -394,18 +431,16 @@ class RewardController:
             deadline_ns = on_ns + round(duration_ms * 1_000_000)
             while (remaining_ns := deadline_ns - self._clock_ns()) > 0:
                 self._sleep(remaining_ns / 1_000_000_000)
-        except KeyboardInterrupt:
-            _transition, cleanup_error = self._deactivate()
-            if cleanup_error is not None:
-                raise cleanup_error
-            raise
-        except Exception as exc:
+        except BaseException as exc:
             _transition, cleanup_error = self._deactivate()
             raise RewardDeliveryError(
                 str(exc),
-                activation_started=activation_started,
+                activation_attempted=activation_attempted,
+                may_have_activated=activation_attempted,
+                activation_confirmed=activation_confirmed,
                 inactive_confirmed=cleanup_error is None,
                 cleanup_error=cleanup_error,
+                original_error=exc,
             ) from exc
 
         try:
@@ -427,11 +462,12 @@ class RewardController:
                 ),
                 events,
             )
-            if isinstance(first_error, KeyboardInterrupt) and inactive_confirmed:
-                raise
             raise RewardDeliveryError(
                 "reward valve inactive transition failed",
-                activation_started=True,
+                activation_attempted=True,
+                may_have_activated=True,
+                activation_confirmed=True,
+                original_error=first_error,
                 inactive_confirmed=inactive_confirmed,
                 cleanup_error=retry_error or first_error,
             ) from first_error
@@ -527,6 +563,9 @@ class RewardArbiter:
     @property
     def event_handoff(self) -> BoundedEventHandoff | None:
         return self.controller.event_handoff
+
+    def event_handoff_diagnostics(self) -> dict[str, object]:
+        return self.controller.event_handoff_diagnostics()
 
     def deliver_task(
         self,

@@ -19,6 +19,7 @@ from rpi_vstim.hardware.calibration import (
     write_profile,
 )
 from rpi_vstim.hardware.reward import (
+    BoundedEventHandoff,
     RewardArbiter,
     RewardBusyError,
     RewardConfigurationError,
@@ -98,6 +99,106 @@ def test_one_reward_has_one_continuous_interval_and_four_events():
     assert delivery.actual_on_interval_ns >= 50_000_000
     assert events[2].actual_on_interval_ns == delivery.actual_on_interval_ns
     assert all(event.gpio_bcm == 19 for event in events)
+
+
+def test_active_write_failure_is_conservatively_maybe_delivered():
+    backend = FakeOutputBackend(fail_active=True)
+    controller = RewardController(backend, active_config().hardware, duration_ms=1)
+
+    with pytest.raises(RewardDeliveryError) as caught:
+        controller.deliver()
+    controller.close_events()
+
+    error = caught.value
+    assert error.activation_attempted
+    assert error.may_have_activated
+    assert not error.activation_confirmed
+    assert error.inactive_confirmed
+    assert backend.levels == [("reward_left", 1), ("reward_left", 0)]
+
+
+def test_keyboard_interrupt_during_open_is_wrapped_and_deactivates():
+    clock = FakeClock()
+    backend = FakeOutputBackend(clock=clock)
+
+    def interrupt(_seconds):
+        raise KeyboardInterrupt
+
+    controller = RewardController(
+        backend,
+        active_config().hardware,
+        duration_ms=1000,
+        clock_ns=clock.ns,
+        sleep=interrupt,
+    )
+    with pytest.raises(RewardDeliveryError) as caught:
+        controller.deliver()
+    controller.close_events()
+
+    assert isinstance(caught.value.original_error, KeyboardInterrupt)
+    assert caught.value.may_have_activated
+    assert caught.value.inactive_confirmed
+    assert backend.levels == [("reward_left", 1), ("reward_left", 0)]
+
+
+def test_task_accounting_counts_maybe_delivered_reward():
+    backend = FakeOutputBackend(fail_active=True)
+    controller = RewardController(backend, active_config().hardware, duration_ms=1)
+    accounting = WaterAccounting()
+    arbiter = RewardArbiter(
+        controller,
+        task_resolution=RewardDurationResolution(1, 2.0),
+        accounting=accounting,
+    )
+
+    with pytest.raises(RewardDeliveryError):
+        arbiter.deliver_task(session_id="s")
+    arbiter.close()
+
+    assert accounting.task_reward_water_ul == 2.0
+
+
+def test_failed_cleanup_retry_still_counts_task_water():
+    backend = FakeOutputBackend(fail_inactive=2)
+    controller = RewardController(backend, active_config().hardware, duration_ms=1)
+    accounting = WaterAccounting()
+    arbiter = RewardArbiter(
+        controller,
+        task_resolution=RewardDurationResolution(1, 2.0),
+        accounting=accounting,
+    )
+
+    with pytest.raises(RewardDeliveryError) as caught:
+        arbiter.deliver_task(session_id="s")
+    arbiter.close()
+
+    assert not caught.value.inactive_confirmed
+    assert accounting.task_reward_water_ul == 2.0
+
+
+def test_event_handoff_reports_drops_errors_and_close_failures():
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_sink(_event):
+        started.set()
+        release.wait(1)
+
+    handoff = BoundedEventHandoff(blocked_sink, maxsize=1)
+    assert handoff.publish("first")
+    assert started.wait(1)
+    assert handoff.publish("second")
+    assert not handoff.publish("third")
+    with pytest.raises(RuntimeError, match="did not close cleanly"):
+        handoff.close(timeout_s=0.01)
+    release.set()
+    handoff.close(timeout_s=1)
+    assert handoff.diagnostics()["dropped_count"] == 1
+
+    errors = BoundedEventHandoff(lambda _event: (_ for _ in ()).throw(RuntimeError("sink")))
+    assert errors.publish("event")
+    errors.close(timeout_s=1)
+    assert errors.diagnostics()["error_count"] == 1
 
 
 def test_reward_exception_returns_to_inactive_level():

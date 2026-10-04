@@ -111,8 +111,14 @@ def build_simulated_services(
     )
 
 
-def build_session_operator_controls(config: Config, session: SessionOutput, arbiter: RewardArbiter,
-                                    *, stdin: Any = None, enable_keyboard: bool = True) -> OperatorControlService:
+def build_session_operator_controls(
+    config: Config,
+    session: SessionOutput,
+    arbiter: RewardArbiter,
+    *,
+    stdin: Any = None,
+    enable_keyboard: bool = True,
+) -> OperatorControlService:
     """Build controls against the session's existing reward owner."""
     if arbiter.event_handoff is None:
         raise RuntimeError("session reward arbiter must have a session event handoff")
@@ -125,6 +131,42 @@ def build_session_operator_controls(config: Config, session: SessionOutput, arbi
     if stdin is not None:
         kwargs["stdin"] = stdin
     return OperatorControlService(config, **kwargs)
+
+
+def compose_session_reward_controls(
+    config: Config,
+    session: SessionOutput,
+    services: RuntimeServices,
+    backend: Any | None,
+) -> RewardArbiter | None:
+    """Compose one reward owner and optional operator controls for a session."""
+    arbiter = services.reward_arbiter
+    if arbiter is None and (
+        config.hardware.reward_open_duration_ms is not None
+        or config.hardware.reward_target_ul is not None
+        or config.operator_controls.manual_bait_enabled
+    ):
+        if backend is None:
+            raise RuntimeError("session reward configuration requires one output backend")
+        arbiter = RewardArbiter.from_config(
+            backend,
+            config,
+            session_id=session.context.session_id,
+            event_sink=session.record_reward_event,
+        )
+        services.reward_arbiter = arbiter
+    if arbiter is not None:
+        session.attach_reward_arbiter(arbiter)
+    if services.operator_controls is not None:
+        if arbiter is None or getattr(services.operator_controls, "_arbiter", None) is not arbiter:
+            raise RuntimeError("active session operator controls must use the session reward arbiter")
+    elif config.operator_controls.manual_bait_enabled:
+        if arbiter is None:
+            raise RuntimeError("manual bait requires the session reward arbiter")
+        services.operator_controls = build_session_operator_controls(
+            config, session, arbiter, enable_keyboard=False
+        )
+    return arbiter
 
 
 def build_simulation_plan(config: Config, *, protocol_name: str | None, seed: int):
@@ -267,45 +309,12 @@ def run_simulated_session(
     )
     session = new_session(config, protocol_name=selected_protocol, session_id=session_id, seed=seed)
     session.write_initial_outputs()
-    reward_arbiter = services.reward_arbiter
-    if reward_arbiter is None and (
-        config.hardware.reward_open_duration_ms is not None
-        or config.hardware.reward_target_ul is not None
-        or config.operator_controls.manual_bait_enabled
-    ):
-        reward_arbiter = RewardArbiter.from_config(
-            SimulatedRewardBackend(), config, session_id=session_id,
-            event_sink=session.record_reward_event,
-        )
-        services.reward_arbiter = reward_arbiter
-    if reward_arbiter is not None:
-        session.attach_reward_arbiter(reward_arbiter)
-    if services.operator_controls is not None:
-        services.operator_controls.start_background()
-    session.write_preflight_report(
-        PreflightReport(
-            checks=[
-                {
-                    "name": "simulation_mode",
-                    "passed": True,
-                    "detail": "hardware access disabled",
-                }
-            ]
-        )
-    )
-    session.write_cache_manifest({"bounded": True, "mode": "simulation", "entries": []})
-    session.write_resource_summary(
-        {
-            "mode": "simulation",
-            "camera_count": len(config.cameras.devices),
-            "bounded_queues": True,
-        }
-    )
     lifecycle = services.lifecycle
     degraded: list[str] = []
     error: str | None = None
     cleanup_errors: list[str] = []
     sequence_number = 0
+    reward_arbiter: RewardArbiter | None = None
 
     def publish(message: TelemetryMessage) -> None:
         nonlocal degraded
@@ -333,6 +342,33 @@ def run_simulated_session(
         ))
 
     try:
+        reward_arbiter = compose_session_reward_controls(
+            config,
+            session,
+            services,
+            None if services.reward_arbiter is not None else SimulatedRewardBackend(),
+        )
+        session.write_preflight_report(
+            PreflightReport(
+                checks=[
+                    {
+                        "name": "simulation_mode",
+                        "passed": True,
+                        "detail": "hardware access disabled",
+                    }
+                ]
+            )
+        )
+        session.write_cache_manifest({"bounded": True, "mode": "simulation", "entries": []})
+        session.write_resource_summary(
+            {
+                "mode": "simulation",
+                "camera_count": len(config.cameras.devices),
+                "bounded_queues": True,
+            }
+        )
+        if services.operator_controls is not None:
+            services.operator_controls.start_background()
         session.write_plan(plan)
         if fault == "asset_manifest_creation":
             raise RuntimeError("injected asset_manifest_creation failure")
@@ -385,6 +421,16 @@ def run_simulated_session(
             if event.frame_count:
                 session.write_display_result(
                     services.display.present_color(color, frames=event.frame_count)
+                )
+            if (
+                reward_arbiter is not None
+                and reward_arbiter.task_resolution is not None
+                and event.metadata.get("reward_scheduled") is True
+            ):
+                reward_arbiter.deliver_task(
+                    command_id=event.sequence_id or event.event_id,
+                    session_id=session.context.session_id,
+                    trial_id=event.trial_id,
                 )
             session.record_event(
                 "PLAN_EVENT",

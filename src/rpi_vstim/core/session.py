@@ -128,6 +128,21 @@ class SessionOutput:
         provenance["water_accounting"] = accounting.as_dict()
         atomic_write_json(path, provenance)
 
+    def _write_reward_handoff_diagnostics(self) -> None:
+        if self._reward_arbiter is None:
+            return
+        diagnostics = getattr(self._reward_arbiter, "event_handoff_diagnostics", dict)()
+        if not diagnostics:
+            return
+        self._manifest["reward_event_handoff"] = diagnostics
+        if self._manifest:
+            self._write_manifest()
+        path = self.context.session_root / "provenance.json"
+        if path.is_file():
+            provenance = json.loads(path.read_text(encoding="utf-8"))
+            provenance["reward_event_handoff"] = diagnostics
+            atomic_write_json(path, provenance)
+
     def _write_manifest(self) -> None:
         atomic_write_json(self.context.session_root / "session_manifest.json", self._manifest)
 
@@ -296,7 +311,13 @@ class SessionOutput:
             accounting = getattr(self._reward_arbiter, "accounting", None)
             if accounting is not None:
                 self._write_water_provenance(accounting)
-            self._reward_arbiter.close()
+            self._write_reward_handoff_diagnostics()
+            try:
+                self._reward_arbiter.close()
+            except BaseException:
+                self._write_reward_handoff_diagnostics()
+                raise
+            self._write_reward_handoff_diagnostics()
             self._reward_arbiter = None
         if self._display_stream is not None:
             self._display_stream.flush()

@@ -14,7 +14,7 @@ import time
 import tty
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +144,20 @@ class LocalOperatorControlEndpoint:
         if self.path.exists() and stat.S_ISSOCK(self.path.stat().st_mode):
             self.path.unlink()
 
+    def wake(self) -> None:
+        """Wake a polling worker without creating an operator request."""
+        if self._server is None:
+            return
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.settimeout(0.1)
+            client.connect(str(self.path))
+            client.sendall(b"{}")
+        except OSError:
+            pass
+        finally:
+            client.close()
+
 
 def send_manual_bait(path: Path, *, timeout_s: float = 1.0) -> dict[str, object]:
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -206,11 +220,15 @@ class OperatorControlService:
         self._pending: deque[ManualBaitRequest] = deque(maxlen=MAX_PENDING_BAIT_REQUESTS)
         self._pending_lock = threading.Lock()
         self._request_index = 0
+        self._accepting_requests = True
         self._started = False
         self._last_request_ns: int | None = None
         self._keyboard_fd: int | None = None
         self._terminal_state: list[Any] | None = None
         self._stop_event = threading.Event()
+        self._startup_event = threading.Event()
+        self._startup_error: BaseException | None = None
+        self._worker_exited = threading.Event()
         self._thread: threading.Thread | None = None
         self.errors: list[str] = []
 
@@ -226,6 +244,8 @@ class OperatorControlService:
         if source not in {"terminal", "remote_cli"}:
             raise OperatorControlError(f"unsupported operator source: {source}")
         now_ns = time.monotonic_ns()
+        if not self._accepting_requests:
+            return OperatorEnqueueResult(False, reason="operator control is stopping")
         if not self.config.operator_controls.manual_bait_enabled:
             reason = "manual bait is disabled"
             self._emit({"event": "manual_bait_rejected", "source": source, "reason": reason,
@@ -256,6 +276,8 @@ class OperatorControlService:
             return OperatorEnqueueResult(True, request_index=index)
 
     def _on_button_request(self, request: ManualBaitRequest) -> None:
+        if not self._accepting_requests:
+            return
         if not self.config.operator_controls.manual_bait_enabled:
             self._emit({"event": "manual_bait_rejected", "source": "physical_button",
                         "reason": "manual bait is disabled", "gpio_bcm": request.bcm_pin,
@@ -289,7 +311,7 @@ class OperatorControlService:
                 )
                 return
             self._last_request_ns = request.timestamp_ns
-            self._pending.append(request)
+            self._pending.append(replace(request, request_index=self._next_request_index()))
 
     def _on_button_raw_edge(self, edge: Any) -> None:
         self._emit(
@@ -344,9 +366,13 @@ class OperatorControlService:
                 self._monitor.start()
             self._endpoint.start()
             self._start_keyboard()
+            self._accepting_requests = True
             self._started = True
         except BaseException:
-            self.stop()
+            try:
+                self._teardown_resources()
+            except BaseException as cleanup_error:  # noqa: BLE001 — preserve startup cause
+                self.errors.append(f"startup cleanup: {cleanup_error}")
             raise
 
     def _start_keyboard(self) -> None:
@@ -407,48 +433,113 @@ class OperatorControlService:
             )
 
     def run_forever(self, *, stop: Callable[[], bool] | None = None) -> None:
-        self.start()
         try:
-            while not self._stop_event.is_set() and (stop is None or not stop()):
-                self._endpoint.poll(0.02)
-                self._poll_keyboard()
-                self._drain_one()
+            self.start()
+            self._run_loop(stop=stop)
         finally:
             self.stop()
+
+    def _run_loop(self, *, stop: Callable[[], bool] | None = None) -> None:
+        while not self._stop_event.is_set() and (stop is None or not stop()):
+            self._endpoint.poll(0.02)
+            self._poll_keyboard()
+            self._drain_one()
+
+    def _background_main(self) -> None:
+        try:
+            self.start()
+            self._startup_event.set()
+            self._run_loop()
+        except BaseException as exc:  # noqa: BLE001 — propagate startup and worker failures
+            self._startup_error = exc
+            self.errors.append(str(exc))
+            self._startup_event.set()
+        finally:
+            self._worker_exited.set()
 
     def start_background(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self.run_forever, name="rpi-vstim-operator", daemon=True)
+        self._startup_event.clear()
+        self._worker_exited.clear()
+        self._startup_error = None
+        self._thread = threading.Thread(
+            target=self._background_main,
+            name="rpi-vstim-operator",
+            daemon=True,
+        )
         self._thread.start()
+        if not self._startup_event.wait(2.0):
+            self.stop()
+            raise OperatorControlError("operator control startup acknowledgement timed out")
+        if self._startup_error is not None:
+            error = self._startup_error
+            self.stop()
+            raise OperatorControlError(f"operator control failed to start: {error}") from error
 
     def stop(self) -> None:
+        self._accepting_requests = False
         self._stop_event.set()
+        self._endpoint.wake()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+            if thread.is_alive() or not self._worker_exited.is_set():
+                self._force_inactive()
+                raise OperatorControlError("operator control worker did not stop cleanly")
+            self._thread = None
+        self._teardown_resources()
+
+    def _force_inactive(self) -> None:
+        try:
+            if self._arbiter is not None:
+                self._arbiter.controller._deactivate()
+            elif self._backend is not None:
+                line = self.config.hardware.output_line("reward_left")
+                self._backend.set_level("reward_left", line.initial_level)
+        except BaseException as exc:  # noqa: BLE001 — report, never mask stop failure
+            self.errors.append(f"operator force-inactive failed: {exc}")
+
+    def _teardown_resources(self) -> None:
+        errors: list[BaseException] = []
         if self._keyboard_fd is not None and self._terminal_state is not None:
-            termios.tcsetattr(self._keyboard_fd, termios.TCSADRAIN, self._terminal_state)
+            try:
+                termios.tcsetattr(self._keyboard_fd, termios.TCSADRAIN, self._terminal_state)
+            except BaseException as exc:  # noqa: BLE001 — continue cleanup
+                errors.append(exc)
         self._keyboard_fd = None
         self._terminal_state = None
         try:
             if self._monitor is not None:
                 self._monitor.stop()
-        finally:
-            self._monitor = None
+        except BaseException as exc:  # noqa: BLE001 — continue cleanup
+            errors.append(exc)
+        self._monitor = None
+        try:
             self._endpoint.close()
-            try:
-                if self._manual is not None:
-                    self._manual.close()
-                    self._manual = None
-                if self._backend is not None:
-                    self._backend.stop()
-            finally:
-                self._backend = None
-                self._started = False
+        except BaseException as exc:  # noqa: BLE001 — continue cleanup
+            errors.append(exc)
+        try:
+            if self._manual is not None:
+                self._manual.close()
+        except BaseException as exc:  # noqa: BLE001 — continue cleanup
+            errors.append(exc)
+        self._manual = None
+        try:
+            if self._backend is not None:
+                self._backend.stop()
+        except BaseException as exc:  # noqa: BLE001 — continue cleanup
+            errors.append(exc)
+        self._backend = None
+        self._started = False
         if self._owns_event_handoff and self._event_handoff is not None:
-            self._event_handoff.close()
-            self._event_handoff = None
-            self._event_sink = None
-        thread = self._thread
-        self._thread = None
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=1.0)
+            try:
+                self._event_handoff.close()
+            except BaseException as exc:  # noqa: BLE001 — continue cleanup
+                errors.append(exc)
+            else:
+                self._event_handoff = None
+                self._event_sink = None
+        if errors:
+            raise OperatorControlError("operator control cleanup failed: " + "; ".join(map(str, errors)))

@@ -20,6 +20,19 @@ are logged separately. The optional `max_manual_bait_water_ul` budget rejects
 requests before GPIO19 is actuated; task and operator water counters remain
 separate. `bait_auto_suction = false` is the default.
 
+During an active session, startup composes one `RewardArbiter` and one
+`RewardController` for both scheduled task rewards and manual bait. The
+session-owned AF_UNIX endpoint and optional GPIO23 monitor only enqueue bounded
+requests to that arbiter; they never create a second GPIO19 owner. A manual
+request arriving while a task reward is active is rejected as busy.
+
+Reward events are handed to a bounded background writer. Filesystem writes are
+therefore outside the GPIO19 active interval. Final provenance records event
+handoff drops/errors and a session is cleanup-failed if that writer cannot
+flush/stop. If activation was attempted but delivery cleanup is uncertain,
+water accounting conservatively retains the requested volume and logs an
+uncertain/partial delivery.
+
 ## Normal baiting
 
 Configure measured GPIO23 polarity before enabling the button:

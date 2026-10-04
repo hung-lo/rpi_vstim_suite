@@ -10,11 +10,16 @@ from rpi_vstim.core.config import Config, HardwareConfig, config_from_mapping
 from rpi_vstim.hardware.operator_bait import ManualBaitRequest, ManualBaitService
 from rpi_vstim.hardware.operator_control import (
     LocalOperatorControlEndpoint,
+    OperatorControlError,
     OperatorControlService,
     send_manual_bait,
 )
 from rpi_vstim.hardware.ownership import RewardHardwareBusyError, RewardHardwareOwnership
-from rpi_vstim.hardware.reward import RewardDurationResolution
+from rpi_vstim.hardware.reward import (
+    RewardArbiter,
+    RewardController,
+    RewardDurationResolution,
+)
 from rpi_vstim.hardware.water import WaterAccounting, WaterLimitError
 from rpi_vstim.hardware.water_service import (
     MAX_CONTINUOUS_WATER_OPEN_SECONDS,
@@ -241,6 +246,25 @@ def test_terminal_b_is_one_queued_request_and_autorepeat_is_rejected(tmp_path: P
     assert next(iter(service._pending)).source == "terminal"
 
 
+def test_physical_and_terminal_requests_share_service_global_ids():
+    base = reward_config()
+    config = replace(
+        base,
+        operator_controls=replace(
+            base.operator_controls,
+            manual_bait_enabled=True,
+            bait_button_enabled=True,
+            bait_button_idle_level=0,
+            bait_button_active_level=1,
+            bait_reward_ul=3.0,
+        ),
+    )
+    service = OperatorControlService(config, backend=FakeBackend(), enable_keyboard=False)
+    service._on_button_request(ManualBaitRequest(23, 1, 900, "physical_button"))
+    assert service._enqueue_source("terminal").accepted
+    assert [request.request_index for request in service._pending] == [1, 2]
+
+
 def test_button_disabled_does_not_claim_gpio23_but_terminal_path_remains_available(tmp_path: Path):
     profile_path = tmp_path / "calibration.json"
     from rpi_vstim.hardware.calibration import (
@@ -296,6 +320,61 @@ def test_button_disabled_does_not_claim_gpio23_but_terminal_path_remains_availab
         assert service.errors == []
     finally:
         service.stop()
+
+
+def test_background_operator_service_acknowledges_start_and_joins_before_shared_owner_cleanup(
+    tmp_path: Path,
+):
+    base = reward_config()
+    config = replace(
+        base,
+        operator_controls=replace(
+            base.operator_controls,
+            manual_bait_enabled=True,
+            bait_button_enabled=False,
+            bait_reward_ul=3.0,
+        ),
+        paths=replace(base.paths, operator_control_socket=tmp_path / "operator.sock"),
+    )
+    backend = FakeBackend()
+    events = []
+    arbiter = RewardArbiter(
+        RewardController(backend, config.hardware, duration_ms=1, event_sink=events.append),
+        manual_resolution=RewardDurationResolution(1, 3.0),
+    )
+    service = OperatorControlService(
+        config,
+        arbiter=arbiter,
+        event_sink=arbiter.event_handoff,
+        enable_keyboard=False,
+    )
+    try:
+        service.start_background()
+    except OperatorControlError as exc:
+        arbiter.close()
+        if isinstance(exc.__cause__, PermissionError):
+            pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+        raise
+    assert service._thread is not None and service._thread.is_alive()
+    service.stop()
+    assert service._thread is None
+    assert not config.paths.operator_control_socket.exists()
+    assert backend.transitions == []
+    arbiter.close()
+
+
+def test_background_start_failure_is_propagated(monkeypatch, tmp_path: Path):
+    base = reward_config()
+    config = replace(base, paths=replace(base.paths, operator_control_socket=tmp_path / "operator.sock"))
+    service = OperatorControlService(config, backend=FakeBackend(), enable_keyboard=False)
+
+    def fail_start():
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(service, "start", fail_start)
+    with pytest.raises(OperatorControlError, match="failed to start"):
+        service.start_background()
+    assert service._thread is None
 
 
 def test_reward_hardware_ownership_blocks_second_owner(tmp_path: Path):

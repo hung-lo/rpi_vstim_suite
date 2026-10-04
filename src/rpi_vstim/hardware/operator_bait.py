@@ -366,12 +366,12 @@ class ManualBaitService:
         try:
             if self.arbiter is not None:
                 return self.arbiter.deliver_manual(
-                    command_id=f"manual-bait-{request.request_index}",
+                    command_id=f"manual-bait-{request.request_index:06d}",
                     session_id=self.session_id,
                     source=request.source,
                 )
             return self.controller.deliver(
-                command_id=f"manual-bait-{request.request_index}",
+                command_id=f"manual-bait-{request.request_index:06d}",
                 session_id=self.session_id,
                 source=request.source,
                 reason="operator_bait",
