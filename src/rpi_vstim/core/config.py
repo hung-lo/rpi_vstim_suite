@@ -15,6 +15,7 @@ from rpi_vstim.hardware.policy import (
     LICK_CENTER_GPIO_BCM,
     OPERATOR_BAIT_GPIO_BCM,
     RESERVED_GPIO_BCM,
+    TRIGGER_OUT_GPIO_BCM,
     reserved_gpio_message,
 )
 
@@ -138,6 +139,7 @@ class HardwareConfig:
 
 @dataclass(frozen=True)
 class OperatorControlsConfig:
+    manual_bait_enabled: bool = False
     bait_button_enabled: bool = False
     bait_button_gpio: int = OPERATOR_BAIT_GPIO_BCM
     bait_button_idle_level: int | None = None
@@ -263,6 +265,11 @@ class Config:
         reserved = RESERVED_GPIO_BCM.intersection(pins.values())
         if reserved:
             raise ConfigError(reserved_gpio_message(min(reserved)))
+        if any(
+            name != "ttl" and pin == TRIGGER_OUT_GPIO_BCM
+            for name, pin in pins.items()
+        ):
+            raise ConfigError(reserved_gpio_message(TRIGGER_OUT_GPIO_BCM))
         for name, level in {
             "reward_initial_level": self.hardware.reward_initial_level,
             "suction_initial_level": self.hardware.suction_initial_level,
@@ -291,12 +298,30 @@ class Config:
         if not isinstance(self.hardware.chip, int) or self.hardware.chip < 0:
             raise ConfigError("hardware chip must be a non-negative integer")
         controls = self.operator_controls
+        if type(controls.manual_bait_enabled) is not bool:
+            raise ConfigError("manual_bait_enabled must be true or false")
+        if type(controls.bait_button_enabled) is not bool:
+            raise ConfigError("bait_button_enabled must be true or false")
         for name, level in {
             "bait_button_idle_level": controls.bait_button_idle_level,
             "bait_button_active_level": controls.bait_button_active_level,
         }.items():
             if level is not None and (type(level) is not int or level not in (0, 1)):
                 raise ConfigError(f"{name} must be 0, 1, or unset")
+        if controls.manual_bait_enabled:
+            if (
+                controls.bait_reward_ul is None
+                or type(controls.bait_reward_ul) not in (int, float)
+                or not math.isfinite(controls.bait_reward_ul)
+                or controls.bait_reward_ul <= 0
+            ):
+                raise ConfigError("manual bait requires positive bait_reward_ul")
+        elif controls.bait_reward_ul is not None and (
+            type(controls.bait_reward_ul) not in (int, float)
+            or not math.isfinite(controls.bait_reward_ul)
+            or controls.bait_reward_ul <= 0
+        ):
+            raise ConfigError("bait_reward_ul must be positive when configured")
         if controls.bait_button_enabled:
             if controls.bait_button_idle_level is None or controls.bait_button_active_level is None:
                 raise ConfigError(
@@ -304,19 +329,8 @@ class Config:
                 )
             if controls.bait_button_idle_level == controls.bait_button_active_level:
                 raise ConfigError("operator bait button idle and active levels must differ")
-            if (
-                controls.bait_reward_ul is None
-                or type(controls.bait_reward_ul) not in (int, float)
-                or not math.isfinite(controls.bait_reward_ul)
-                or controls.bait_reward_ul <= 0
-            ):
-                raise ConfigError("enabled operator bait button requires positive bait_reward_ul")
-        elif controls.bait_reward_ul is not None and (
-            type(controls.bait_reward_ul) not in (int, float)
-            or not math.isfinite(controls.bait_reward_ul)
-            or controls.bait_reward_ul <= 0
-        ):
-            raise ConfigError("bait_reward_ul must be positive when configured")
+            if not controls.manual_bait_enabled:
+                raise ConfigError("enabled operator bait button requires manual_bait_enabled")
         if (
             not isinstance(controls.minimum_interval_ms, int)
             or controls.minimum_interval_ms <= 0

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -59,8 +60,10 @@ class SessionOutput:
         self.context = context
         self._reward_resolution = reward_resolution
         self._operator_bait_provenance = operator_bait_provenance or {}
+        self._reward_arbiter: Any | None = None
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
+        self._event_lock = threading.Lock()
         self._display_stream: TextIO | None = None
         self._display_summary = {
             "schema_version": 1,
@@ -110,6 +113,20 @@ class SessionOutput:
             self._display_summary,
         )
         self.record_event("SESSION_CREATED", lifecycle="CREATED")
+
+    def attach_reward_arbiter(self, arbiter: Any) -> None:
+        self._reward_arbiter = arbiter
+        accounting = getattr(arbiter, "accounting", None)
+        if accounting is not None:
+            self._write_water_provenance(accounting)
+
+    def _write_water_provenance(self, accounting: Any) -> None:
+        path = self.context.session_root / "provenance.json"
+        if not path.is_file():
+            return
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+        provenance["water_accounting"] = accounting.as_dict()
+        atomic_write_json(path, provenance)
 
     def _write_manifest(self) -> None:
         atomic_write_json(self.context.session_root / "session_manifest.json", self._manifest)
@@ -225,17 +242,18 @@ class SessionOutput:
         sequence_id: str = "",
         detail: str = "",
     ) -> None:
-        if self._events is None:
-            raise RuntimeError("session outputs are not initialized")
-        self._events.write(
-            {
-                "event": event,
-                "lifecycle": lifecycle,
-                "sequence_id": sequence_id,
-                "timestamp_utc_ns": utc_ns(),
-                "detail": detail,
-            }
-        )
+        with self._event_lock:
+            if self._events is None:
+                raise RuntimeError("session outputs are not initialized")
+            self._events.write(
+                {
+                    "event": event,
+                    "lifecycle": lifecycle,
+                    "sequence_id": sequence_id,
+                    "timestamp_utc_ns": utc_ns(),
+                    "detail": detail,
+                }
+            )
 
     def record_reward_event(self, event: Any) -> None:
         """Write a hardware reward event without changing the CSV schema."""
@@ -274,6 +292,12 @@ class SessionOutput:
         atomic_write_json(self.context.session_root / "final_status.json", self._manifest)
 
     def close(self) -> None:
+        if self._reward_arbiter is not None:
+            accounting = getattr(self._reward_arbiter, "accounting", None)
+            if accounting is not None:
+                self._write_water_provenance(accounting)
+            self._reward_arbiter.close()
+            self._reward_arbiter = None
         if self._display_stream is not None:
             self._display_stream.flush()
             os.fsync(self._display_stream.fileno())
@@ -285,7 +309,8 @@ class SessionOutput:
                 self._display_summary,
             )
         if self._events is not None:
-            self._events.close()
+            with self._event_lock:
+                self._events.close()
             self._events = None
         if self._manifest:
             self._manifest["outputs_finalized"] = True
@@ -325,7 +350,7 @@ def new_session(
     if (
         config.hardware.reward_open_duration_ms is not None
         or config.hardware.reward_target_ul is not None
-        or config.operator_controls.bait_button_enabled
+        or config.operator_controls.manual_bait_enabled
     ):
         from rpi_vstim.hardware.reward import resolve_reward_duration
 
@@ -334,22 +359,28 @@ def new_session(
         or config.hardware.reward_target_ul is not None
     ):
         reward_resolution = resolve_reward_duration(config)
-    if config.operator_controls.bait_button_enabled:
+    operator_bait_provenance = {
+        "operator_bait_enabled": config.operator_controls.manual_bait_enabled,
+        "operator_bait_button_enabled": config.operator_controls.bait_button_enabled,
+        "operator_bait_button_gpio": config.operator_controls.bait_button_gpio,
+        "operator_bait_button_idle_level": config.operator_controls.bait_button_idle_level,
+        "operator_bait_button_active_level": config.operator_controls.bait_button_active_level,
+        "operator_bait_max_water_ul": config.operator_controls.max_manual_bait_water_ul,
+        "operator_bait_auto_suction": config.operator_controls.bait_auto_suction,
+    }
+    if config.operator_controls.manual_bait_enabled:
         bait_resolution = resolve_reward_duration(
             config,
             target_volume_ul=config.operator_controls.bait_reward_ul,
         )
-        operator_bait_provenance = {
-            "operator_bait_button_gpio": config.operator_controls.bait_button_gpio,
-            "operator_bait_max_water_ul": config.operator_controls.max_manual_bait_water_ul,
-            "operator_bait_auto_suction": config.operator_controls.bait_auto_suction,
+        operator_bait_provenance.update({
             "operator_bait_reward_target_ul": bait_resolution.target_volume_ul,
             "operator_bait_resolved_open_duration_ms": bait_resolution.open_duration_ms,
             "operator_bait_calibration_id": bait_resolution.calibration_id,
             "operator_bait_calibration_file_sha256": bait_resolution.calibration_sha256,
             "operator_bait_calibration_created_at": bait_resolution.calibration_created_at,
             "operator_bait_delivery_mode": bait_resolution.delivery_mode,
-        }
+        })
     return SessionOutput(context, reward_resolution, operator_bait_provenance)
 
 

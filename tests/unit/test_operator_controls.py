@@ -32,6 +32,12 @@ class FakeBackend:
     def set_level(self, role, level):
         self.transitions.append((role, level))
 
+    def start(self):
+        return None
+
+    def stop(self):
+        return None
+
 
 class FakeRewardController:
     def __init__(self):
@@ -133,6 +139,51 @@ def test_water_service_hold_requires_release_and_times_out_without_reopen():
     assert backend.transitions == [("reward_left", 1), ("reward_left", 0), ("reward_left", 1), ("reward_left", 0)]
 
 
+def test_water_service_rearms_after_one_idle_edge_without_second_sample():
+    clock = FakeClock()
+    backend = FakeBackend()
+    controller = WaterServiceController(
+        backend, reward_config().hardware, clock_ns=clock, sleep=clock.sleep
+    )
+    hold = WaterHoldStateMachine(
+        controller, idle_level=0, active_level=1, release_stable_ms=25, clock_ns=clock
+    )
+    hold.handle_level(1, 1_000_000)
+    hold.handle_level(0, 2_000_000)
+    assert not controller.open
+    hold.handle_level(1, 30_000_000)
+    assert controller.open
+
+
+def test_water_service_close_failure_keeps_fault_state_and_retries():
+    class FailingBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.failures = 3
+
+        def set_level(self, role, level):
+            self.transitions.append((role, level))
+            if level == 0 and self.failures:
+                self.failures -= 1
+                raise RuntimeError("inactive write failed")
+
+    backend = FailingBackend()
+    controller = WaterServiceController(backend, reward_config().hardware)
+    controller.open_now(requested_seconds=1, source="test")
+    with pytest.raises(WaterServiceError, match="inactive transition failed"):
+        controller.close(source="test")
+    assert controller.open
+    controller.close(source="cleanup")
+    assert not controller.open
+    assert backend.transitions == [
+        ("reward_left", 1),
+        ("reward_left", 0),
+        ("reward_left", 0),
+        ("reward_left", 0),
+        ("reward_left", 0),
+    ]
+
+
 def test_water_accounting_separates_task_and_manual_bait():
     accounting = WaterAccounting(max_manual_bait_water_ul=5)
     accounting.record_task_reward(2)
@@ -172,6 +223,8 @@ def test_terminal_b_is_one_queued_request_and_autorepeat_is_rejected(tmp_path: P
     config = replace(
         Config(),
         hardware=HardwareConfig(backend="lgpio", reward_active_level=1),
+        operator_controls=replace(Config().operator_controls, manual_bait_enabled=True,
+                                  bait_reward_ul=3.0),
         paths=replace(
             Config().paths,
             reward_hardware_lock_path=tmp_path / "reward.lock",
@@ -186,6 +239,63 @@ def test_terminal_b_is_one_queued_request_and_autorepeat_is_rejected(tmp_path: P
     assert not service.submit_terminal_key("b")
     assert not service.submit_terminal_key("x")
     assert next(iter(service._pending)).source == "terminal"
+
+
+def test_button_disabled_does_not_claim_gpio23_but_terminal_path_remains_available(tmp_path: Path):
+    profile_path = tmp_path / "calibration.json"
+    from rpi_vstim.hardware.calibration import (
+        CalibrationCondition,
+        CalibrationProfile,
+        write_profile,
+    )
+
+    write_profile(
+        CalibrationProfile.create(
+            calibration_id="test",
+            rig_id="test-rig",
+            conditions=(
+                CalibrationCondition.measured(10, 10, 0, 0.02),
+                CalibrationCondition.measured(20, 10, 0, 0.04),
+            ),
+        ),
+        profile_path,
+    )
+    base = Config()
+    config = replace(
+        base,
+        hardware=replace(
+            base.hardware,
+            backend="lgpio",
+            reward_active_level=1,
+            reward_calibration_profile=profile_path,
+        ),
+        operator_controls=replace(
+            base.operator_controls,
+            manual_bait_enabled=True,
+            bait_button_enabled=False,
+            bait_reward_ul=2.0,
+        ),
+        paths=replace(
+            base.paths,
+            reward_hardware_lock_path=tmp_path / "reward.lock",
+            operator_control_socket=tmp_path / "operator.sock",
+            operator_event_log=tmp_path / "events.jsonl",
+        ),
+    )
+    service = OperatorControlService(config, backend=FakeBackend(), enable_keyboard=False)
+    try:
+        service.start()
+    except PermissionError as exc:
+        if exc.errno == errno.EPERM:
+            pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+        raise
+    try:
+        assert service._monitor is None
+        assert service.submit_terminal_key("b")
+        service._drain_one()
+        assert service.errors == []
+    finally:
+        service.stop()
 
 
 def test_reward_hardware_ownership_blocks_second_owner(tmp_path: Path):
@@ -244,3 +354,7 @@ def test_gpio9_is_rejected_for_button_or_normal_outputs():
         config_from_mapping({"operator_controls": {"bait_button_gpio": 9}})
     with pytest.raises(ValueError, match="BCM GPIO9 is reserved for IRIG output"):
         config_from_mapping({"hardware": {"ttl_pin_bcm": 9}})
+    config = config_from_mapping({"hardware": {"ttl_pin_bcm": 24}})
+    assert config.hardware.ttl_pin_bcm == 24
+    with pytest.raises(ValueError, match="GPIO24.*trigger_out"):
+        config_from_mapping({"hardware": {"reward_pin_bcm": 24}})

@@ -16,12 +16,12 @@ The lab-wide BehavBox map is:
 | `airpuff` | 8 | canonical actuator mapping |
 | `vacuum` | 25 | canonical actuator mapping |
 | `operator_bait_button` | 23 | input-only operator control |
-| reserved output | 24 | unused |
+| `trigger_out` | 24 | canonical, currently disabled/not implemented |
 | `irig_output` | 9 | reserved exclusively for future IRIG |
 
 This change does not implement IRIG generation. GPIO9 / PCB `DIO4` is not
-available to normal behavior or control code, and GPIO24 is also rejected as a
-reserved unused output.
+available to normal behavior or control code. GPIO24 is not acquired by this
+repository, but it is not part of the permanent IRIG reservation.
 
 The runtime policy error is deliberately explicit: `BCM GPIO9 is reserved for
 IRIG output.` The current source/configuration occurrences of GPIO9, DIO4, and
@@ -46,10 +46,19 @@ Requests are passed to `ManualBaitService`, which calls the existing
 deliver reward GPIO19 intervals. Manual bait therefore uses the configured
 calibrated reward profile and emits the same reward event sequence.
 
+`manual_bait_enabled` is the global capability switch. Terminal/SSH bait does
+not require the physical button; GPIO23 is claimed only when
+`bait_button_enabled = true`, and that mode additionally requires explicit
+polarity. During an active experiment, the session owns GPIO19 once and task
+rewards plus manual bait are serialized by one `RewardArbiter`. A manual bait
+that arrives while a task reward is open is rejected with a logged busy reason;
+it is never overlapped or handed to a second GPIO backend.
+
 Example configuration:
 
 ```toml
 [operator_controls]
+manual_bait_enabled = true
 bait_button_enabled = true
 bait_button_gpio = 23
 bait_button_idle_level = 0
@@ -82,8 +91,11 @@ terminal B ───┼─> manual_bait_request -> RewardController -> one calib
 SSH operator bait ┘
 ```
 
-Run the long-lived service on the rig with `rpi-vstim operator service`. It
+Run the standalone service on an idle rig with `rpi-vstim operator service`. It
 owns a restrictive AF_UNIX socket configured by `paths.operator_control_socket`.
+For a behavioral session, construct the same service against that session's
+arbiter; the standalone service cannot acquire GPIO19 while the session owns
+it.
 The remote command is:
 
 ```text
@@ -94,7 +106,9 @@ The handoff is bounded and acknowledged; the socket is local to the rig and is
 not a network reward server. A terminal `B`/`b` request is nonblocking and the
 configured one-second operator interval, button latch, and optional cumulative
 `max_manual_bait_water_ul` cap prevent accidental bursts. Operator bait water
-is logged separately from task reward water. `bait_auto_suction` is explicit
+is logged separately from task reward water. Events use a bounded nonblocking
+handoff and a background writer, so filesystem I/O is outside the valve-open
+interval. `bait_auto_suction` is explicit
 and defaults to false.
 
 ## Water service / prime

@@ -72,6 +72,7 @@ def enabled_config():
     return config_from_mapping(
         {
             "operator_controls": {
+                "manual_bait_enabled": True,
                 "bait_button_enabled": True,
                 "bait_button_gpio": 23,
                 "bait_button_idle_level": 0,
@@ -178,6 +179,41 @@ def test_manual_bait_service_rejects_non_button_requests():
     service = ManualBaitService(FakeRewardController())
     with pytest.raises(RuntimeError, match="canonical BCM GPIO23"):
         service.handle_request(ManualBaitRequest(15, 123, 1))
+
+
+def test_partial_manual_delivery_remains_counted():
+    from rpi_vstim.hardware.reward import (
+        RewardArbiter,
+        RewardDeliveryError,
+        RewardDurationResolution,
+    )
+    from rpi_vstim.hardware.water import WaterAccounting
+
+    class PartialController(FakeRewardController):
+        resolution = type("Resolution", (), {
+            "target_volume_ul": 3.0,
+            "open_duration_ms": 10.0,
+            "calibration_id": "cal",
+            "calibration_sha256": "sha",
+        })()
+
+        def deliver(self, **kwargs):
+            raise RewardDeliveryError(
+                "inactive transition failed", activation_started=True,
+                inactive_confirmed=False,
+            )
+
+    controller = PartialController()
+    accounting = WaterAccounting(3.0)
+    arbiter = RewardArbiter(
+        controller,
+        manual_resolution=RewardDurationResolution(10, 3.0),
+        accounting=accounting,
+    )
+    service = ManualBaitService(arbiter=arbiter)
+    with pytest.raises(RewardDeliveryError):
+        service.handle_request(ManualBaitRequest(None, 1, 1, "terminal"))
+    assert accounting.operator_bait_water_ul == 3.0
 
 
 def test_operator_configuration_requires_explicit_polarity_when_enabled():

@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from dataclasses import replace
 
 import pytest
@@ -17,10 +19,15 @@ from rpi_vstim.hardware.calibration import (
     write_profile,
 )
 from rpi_vstim.hardware.reward import (
+    RewardArbiter,
+    RewardBusyError,
     RewardConfigurationError,
     RewardController,
+    RewardDeliveryError,
+    RewardDurationResolution,
     resolve_reward_duration,
 )
+from rpi_vstim.hardware.water import WaterAccounting
 
 
 class FakeClock:
@@ -36,15 +43,19 @@ class FakeClock:
 
 
 class FakeOutputBackend:
-    def __init__(self, fail_active=False, clock=None):
+    def __init__(self, fail_active=False, fail_inactive=0, clock=None):
         self.levels = []
         self.fail_active = fail_active
+        self.fail_inactive = fail_inactive
         self.clock = clock
 
     def set_level(self, role, level):
         self.levels.append((role, level))
         if self.fail_active and level == 1:
             raise RuntimeError("active write failed")
+        if level == 0 and self.fail_inactive:
+            self.fail_inactive -= 1
+            raise RuntimeError("inactive write failed")
         timestamp = self.clock.ns() if self.clock is not None else len(self.levels) * 1_000
         return type("Transition", (), {"completed_monotonic_ns": timestamp})()
 
@@ -75,6 +86,7 @@ def test_one_reward_has_one_continuous_interval_and_four_events():
     )
 
     delivery = controller.deliver(command_id="cmd-1", session_id="s", trial_id="t")
+    controller.close_events()
 
     assert backend.levels == [("reward_left", 1), ("reward_left", 0)]
     assert [event.event for event in events] == [
@@ -96,6 +108,72 @@ def test_reward_exception_returns_to_inactive_level():
         controller.deliver()
 
     assert backend.levels == [("reward_left", 1), ("reward_left", 0)]
+
+
+def test_blocking_event_sink_is_not_in_the_valve_interval():
+    backend = FakeOutputBackend()
+    controller = RewardController(
+        backend,
+        active_config().hardware,
+        duration_ms=1,
+        event_sink=lambda _event: time.sleep(0.15),
+    )
+    started = time.monotonic()
+    controller.deliver()
+    elapsed = time.monotonic() - started
+    controller.close_events()
+    assert elapsed < 0.1
+    assert backend.levels == [("reward_left", 1), ("reward_left", 0)]
+
+
+def test_inactive_failure_retries_and_reports_fault_state():
+    backend = FakeOutputBackend(fail_inactive=1)
+    controller = RewardController(backend, active_config().hardware, duration_ms=1)
+    with pytest.raises(RewardDeliveryError) as caught:
+        controller.deliver()
+    controller.close_events()
+    assert caught.value.activation_started
+    assert caught.value.inactive_confirmed
+    assert backend.levels == [("reward_left", 1), ("reward_left", 0), ("reward_left", 0)]
+
+
+def test_reward_arbiter_rejects_manual_overlap_and_keeps_one_owner():
+    class SlowController:
+        resolution = RewardDurationResolution(1, 3.0)
+
+        def __init__(self):
+            self.active = False
+            self.overlap = False
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def deliver(self, **kwargs):
+            if self.active:
+                self.overlap = True
+            self.active = True
+            self.started.set()
+            self.release.wait(1)
+            self.active = False
+            return "delivery"
+
+        def close_events(self):
+            return None
+
+    controller = SlowController()
+    arbiter = RewardArbiter(
+        controller,
+        task_resolution=RewardDurationResolution(1, 1.0),
+        manual_resolution=RewardDurationResolution(1, 3.0),
+        accounting=WaterAccounting(),
+    )
+    thread = threading.Thread(target=arbiter.deliver_task)
+    thread.start()
+    assert controller.started.wait(1)
+    with pytest.raises(RewardBusyError):
+        arbiter.deliver_manual(command_id="manual", session_id="s")
+    controller.release.set()
+    thread.join()
+    assert not controller.overlap
 
 
 def test_missing_polarity_fails_closed():
@@ -124,6 +202,23 @@ def test_mass_conversion_and_profile_round_trip(tmp_path):
     write_csv(profile, tmp_path / "profile.csv")
     write_png_curve(profile, tmp_path / "profile.png")
     assert (tmp_path / "profile.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_corrupted_calibration_derived_fields_fail_closed(tmp_path):
+    profile = CalibrationProfile.create(
+        calibration_id="id",
+        rig_id="rig",
+        conditions=(
+            CalibrationCondition.measured(50, 100, 0, 0.5),
+            CalibrationCondition.measured(100, 100, 0, 1.0),
+        ),
+    )
+    payload = profile.as_dict()
+    payload["conditions"][0]["mean_volume_ul"] = 999.0
+    path = tmp_path / "corrupt.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(CalibrationError, match="inconsistent mean_volume_ul"):
+        load_profile(path)
 
 
 def test_profile_interpolation_is_bounded():
@@ -211,3 +306,27 @@ def test_session_provenance_records_frozen_reward_resolution(tmp_path):
     assert provenance["reward_calibration_id"] == "id"
     assert provenance["reward_calibration_file_sha256"] == profile_sha256(profile_path)
     session.close()
+
+
+def test_session_persists_task_and_operator_water_accounting(tmp_path):
+    config = replace(active_config(), paths=replace(Config().paths, output_root=tmp_path))
+    session = new_session(config, session_id="water-accounting")
+    session.write_initial_outputs()
+    controller = RewardController(FakeOutputBackend(), config.hardware, duration_ms=1)
+    arbiter = RewardArbiter(
+        controller,
+        task_resolution=RewardDurationResolution(1, 1.0),
+        manual_resolution=RewardDurationResolution(1, 3.0),
+        accounting=WaterAccounting(),
+    )
+    session.attach_reward_arbiter(arbiter)
+    arbiter.deliver_task(session_id="water-accounting")
+    arbiter.deliver_manual(command_id="manual", session_id="water-accounting")
+    session.close()
+    provenance = json.loads((tmp_path / "water-accounting" / "provenance.json").read_text())
+    assert provenance["water_accounting"] == {
+        "task_reward_water_ul": 1.0,
+        "operator_bait_water_ul": 3.0,
+        "total_delivered_water_ul": 4.0,
+        "max_manual_bait_water_ul": None,
+    }

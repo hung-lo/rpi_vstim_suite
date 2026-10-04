@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from typing import Any, Self
 
 from .policy import OPERATOR_BAIT_GPIO_BCM
-from .reward import RewardController, RewardDelivery, resolve_reward_duration
+from .reward import (
+    RewardArbiter,
+    RewardController,
+    RewardDelivery,
+    RewardDeliveryError,
+    resolve_reward_duration,
+)
 from .water import WaterAccounting, WaterLimitError
 
 
@@ -256,13 +262,17 @@ class ManualBaitService:
 
     def __init__(
         self,
-        controller: RewardController,
+        controller: RewardController | None = None,
         *,
+        arbiter: RewardArbiter | None = None,
         session_id: str = "",
         event_sink: Callable[[Any], None] | None = None,
         water_accounting: WaterAccounting | None = None,
     ) -> None:
+        if controller is None and arbiter is None:
+            raise OperatorBaitError("manual bait requires a reward controller or session arbiter")
         self.controller = controller
+        self.arbiter = arbiter
         self.session_id = session_id
         self._event_sink = event_sink
         self.water_accounting = water_accounting
@@ -278,8 +288,8 @@ class ManualBaitService:
         water_accounting: WaterAccounting | None = None,
     ) -> ManualBaitService:
         controls = config.operator_controls
-        if not controls.bait_button_enabled or controls.bait_reward_ul is None:
-            raise OperatorBaitError("enabled operator bait requires bait_reward_ul")
+        if not controls.manual_bait_enabled or controls.bait_reward_ul is None:
+            raise OperatorBaitError("manual bait is disabled or lacks bait_reward_ul")
         resolution = resolve_reward_duration(config, target_volume_ul=controls.bait_reward_ul)
         return cls(
             RewardController(
@@ -303,12 +313,16 @@ class ManualBaitService:
             raise OperatorBaitError("manual bait request is not from canonical BCM GPIO23")
         if request.source != "physical_button" and request.bcm_pin not in (None, 0):
             raise OperatorBaitError("non-button manual bait requests must not claim a GPIO")
-        resolution = getattr(self.controller, "resolution", None)
+        resolution = (
+            self.arbiter.manual_resolution
+            if self.arbiter is not None
+            else getattr(self.controller, "resolution", None)
+        )
         target_volume_ul = getattr(resolution, "target_volume_ul", None)
         duration_ms = getattr(resolution, "open_duration_ms", None)
         if duration_ms is None:
-            duration_ms = getattr(self.controller, "duration_ms", None)
-        if self.water_accounting is not None:
+            duration_ms = getattr(self.controller, "duration_ms", None) if self.controller else None
+        if self.arbiter is None and self.water_accounting is not None:
             if target_volume_ul is None:
                 raise OperatorBaitError(
                     "manual bait water accounting requires a calibrated target volume"
@@ -328,30 +342,60 @@ class ManualBaitService:
                     )
                 raise
         if self._event_sink is not None:
-            self._event_sink(
-                {
-                    "event": "manual_bait_request",
-                    "role": "operator_bait_button",
-                    "gpio_bcm": request.bcm_pin,
-                    "monotonic_ns": request.timestamp_ns,
-                    "request_index": request.request_index,
-                    "session_id": self.session_id,
-                    "source": request.source,
-                    "reason": "operator_bait",
-                    "target_volume_ul": target_volume_ul,
-                    "resolved_open_duration_ms": duration_ms,
-                    "calibration_id": getattr(resolution, "calibration_id", ""),
-                    "calibration_sha256": getattr(resolution, "calibration_sha256", ""),
-                }
-            )
+            try:
+                self._event_sink(
+                    {
+                        "event": "manual_bait_request",
+                        "role": "operator_bait_button",
+                        "gpio_bcm": request.bcm_pin,
+                        "monotonic_ns": request.timestamp_ns,
+                        "request_index": request.request_index,
+                        "session_id": self.session_id,
+                        "source": request.source,
+                        "reason": "operator_bait",
+                        "target_volume_ul": target_volume_ul,
+                        "resolved_open_duration_ms": duration_ms,
+                        "calibration_id": getattr(resolution, "calibration_id", ""),
+                        "calibration_sha256": getattr(resolution, "calibration_sha256", ""),
+                    }
+                )
+            except BaseException:
+                if self.arbiter is None and self.water_accounting is not None and target_volume_ul is not None:
+                    self.water_accounting.rollback_manual_bait(target_volume_ul)
+                raise
         try:
+            if self.arbiter is not None:
+                return self.arbiter.deliver_manual(
+                    command_id=f"manual-bait-{request.request_index}",
+                    session_id=self.session_id,
+                    source=request.source,
+                )
             return self.controller.deliver(
                 command_id=f"manual-bait-{request.request_index}",
                 session_id=self.session_id,
                 source=request.source,
                 reason="operator_bait",
             )
-        except BaseException:
-            if self.water_accounting is not None and target_volume_ul is not None:
+        except RewardDeliveryError as exc:
+            if (
+                self.arbiter is None
+                and self.water_accounting is not None
+                and target_volume_ul is not None
+                and not exc.activation_started
+            ):
                 self.water_accounting.rollback_manual_bait(target_volume_ul)
+            if exc.activation_started and self._event_sink is not None:
+                self._event_sink(
+                    {
+                        "event": "manual_bait_partial_delivery",
+                        "source": request.source,
+                        "target_volume_ul": target_volume_ul,
+                        "monotonic_ns": request.timestamp_ns,
+                        "reason": str(exc),
+                    }
+                )
             raise
+
+    def close(self) -> None:
+        if self.arbiter is None and self.controller is not None:
+            self.controller.close_events()

@@ -340,6 +340,7 @@ def _run_water_service(args: argparse.Namespace) -> int:
         try:
             while not stopped:
                 hold.check_timeout()
+                hold.check_release()
                 time.sleep(0.02)
         finally:
             signal.signal(signal.SIGTERM, previous)

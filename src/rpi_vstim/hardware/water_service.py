@@ -71,12 +71,13 @@ class WaterServiceController:
         self._clock_ns = clock_ns
         self._sleep = sleep
         self._event_sink = event_sink
+        self._state = "CLOSED"
         self._open_since_ns: int | None = None
         self._deadline_ns: int | None = None
 
     @property
     def open(self) -> bool:
-        return self._open_since_ns is not None
+        return self._state in {"OPEN", "OPEN_OR_UNKNOWN", "FAULT"}
 
     def _emit(self, event: WaterServiceEvent) -> None:
         if self._event_sink is not None:
@@ -89,6 +90,7 @@ class WaterServiceController:
             return
         now = self._clock_ns()
         self._backend.set_level(REWARD_ROLE, self._line.active_level)
+        self._state = "OPEN"
         self._open_since_ns = now
         self._deadline_ns = (
             now + round(requested_seconds * 1_000_000_000)
@@ -101,10 +103,44 @@ class WaterServiceController:
         if not self.open:
             return
         now = self._clock_ns()
+        started = self._open_since_ns
         try:
-            self._backend.set_level(REWARD_ROLE, self._line.initial_level)
-        finally:
-            started = self._open_since_ns
+            transition = self._backend.set_level(REWARD_ROLE, self._line.initial_level)
+            readback = getattr(transition, "readback_level", None)
+            if readback is not None and readback != self._line.initial_level:
+                raise RuntimeError("water service inactive readback did not confirm baseline")
+        except BaseException as first_error:  # noqa: BLE001 — cleanup must handle SIGINT/driver failures
+            self._state = "OPEN_OR_UNKNOWN"
+            try:
+                retry = self._backend.set_level(REWARD_ROLE, self._line.initial_level)
+                readback = getattr(retry, "readback_level", None)
+                if readback is not None and readback != self._line.initial_level:
+                    raise RuntimeError("water service cleanup readback did not confirm baseline")
+            except BaseException as retry_error:  # noqa: BLE001 — retry must catch SIGINT/driver failures
+                self._state = "FAULT"
+                self._emit(
+                    WaterServiceEvent(
+                        "water_service_fault", now,
+                        actual_open_interval_ns=now - started if started is not None else None,
+                        source=source,
+                    )
+                )
+                raise WaterServiceError(
+                    f"water service inactive transition failed: {retry_error}"
+                ) from first_error
+            self._state = "CLOSED"
+            self._open_since_ns = None
+            self._deadline_ns = None
+            self._emit(
+                WaterServiceEvent(
+                    "water_service_cleanup_retry", now,
+                    actual_open_interval_ns=now - started if started is not None else None,
+                    source=source,
+                )
+            )
+            return
+        else:
+            self._state = "CLOSED"
             self._open_since_ns = None
             self._deadline_ns = None
             self._emit(
@@ -177,20 +213,22 @@ class WaterHoldStateMachine:
         self._ready = True
         self._inactive_since_ns = clock_ns()
         self._timed_out = False
+        self._current_level = idle_level
 
     def handle_level(self, level: int, timestamp_ns: int | None = None) -> None:
         if level not in (self.idle_level, self.active_level):
             raise ValueError("water service button level does not match configured polarity")
         timestamp_ns = self.clock_ns() if timestamp_ns is None else timestamp_ns
         if level == self.idle_level:
+            self._current_level = level
             if self.service.open:
                 self.service.close(source="button_release")
             if self._inactive_since_ns is None:
                 self._inactive_since_ns = timestamp_ns
-            if timestamp_ns - self._inactive_since_ns >= self.release_stable_ns:
-                self._ready = True
-                self._timed_out = False
+            self.check_release(now_ns=timestamp_ns)
             return
+        self.check_release(now_ns=timestamp_ns)
+        self._current_level = level
         if self._timed_out or not self._ready or self.service.open:
             return
         self.service.open_now(
@@ -204,6 +242,17 @@ class WaterHoldStateMachine:
         if timed_out:
             self._timed_out = True
         return timed_out
+
+    def check_release(self, *, now_ns: int | None = None) -> bool:
+        """Re-arm after one stable idle edge, without requiring another edge."""
+        if self._current_level != self.idle_level or self._inactive_since_ns is None:
+            return False
+        now = self.clock_ns() if now_ns is None else now_ns
+        if now - self._inactive_since_ns < self.release_stable_ns:
+            return False
+        self._ready = True
+        self._timed_out = False
+        return True
 
     def close(self) -> None:
         self.service.close_if_active(source="cleanup")

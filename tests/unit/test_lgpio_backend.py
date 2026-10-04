@@ -139,3 +139,12 @@ def test_reserved_gpio9_cannot_be_claimed_by_normal_output_backend():
 def test_irig_role_is_not_a_normal_output_role():
     with pytest.raises(ValueError, match="only reward and vacuum"):
         LgpioBackend(HardwareConfig(), roles=("irig_output",))
+
+
+def test_trigger_out_gpio24_is_not_acquired_by_normal_output_backend():
+    api = FakeLgpio()
+    config = replace(HardwareConfig(), reward_pin_bcm=24)
+    backend = LgpioBackend(config, roles=("reward",), api=api)
+    with pytest.raises(LgpioBackendError, match="GPIO24.*trigger_out"):
+        backend.start()
+    assert not any(call[0] == "claim" for call in api.calls)

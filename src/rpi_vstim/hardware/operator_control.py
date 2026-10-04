@@ -9,10 +9,12 @@ import socket
 import stat
 import sys
 import termios
+import threading
 import time
 import tty
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,7 @@ from .operator_bait import (
     ManualBaitRequest,
     ManualBaitService,
 )
+from .reward import RewardArbiter, RewardBusyError, ensure_event_handoff
 from .water import WaterAccounting
 
 MAX_IPC_REQUEST_BYTES = 4096
@@ -30,6 +33,13 @@ MAX_PENDING_BAIT_REQUESTS = 8
 
 class OperatorControlError(RuntimeError):
     """Raised when an operator-control service cannot start or accept a command."""
+
+
+@dataclass(frozen=True)
+class OperatorEnqueueResult:
+    accepted: bool
+    request_index: int | None = None
+    reason: str = ""
 
 
 class JsonlEventLog:
@@ -46,7 +56,7 @@ class JsonlEventLog:
 class LocalOperatorControlEndpoint:
     """Restricted AF_UNIX command endpoint; it never opens GPIO itself."""
 
-    def __init__(self, path: Path, enqueue: Callable[[str], int | None]):
+    def __init__(self, path: Path, enqueue: Callable[[str], object]):
         self.path = Path(path)
         self._enqueue = enqueue
         self._server: socket.socket | None = None
@@ -97,10 +107,19 @@ class LocalOperatorControlEndpoint:
             request = json.loads(payload.decode("utf-8"))
             if request.get("command") not in {"bait", "manual_bait_request"}:
                 raise OperatorControlError("unsupported operator command")
-            index = self._enqueue("remote_cli")
-            if index is None:
+            result = self._enqueue("remote_cli")
+            if isinstance(result, OperatorEnqueueResult):
+                if not result.accepted:
+                    self._reply(client, {"ok": False, "error": result.reason})
+                    return
+                index = result.request_index
+            elif isinstance(result, int):
+                index = result
+            elif result is None:
                 self._reply(client, {"ok": False, "error": "operator request queue is full"})
                 return
+            else:
+                raise OperatorControlError("operator request was not accepted")
             self._reply(
                 client,
                 {"ok": True, "status": "accepted", "request_index": index, "source": "remote_cli"},
@@ -155,12 +174,26 @@ class OperatorControlService:
         enable_keyboard: bool = True,
         backend: Any | None = None,
         monitor: Any | None = None,
+        arbiter: RewardArbiter | None = None,
     ) -> None:
-        if config.hardware.backend != "lgpio" and backend is None:
+        if config.hardware.backend != "lgpio" and backend is None and arbiter is None:
             raise OperatorControlError("operator control requires the production lgpio backend")
         self.config = config
         self.session_id = session_id
-        self._event_sink = event_sink or JsonlEventLog(config.paths.operator_event_log)
+        self._arbiter = arbiter
+        sink = event_sink
+        if sink is None and arbiter is not None:
+            sink = arbiter.event_handoff
+        if arbiter is not None and sink is None:
+            raise OperatorControlError(
+                "in-session operator control requires the session event handoff"
+            )
+        if sink is None:
+            sink = JsonlEventLog(config.paths.operator_event_log)
+        self._event_sink_source = sink
+        self._event_handoff = ensure_event_handoff(sink)
+        self._owns_event_handoff = self._event_handoff is not sink
+        self._event_sink = self._event_handoff.publish if self._event_handoff is not None else None
         self._stdin = stdin
         self._enable_keyboard = enable_keyboard
         self._backend = backend
@@ -171,11 +204,14 @@ class OperatorControlService:
             self._enqueue_source,
         )
         self._pending: deque[ManualBaitRequest] = deque(maxlen=MAX_PENDING_BAIT_REQUESTS)
+        self._pending_lock = threading.Lock()
         self._request_index = 0
         self._started = False
         self._last_request_ns: int | None = None
         self._keyboard_fd: int | None = None
         self._terminal_state: list[Any] | None = None
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
         self.errors: list[str] = []
 
     def _emit(self, event: Any) -> None:
@@ -186,60 +222,74 @@ class OperatorControlService:
         self._request_index += 1
         return self._request_index
 
-    def _enqueue_source(self, source: str) -> int | None:
+    def _enqueue_source(self, source: str) -> OperatorEnqueueResult:
         if source not in {"terminal", "remote_cli"}:
             raise OperatorControlError(f"unsupported operator source: {source}")
         now_ns = time.monotonic_ns()
-        minimum_ns = self.config.operator_controls.minimum_interval_ms * 1_000_000
-        if (
-            self._last_request_ns is not None
-            and now_ns - self._last_request_ns < minimum_ns
-        ):
-            self._emit(
-                {
-                    "event": "manual_bait_rejected",
-                    "source": source,
-                    "reason": "manual bait minimum interval has not elapsed",
-                    "monotonic_ns": now_ns,
-                }
-            )
-            return None
-        index = self._next_request_index()
-        if len(self._pending) >= MAX_PENDING_BAIT_REQUESTS:
-            return None
-        self._last_request_ns = now_ns
-        self._pending.append(ManualBaitRequest(None, now_ns, index, source))
-        return index
+        if not self.config.operator_controls.manual_bait_enabled:
+            reason = "manual bait is disabled"
+            self._emit({"event": "manual_bait_rejected", "source": source, "reason": reason,
+                        "monotonic_ns": now_ns})
+            return OperatorEnqueueResult(False, reason=reason)
+        with self._pending_lock:
+            minimum_ns = self.config.operator_controls.minimum_interval_ms * 1_000_000
+            if (
+                self._last_request_ns is not None
+                and now_ns - self._last_request_ns < minimum_ns
+            ):
+                self._emit(
+                    {
+                        "event": "manual_bait_rejected",
+                        "source": source,
+                        "reason": "manual bait minimum interval has not elapsed",
+                        "monotonic_ns": now_ns,
+                    }
+                )
+                return OperatorEnqueueResult(
+                    False, reason="manual bait minimum interval has not elapsed"
+                )
+            index = self._next_request_index()
+            if len(self._pending) >= MAX_PENDING_BAIT_REQUESTS:
+                return OperatorEnqueueResult(False, reason="operator request queue is full")
+            self._last_request_ns = now_ns
+            self._pending.append(ManualBaitRequest(None, now_ns, index, source))
+            return OperatorEnqueueResult(True, request_index=index)
 
     def _on_button_request(self, request: ManualBaitRequest) -> None:
-        minimum_ns = self.config.operator_controls.minimum_interval_ms * 1_000_000
-        if (
-            self._last_request_ns is not None
-            and request.timestamp_ns - self._last_request_ns < minimum_ns
-        ):
-            self._emit(
-                {
-                    "event": "manual_bait_rejected",
-                    "source": "physical_button",
-                    "reason": "manual bait minimum interval has not elapsed",
-                    "gpio_bcm": request.bcm_pin,
-                    "monotonic_ns": request.timestamp_ns,
-                }
-            )
+        if not self.config.operator_controls.manual_bait_enabled:
+            self._emit({"event": "manual_bait_rejected", "source": "physical_button",
+                        "reason": "manual bait is disabled", "gpio_bcm": request.bcm_pin,
+                        "monotonic_ns": request.timestamp_ns})
             return
-        if len(self._pending) >= MAX_PENDING_BAIT_REQUESTS:
-            self._emit(
-                {
-                    "event": "manual_bait_rejected",
-                    "source": "physical_button",
-                    "reason": "operator request queue is full",
-                    "gpio_bcm": request.bcm_pin,
-                    "monotonic_ns": request.timestamp_ns,
-                }
-            )
-            return
-        self._last_request_ns = request.timestamp_ns
-        self._pending.append(request)
+        with self._pending_lock:
+            minimum_ns = self.config.operator_controls.minimum_interval_ms * 1_000_000
+            if (
+                self._last_request_ns is not None
+                and request.timestamp_ns - self._last_request_ns < minimum_ns
+            ):
+                self._emit(
+                    {
+                        "event": "manual_bait_rejected",
+                        "source": "physical_button",
+                        "reason": "manual bait minimum interval has not elapsed",
+                        "gpio_bcm": request.bcm_pin,
+                        "monotonic_ns": request.timestamp_ns,
+                    }
+                )
+                return
+            if len(self._pending) >= MAX_PENDING_BAIT_REQUESTS:
+                self._emit(
+                    {
+                        "event": "manual_bait_rejected",
+                        "source": "physical_button",
+                        "reason": "operator request queue is full",
+                        "gpio_bcm": request.bcm_pin,
+                        "monotonic_ns": request.timestamp_ns,
+                    }
+                )
+                return
+            self._last_request_ns = request.timestamp_ns
+            self._pending.append(request)
 
     def _on_button_raw_edge(self, edge: Any) -> None:
         self._emit(
@@ -256,28 +306,42 @@ class OperatorControlService:
         if self._started:
             return
         try:
-            if self._backend is None:
-                self._backend = LgpioBackend(
-                    self.config.hardware,
-                    roles=("reward_left",),
-                    ownership_path=self.config.paths.reward_hardware_lock_path,
+            if self._event_handoff is None:
+                self._event_handoff = ensure_event_handoff(self._event_sink_source)
+                self._owns_event_handoff = self._event_handoff is not self._event_sink_source
+                self._event_sink = (
+                    self._event_handoff.publish if self._event_handoff is not None else None
                 )
-            self._backend.start()
-            accounting = WaterAccounting(self.config.operator_controls.max_manual_bait_water_ul)
-            self._manual = ManualBaitService.from_config(
-                self._backend,
-                self.config,
-                session_id=self.session_id,
-                event_sink=self._event_sink,
-                water_accounting=accounting,
-            )
-            if self._monitor is None:
-                self._monitor = LgpioOperatorBaitMonitor(
+            if self._arbiter is not None:
+                self._manual = ManualBaitService(
+                    arbiter=self._arbiter,
+                    session_id=self.session_id,
+                    event_sink=self._event_sink,
+                )
+            else:
+                if self._backend is None:
+                    self._backend = LgpioBackend(
+                        self.config.hardware,
+                        roles=("reward_left",),
+                        ownership_path=self.config.paths.reward_hardware_lock_path,
+                    )
+                self._backend.start()
+                accounting = WaterAccounting(self.config.operator_controls.max_manual_bait_water_ul)
+                self._manual = ManualBaitService.from_config(
+                    self._backend,
                     self.config,
-                    on_raw_edge=self._on_button_raw_edge,
-                    on_request=self._on_button_request,
+                    session_id=self.session_id,
+                    event_sink=self._event_sink,
+                    water_accounting=accounting,
                 )
-            self._monitor.start()
+            if self.config.operator_controls.bait_button_enabled:
+                if self._monitor is None:
+                    self._monitor = LgpioOperatorBaitMonitor(
+                        self.config,
+                        on_raw_edge=self._on_button_raw_edge,
+                        on_request=self._on_button_request,
+                    )
+                self._monitor.start()
             self._endpoint.start()
             self._start_keyboard()
             self._started = True
@@ -301,12 +365,15 @@ class OperatorControlService:
 
     def submit_terminal_key(self, key: str) -> bool:
         """Handle one nonblocking terminal key without bypassing the queue."""
-        return key.lower() == "b" and self._enqueue_source("terminal") is not None
+        return key.lower() == "b" and self._enqueue_source("terminal").accepted
 
     def _drain_one(self) -> None:
-        if not self._pending or self._manual is None:
+        if self._manual is None:
             return
-        request = self._pending.popleft()
+        with self._pending_lock:
+            if not self._pending:
+                return
+            request = self._pending.popleft()
         if request.source == "physical_button":
             self._emit(
                 {
@@ -318,6 +385,16 @@ class OperatorControlService:
             )
         try:
             self._manual.handle_request(request)
+        except RewardBusyError as exc:
+            self.errors.append(str(exc))
+            self._emit(
+                {
+                    "event": "manual_bait_rejected",
+                    "source": request.source,
+                    "reason": str(exc),
+                    "monotonic_ns": time.monotonic_ns(),
+                }
+            )
         except Exception as exc:  # noqa: BLE001 — keep the service alive after one request
             self.errors.append(str(exc))
             self._emit(
@@ -332,14 +409,22 @@ class OperatorControlService:
     def run_forever(self, *, stop: Callable[[], bool] | None = None) -> None:
         self.start()
         try:
-            while stop is None or not stop():
+            while not self._stop_event.is_set() and (stop is None or not stop()):
                 self._endpoint.poll(0.02)
                 self._poll_keyboard()
                 self._drain_one()
         finally:
             self.stop()
 
+    def start_background(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self.run_forever, name="rpi-vstim-operator", daemon=True)
+        self._thread.start()
+
     def stop(self) -> None:
+        self._stop_event.set()
         if self._keyboard_fd is not None and self._terminal_state is not None:
             termios.tcsetattr(self._keyboard_fd, termios.TCSADRAIN, self._terminal_state)
         self._keyboard_fd = None
@@ -351,8 +436,19 @@ class OperatorControlService:
             self._monitor = None
             self._endpoint.close()
             try:
+                if self._manual is not None:
+                    self._manual.close()
+                    self._manual = None
                 if self._backend is not None:
                     self._backend.stop()
             finally:
                 self._backend = None
                 self._started = False
+        if self._owns_event_handoff and self._event_handoff is not None:
+            self._event_handoff.close()
+            self._event_handoff = None
+            self._event_sink = None
+        thread = self._thread
+        self._thread = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=1.0)

@@ -222,19 +222,46 @@ def load_profile(path: Path | str) -> CalibrationProfile:
         raise CalibrationError("calibration profile must be a JSON object")
     if payload.get("schema_version") != SCHEMA_VERSION:
         raise CalibrationError("unsupported reward calibration schema_version")
-    try:
-        conditions = tuple(CalibrationCondition(**row) for row in payload.get("conditions", ()))
-    except (TypeError, ValueError) as exc:
-        raise CalibrationError("calibration profile contains an invalid condition") from exc
     required = (
         "calibration_id", "created_at", "rig_id", "output_role", "gpio_bcm",
         "delivery_mode", "fluid", "valid_duration_range_ms", "valid_volume_range_ul",
         "calibration_fit", "software_commit", "hardware_backend",
     )
     missing = [name for name in required if name not in payload]
-    if missing or not conditions:
+    if missing or not isinstance(payload.get("conditions"), list) or not payload["conditions"]:
         raise CalibrationError("calibration profile is missing required fields")
+    if payload["output_role"] != REWARD_ROLE or payload["gpio_bcm"] != REWARD_GPIO_BCM:
+        raise CalibrationError("calibration profile must target reward_left BCM19")
+    if payload["delivery_mode"] != DELIVERY_MODE:
+        raise CalibrationError("calibration profile must use single_continuous_open")
+    if payload["hardware_backend"] != "lgpio":
+        raise CalibrationError("calibration profile must use the production lgpio backend")
+    conditions: list[CalibrationCondition] = []
+    for row in payload["conditions"]:
+        if not isinstance(row, dict):
+            raise CalibrationError("calibration profile contains an invalid condition")
+        if type(row.get("delivery_count")) is not int or row["delivery_count"] <= 0:
+            raise CalibrationError("calibration delivery_count must be a positive integer")
+        try:
+            measured = CalibrationCondition.measured(
+                row["open_duration_ms"],
+                row["delivery_count"],
+                row["initial_mass_g"],
+                row["final_mass_g"],
+            )
+        except (KeyError, TypeError, ValueError, CalibrationError) as exc:
+            raise CalibrationError("calibration profile contains an invalid condition") from exc
+        for name in ("collected_mass_g", "mean_volume_ul"):
+            try:
+                stored = float(row[name])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CalibrationError(f"calibration condition is missing {name}") from exc
+            if not math.isclose(stored, getattr(measured, name), rel_tol=1e-9, abs_tol=1e-9):
+                raise CalibrationError(f"calibration condition has inconsistent {name}")
+        conditions.append(measured)
     try:
+        duration_range = tuple(float(value) for value in payload["valid_duration_range_ms"])
+        volume_range = tuple(float(value) for value in payload["valid_volume_range_ul"])
         profile = CalibrationProfile(
             schema_version=payload["schema_version"],
             calibration_id=payload["calibration_id"],
@@ -245,9 +272,9 @@ def load_profile(path: Path | str) -> CalibrationProfile:
             delivery_mode=payload["delivery_mode"],
             fluid=payload["fluid"],
             operator=payload.get("operator", ""),
-            conditions=conditions,
-            valid_duration_range_ms=tuple(payload["valid_duration_range_ms"]),
-            valid_volume_range_ul=tuple(payload["valid_volume_range_ul"]),
+            conditions=tuple(conditions),
+            valid_duration_range_ms=duration_range,
+            valid_volume_range_ul=volume_range,
             calibration_fit=payload["calibration_fit"],
             selected_target_volume_ul=payload.get("selected_target_volume_ul"),
             resolved_duration_ms=payload.get("resolved_duration_ms"),
@@ -258,10 +285,51 @@ def load_profile(path: Path | str) -> CalibrationProfile:
         raise CalibrationError("calibration profile contains invalid fields") from exc
     if len(profile.valid_duration_range_ms) != 2 or len(profile.valid_volume_range_ul) != 2:
         raise CalibrationError("calibration profile ranges must contain two values")
-    if profile.valid_duration_range_ms[0] > profile.valid_duration_range_ms[1]:
-        raise CalibrationError("calibration duration range is reversed")
-    if profile.valid_volume_range_ul[0] > profile.valid_volume_range_ul[1]:
-        raise CalibrationError("calibration volume range is reversed")
+    for values, label in (
+        (profile.valid_duration_range_ms, "duration"),
+        (profile.valid_volume_range_ul, "volume"),
+    ):
+        if not all(math.isfinite(float(value)) for value in values) or values[0] > values[1]:
+            raise CalibrationError(f"calibration {label} range is invalid")
+    ordered = sorted(profile.conditions, key=lambda condition: condition.open_duration_ms)
+    if any(right.mean_volume_ul <= left.mean_volume_ul for left, right in pairwise(ordered)):
+        raise CalibrationError("calibration volumes must increase with open duration")
+    expected_duration = (ordered[0].open_duration_ms, ordered[-1].open_duration_ms)
+    expected_volume = (ordered[0].mean_volume_ul, ordered[-1].mean_volume_ul)
+    if not all(math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-9)
+               for a, b in zip(profile.valid_duration_range_ms, expected_duration)):
+        raise CalibrationError("calibration duration range does not match conditions")
+    if not all(math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-9)
+               for a, b in zip(profile.valid_volume_range_ul, expected_volume)):
+        raise CalibrationError("calibration volume range does not match conditions")
+    fit = profile.calibration_fit
+    expected_interpolation = {
+        "method": "piecewise_linear", "x": "mean_volume_ul", "y": "open_duration_ms"
+    }
+    if not isinstance(fit, dict) or fit.get("interpolation") != expected_interpolation:
+        raise CalibrationError("calibration interpolation metadata is invalid")
+    expected_fit = _linear_fit(list(profile.conditions))
+    stored_fit = fit.get("linear_fit")
+    try:
+        fit_consistent = isinstance(stored_fit, dict) and all(
+            math.isclose(float(stored_fit[name]), value, rel_tol=1e-9, abs_tol=1e-9)
+            for name, value in expected_fit.items()
+        )
+    except (KeyError, TypeError, ValueError):
+        fit_consistent = False
+    if not fit_consistent:
+        raise CalibrationError("calibration linear fit is inconsistent with conditions")
+    if profile.selected_target_volume_ul is not None:
+        try:
+            resolved = profile.resolve_duration_ms(profile.selected_target_volume_ul)
+        except (TypeError, ValueError, CalibrationError) as exc:
+            raise CalibrationError("selected calibration target is outside the measured range") from exc
+        if profile.resolved_duration_ms is None or not math.isclose(
+            profile.resolved_duration_ms, resolved, rel_tol=1e-9, abs_tol=1e-9
+        ):
+            raise CalibrationError("resolved calibration duration is inconsistent")
+    elif profile.resolved_duration_ms is not None:
+        raise CalibrationError("resolved duration requires a selected target volume")
     return profile
 
 

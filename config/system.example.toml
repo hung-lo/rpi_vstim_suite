@@ -39,6 +39,7 @@ release_stable_ms = 25
 min_classified_lick_interval_ms = 70
 
 [operator_controls]
+manual_bait_enabled = false
 bait_button_enabled = false
 bait_button_gpio = 23
 # Configure measured button polarity before enabling:

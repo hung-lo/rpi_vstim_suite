@@ -47,6 +47,8 @@ class RuntimeServices:
     hardware: object | None = None
     cameras: object | None = None
     telemetry: object | None = None
+    reward_arbiter: object | None = None
+    operator_controls: object | None = None
     lifecycle: Lifecycle = field(default_factory=Lifecycle)
 
 

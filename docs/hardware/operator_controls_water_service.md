@@ -26,6 +26,7 @@ Configure measured GPIO23 polarity before enabling the button:
 
 ```toml
 [operator_controls]
+manual_bait_enabled = true
 bait_button_enabled = true
 bait_button_gpio = 23
 bait_button_idle_level = 0
@@ -39,6 +40,10 @@ bait_auto_suction = false
 The polarity values above are an example, not a physical validation result.
 The state machine emits one request per active contact, latches while held,
 debounces release before re-arming, and does not use the 70 ms lick interval.
+
+Set `bait_button_enabled = false` to leave GPIO23 unclaimed while retaining
+terminal/SSH bait, provided `manual_bait_enabled` and calibrated reward
+configuration are valid.
 
 Start the local operator service:
 
@@ -82,6 +87,11 @@ cannot run concurrently. The production `LgpioBackend` holds a kernel-backed
 exclusive reward lock for GPIO19, so calibration and behavioral reward owners
 are blocked too.
 
+The service state remains open-or-unknown after a failed inactive write and
+retries the inactive transition during cleanup; it does not report a normal
+close until the baseline is confirmed. A single final idle edge is enough to
+re-arm after the configured stable-release interval.
+
 Service duration is never translated into uL. Only measured, rig-specific
 collection calibration resolves target uL to a reward opening duration.
 
@@ -89,7 +99,8 @@ collection calibration resolves target uL to a reward opening duration.
 
 Software tests cover button latch/re-arm, keyboard/IPC convergence, source
 logging, water accounting/limits, prime cleanup, hold timeout/release,
-exclusive ownership, and GPIO9 rejection. The prototype has not physically
+exclusive ownership, one-owner reward arbitration, nonblocking event logging,
+calibration integrity checks, and GPIO9 rejection. The prototype has not physically
 validated GPIO23 polarity or button behavior, and its reward plumbing is not
 connected or water-calibrated. GPIO9 was not physically accessed.
 
@@ -103,4 +114,5 @@ connected or water-calibrated. GPIO9 was not physically accessed.
 | Historical/reference material | `docs/hardware/pi5_gpio_reward_preflight_2026-09-26.md`, `docs/hardware/pi5_initial_audit.txt` | reference only; not runtime configuration |
 
 No ordinary reward, bait, lick, vacuum, airpuff, trigger, camera, cue, or
-water-service path assigns or acquires GPIO9.
+water-service path assigns or acquires GPIO9. GPIO24 is the canonical
+`trigger_out` mapping but is currently disabled and not acquired.

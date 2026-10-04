@@ -27,11 +27,13 @@ creates a software request; it never electrically drives GPIO19. The request
 must be handled by `ManualBaitService` and the existing `RewardController`,
 so manual baiting uses the same calibration, polarity, timing, cleanup, event,
 and provenance path as task rewards. GPIO15 remains `lick_center` and is not
-used for baiting. GPIO24 remains reserved/unused.
+used for baiting. GPIO24 remains the canonical `trigger_out` mapping but is
+currently disabled and unused by this repository.
 
 GPIO9 / DIO4 is reserved exclusively for a future `irig_output`. IRIG
-generation is not implemented here, and normal output backends reject both
-GPIO9 and the reserved GPIO24 rather than claiming them.
+generation is not implemented here, and normal output backends reject GPIO9
+rather than claiming it. GPIO24 is not acquired because trigger support is
+not implemented, but it is not permanently IRIG-reserved.
 
 The prototype configuration preserves the canonical lab BehavBox map: BCM19
 is `reward_left`/`pump1`, and BCM25 is `vacuum`/`pump_en`; both electrical
