@@ -118,6 +118,7 @@ def build_session_operator_controls(
     *,
     stdin: Any = None,
     enable_keyboard: bool = True,
+    enable_physical_operator_button: bool = True,
 ) -> OperatorControlService:
     """Build controls against the session's existing reward owner."""
     if arbiter.event_handoff is None:
@@ -127,6 +128,7 @@ def build_session_operator_controls(
         "arbiter": arbiter,
         "event_sink": arbiter.event_handoff,
         "enable_keyboard": enable_keyboard,
+        "enable_physical_operator_button": enable_physical_operator_button,
     }
     if stdin is not None:
         kwargs["stdin"] = stdin
@@ -138,6 +140,9 @@ def compose_session_reward_controls(
     session: SessionOutput,
     services: RuntimeServices,
     backend: Any | None,
+    *,
+    enable_keyboard: bool = True,
+    enable_physical_operator_button: bool = True,
 ) -> RewardArbiter | None:
     """Compose one reward owner and optional operator controls for a session."""
     arbiter = services.reward_arbiter
@@ -164,7 +169,11 @@ def compose_session_reward_controls(
         if arbiter is None:
             raise RuntimeError("manual bait requires the session reward arbiter")
         services.operator_controls = build_session_operator_controls(
-            config, session, arbiter, enable_keyboard=False
+            config,
+            session,
+            arbiter,
+            enable_keyboard=enable_keyboard,
+            enable_physical_operator_button=enable_physical_operator_button,
         )
     return arbiter
 
@@ -341,12 +350,20 @@ def run_simulated_session(
             degraded=list(degraded),
         ))
 
+    def check_operator_health() -> None:
+        controls = services.operator_controls
+        checker = getattr(controls, "check_health", None)
+        if checker is not None:
+            checker()
+
     try:
         reward_arbiter = compose_session_reward_controls(
             config,
             session,
             services,
             None if services.reward_arbiter is not None else SimulatedRewardBackend(),
+            enable_keyboard=True,
+            enable_physical_operator_button=False,
         )
         session.write_preflight_report(
             PreflightReport(
@@ -369,6 +386,7 @@ def run_simulated_session(
         )
         if services.operator_controls is not None:
             services.operator_controls.start_background()
+            check_operator_health()
         session.write_plan(plan)
         if fault == "asset_manifest_creation":
             raise RuntimeError("injected asset_manifest_creation failure")
@@ -402,6 +420,7 @@ def run_simulated_session(
         if protocol_failure:
             raise RuntimeError("simulated protocol failure")
         for event in plan.events:
+            check_operator_health()
             camera_poll = getattr(services.cameras, "poll", None)
             if camera_poll is not None:
                 camera_statuses = camera_poll()
@@ -422,6 +441,7 @@ def run_simulated_session(
                 session.write_display_result(
                     services.display.present_color(color, frames=event.frame_count)
                 )
+            check_operator_health()
             if (
                 reward_arbiter is not None
                 and reward_arbiter.task_resolution is not None

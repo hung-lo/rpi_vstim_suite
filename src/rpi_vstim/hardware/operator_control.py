@@ -186,6 +186,7 @@ class OperatorControlService:
         event_sink: Callable[[Any], None] | None = None,
         stdin: Any = sys.stdin,
         enable_keyboard: bool = True,
+        enable_physical_operator_button: bool = True,
         backend: Any | None = None,
         monitor: Any | None = None,
         arbiter: RewardArbiter | None = None,
@@ -210,6 +211,7 @@ class OperatorControlService:
         self._event_sink = self._event_handoff.publish if self._event_handoff is not None else None
         self._stdin = stdin
         self._enable_keyboard = enable_keyboard
+        self._enable_physical_operator_button = enable_physical_operator_button
         self._backend = backend
         self._monitor = monitor
         self._manual: ManualBaitService | None = None
@@ -228,6 +230,8 @@ class OperatorControlService:
         self._stop_event = threading.Event()
         self._startup_event = threading.Event()
         self._startup_error: BaseException | None = None
+        self._runtime_worker_error: BaseException | None = None
+        self._startup_succeeded = False
         self._worker_exited = threading.Event()
         self._thread: threading.Thread | None = None
         self.errors: list[str] = []
@@ -356,7 +360,10 @@ class OperatorControlService:
                     event_sink=self._event_sink,
                     water_accounting=accounting,
                 )
-            if self.config.operator_controls.bait_button_enabled:
+            if (
+                self._enable_physical_operator_button
+                and self.config.operator_controls.bait_button_enabled
+            ):
                 if self._monitor is None:
                     self._monitor = LgpioOperatorBaitMonitor(
                         self.config,
@@ -448,10 +455,15 @@ class OperatorControlService:
     def _background_main(self) -> None:
         try:
             self.start()
+            self._startup_succeeded = True
             self._startup_event.set()
             self._run_loop()
         except BaseException as exc:  # noqa: BLE001 — propagate startup and worker failures
-            self._startup_error = exc
+            if self._startup_succeeded:
+                self._runtime_worker_error = exc
+                self._stop_event.set()
+            else:
+                self._startup_error = exc
             self.errors.append(str(exc))
             self._startup_event.set()
         finally:
@@ -464,6 +476,8 @@ class OperatorControlService:
         self._startup_event.clear()
         self._worker_exited.clear()
         self._startup_error = None
+        self._runtime_worker_error = None
+        self._startup_succeeded = False
         self._thread = threading.Thread(
             target=self._background_main,
             name="rpi-vstim-operator",
@@ -478,7 +492,27 @@ class OperatorControlService:
             self.stop()
             raise OperatorControlError(f"operator control failed to start: {error}") from error
 
+    @property
+    def worker_error(self) -> BaseException | None:
+        return self._runtime_worker_error
+
+    @property
+    def healthy(self) -> bool:
+        return self._runtime_worker_error is None and (
+            self._started or (self._thread is not None and self._thread.is_alive())
+        )
+
+    def check_health(self) -> bool:
+        if self._runtime_worker_error is not None:
+            raise OperatorControlError(
+                f"operator control worker failed: {self._runtime_worker_error}"
+            ) from self._runtime_worker_error
+        if self._thread is not None and self._startup_succeeded and not self._thread.is_alive():
+            raise OperatorControlError("operator control worker exited unexpectedly")
+        return self.healthy
+
     def stop(self) -> None:
+        runtime_error = self._runtime_worker_error
         self._accepting_requests = False
         self._stop_event.set()
         self._endpoint.wake()
@@ -490,6 +524,10 @@ class OperatorControlService:
                 raise OperatorControlError("operator control worker did not stop cleanly")
             self._thread = None
         self._teardown_resources()
+        if runtime_error is not None:
+            raise OperatorControlError(
+                f"operator control worker failed: {runtime_error}"
+            ) from runtime_error
 
     def _force_inactive(self) -> None:
         try:

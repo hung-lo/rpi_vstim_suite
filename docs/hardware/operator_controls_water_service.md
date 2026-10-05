@@ -33,6 +33,15 @@ flush/stop. If activation was attempted but delivery cleanup is uncertain,
 water accounting conservatively retains the requested volume and logs an
 uncertain/partial delivery.
 
+`run_simulated_session()` calls `compose_session_reward_controls()` with the
+simulated reward backend, keyboard enabled, and physical-button construction
+disabled. Thus a production-like configuration may enable GPIO23 without
+claiming it in simulation. The repository currently has no separate real
+protocol session runner: `rpi-vstim run` still reports the Phase 00 placeholder.
+When that runner is added, its session-start boundary must call the same helper
+with the production `LgpioBackend` and physical-button construction enabled;
+real in-session operator control is not claimed until that path exists.
+
 ## Normal baiting
 
 Configure measured GPIO23 polarity before enabling the button:

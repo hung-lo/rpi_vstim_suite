@@ -356,8 +356,12 @@ def test_background_operator_service_acknowledges_start_and_joins_before_shared_
             pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
         raise
     assert service._thread is not None and service._thread.is_alive()
+    assert service.healthy
+    assert service.check_health()
     service.stop()
     assert service._thread is None
+    assert service.worker_error is None
+    assert not service.healthy
     assert not config.paths.operator_control_socket.exists()
     assert backend.transitions == []
     arbiter.close()
