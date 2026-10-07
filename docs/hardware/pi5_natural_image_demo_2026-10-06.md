@@ -6,6 +6,33 @@ Pi: `pi@10.42.84.10`
 Stimulus: HDMI-A-2 / DRM connector 42  
 Camera monitor: HDMI-A-1 / DRM connector 33
 
+## Pre-SSD cleanup update — 2026-10-07
+
+Native direct MP4 capture is accepted: both CSI cameras use
+`rpicam-vid --codec libav --libav-video-codec libx264 --libav-format mp4`,
+produce decodable MP4 files at approximately 30 fps, and exit cleanly. The
+dual native preview layout on HDMI-A-1 is also accepted at `0,0,512,384` and
+`512,0,512,384`.
+
+For an SSH operator, `--camera-preview` now preserves an explicitly supplied
+desktop environment. When `DISPLAY` is absent, it derives the current user's
+`/run/user/<uid>` runtime directory and `wayland-0` socket when available,
+then verifies local XWayland `:0` with `xrandr` and passes that environment
+only to `rpicam-vid`. It does not alter display variables or recording
+behavior when preview is disabled. If `:0` is unavailable, recording proceeds
+without preview and the session records `CAMERA_PREVIEW_UNAVAILABLE`.
+
+The intended permanent Git-backed Pi checkout is `/home/pi/rpi_vstim_suite`.
+The validated archive `/home/pi/rpi_vstim_suite-345d8ee` remains untouched as
+the rollback/reference snapshot. On 2026-10-07, the non-destructive GitHub
+access check from the Pi was blocked by `Host key verification failed`, so no
+clone, venv setup, permanent-checkout smoke test, or source-provenance
+verification was performed. SSH host trust must be repaired by the Pi owner
+before this deployment can proceed.
+
+SSD integration remains pending. This update made no SSD, partition,
+formatting, `/etc/fstab`, or `/mnt/behavbox_ssd` changes.
+
 The deployed checkout is an archive without `.git`; the demo was run from the
 source deployed from commit `79af73f`. The session’s existing provenance helper
 therefore reported an unavailable local Git identity unless

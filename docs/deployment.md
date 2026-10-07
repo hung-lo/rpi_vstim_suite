@@ -6,6 +6,15 @@ The current Phase 2 audit is recorded in
 `/etc/fstab` reference to `/mnt/behavbox_ssd` and does not invent an `/mnt/hd`
 mapping.
 
+The permanent Pi deployment target is `/home/pi/rpi_vstim_suite`, cloned from
+the `codex/pre-hardware-rc-hardening` branch. Keep
+`/home/pi/rpi_vstim_suite-345d8ee` intact as the temporary rollback snapshot
+until the Git checkout, natural-image asset digest, system-site-package venv,
+and hardware smoke test have all passed. The 2026-10-07 migration attempt did
+not create the checkout because Pi-to-GitHub SSH stopped at `Host key
+verification failed`; no source snapshot, SSD, mount, or `/etc/fstab` state
+was changed.
+
 The package now provides a read-only display discovery command:
 
 ```bash
