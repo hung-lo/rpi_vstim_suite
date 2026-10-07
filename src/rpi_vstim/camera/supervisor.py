@@ -298,7 +298,7 @@ class _CameraWorker:
         elif self.status.exit_status is None:
             self.status.exit_status = int(self.process.poll())
         if self.status.state == CameraState.RECORDING:
-            if graceful_exit:
+            if graceful_exit and (self.spec.backend != "rpicam" or self.status.exit_status == 0):
                 self.status.state = CameraState.COMPLETED
                 self.status.exit_reason = self.status.exit_reason or "graceful_stop"
             elif self.status.exit_status == 0:

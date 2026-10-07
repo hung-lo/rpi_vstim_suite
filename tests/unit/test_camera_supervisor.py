@@ -208,6 +208,28 @@ def test_rpicam_stop_uses_sigint_and_requires_a_decodable_frame_count(tmp_path, 
     assert status.effective_fps == 34.0
 
 
+def test_rpicam_nonzero_sigint_exit_is_not_mislabeled_graceful(tmp_path):
+    class NonzeroInterruptProcess(FakeProcess):
+        def send_signal(self, _value):
+            self.returncode = -2
+
+    processes = []
+
+    def popen(*_args, **_kwargs):
+        process = NonzeroInterruptProcess(tmp_path / "session" / "camera" / "face" / "capture.mp4")
+        processes.append(process)
+        return process
+
+    camera_spec = CameraCaptureSpec(
+        **{**spec("face", required=True).__dict__, "backend": "rpicam", "output_extension": "mp4"}
+    )
+    supervisor = LocalCameraSupervisor((camera_spec,), popen_factory=popen)
+    supervisor.start(tmp_path / "session")
+    status = supervisor.stop()[0]
+    assert processes[0].returncode == -2
+    assert status.state == CameraState.FAILED
+
+
 def test_camera_stop_is_idempotent_and_records_monotonic_status_events(tmp_path):
     processes = []
 
