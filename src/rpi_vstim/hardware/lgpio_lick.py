@@ -79,6 +79,22 @@ class LgpioLickMonitor:
     def started(self) -> bool:
         return self._handle is not None
 
+    def diagnostics(self) -> dict[str, Any]:
+        """Return nonblocking lifecycle/counter state for session diagnostics."""
+        return {
+            "started": self.started,
+            "chip": self._hardware_config.chip,
+            "handle_open": self._handle is not None,
+            "claimed_pins": dict(self._claimed),
+            "callback_registration_count": len(self._callbacks),
+            "channels": dict(self._pins),
+            "current_level": dict(self.last_level),
+            "raw_edge_count": dict(self.raw_edge_count),
+            "classified_count": dict(self.classified_count),
+            "callback_error_count": len(self.callback_errors),
+            "callback_errors": list(self.callback_errors),
+        }
+
     def _load_api(self) -> Any:
         if self._api is not None:
             return self._api
@@ -121,7 +137,12 @@ class LgpioLickMonitor:
                     initial_level=initial,
                     initial_timestamp_ns=self._clock_ns(),
                 )
-                self._callbacks.append(api.callback(handle, pin, api.BOTH_EDGES, self._handle_alert))
+                callback = api.callback(handle, pin, api.BOTH_EDGES, self._handle_alert)
+                if callback is None:
+                    raise LgpioLickError(f"register {channel} BCM GPIO{pin} callback")
+                self._callbacks.append(callback)
+            if len(self._callbacks) != len(self._pins):
+                raise LgpioLickError("not all lick GPIO callbacks were registered")
         except BaseException:
             self._release_resources()
             raise

@@ -296,6 +296,7 @@ def _write_demo_metadata(
     classified_counts: dict[str, int],
     camera_manifest: list[dict[str, Any]],
     camera_commands: tuple[str, ...],
+    lick_monitor_diagnostics: dict[str, Any] | None,
 ) -> None:
     for name in ("provenance.json", "final_status.json"):
         path = session_root / name
@@ -310,6 +311,7 @@ def _write_demo_metadata(
             "gpio_untouched": [7, 8, 9, 15, 19, 20, 21, 23, 24, 25],
             "raw_lick_count": raw_counts,
             "classified_lick_count": classified_counts,
+            "lick_monitor": lick_monitor_diagnostics,
             "camera_manifest": camera_manifest,
             "camera_commands": list(camera_commands),
             "event_log": event_diagnostics,
@@ -360,6 +362,7 @@ def run_natural_image_demo(
     camera_failures: list[str] = []
     display_payload: dict[str, Any] | None = None
     camera_commands: tuple[str, ...] = ()
+    lick_monitor_diagnostics: dict[str, Any] | None = None
     status = "FAILED"
     error: str | None = None
     interrupted = False
@@ -455,9 +458,10 @@ def run_natural_image_demo(
                 on_classified=on_classified,
             )
             monitor.start()
+            lick_monitor_diagnostics = monitor.diagnostics()
             events.emit(
                 "LICK_MONITOR_READY",
-                channels={"lick_left": 26, "lick_right": 27},
+                **monitor.diagnostics(),
                 raw_and_classified_streams=True,
             )
 
@@ -612,7 +616,10 @@ def run_natural_image_demo(
                 degraded.append(f"display cleanup: {exc}")
         if monitor is not None:
             try:
+                lick_monitor_diagnostics = monitor.diagnostics()
+                events.emit("LICK_MONITOR_STATUS", **lick_monitor_diagnostics)
                 monitor.stop()
+                events.emit("LICK_MONITOR_STOPPED", **monitor.diagnostics())
             except Exception as exc:  # noqa: BLE001 — preserve cleanup diagnostics
                 degraded.append(f"lick cleanup: {exc}")
         camera_watch_stop.set()
@@ -665,6 +672,7 @@ def run_natural_image_demo(
             classified_counts=classified_counts,
             camera_manifest=camera_manifest,
             camera_commands=camera_commands,
+            lick_monitor_diagnostics=lick_monitor_diagnostics,
         )
 
     return NaturalImageDemoResult(

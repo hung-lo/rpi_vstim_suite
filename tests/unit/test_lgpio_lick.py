@@ -71,6 +71,10 @@ def test_dual_monitor_preserves_raw_edges_and_classifies_each_channel_independen
     for burst in range(20):
         _emit_burst(api.callbacks[0], 1_000_000_000 + burst * 200_000_000)
         _emit_burst(api.callbacks[1], 1_000_000_000 + burst * 200_000_000)
+    diagnostics = monitor.diagnostics()
+    assert diagnostics["claimed_pins"] == {"lick_left": 26, "lick_right": 27}
+    assert diagnostics["callback_registration_count"] == 2
+    assert diagnostics["started"] is True
     monitor.stop()
 
     assert monitor.raw_edge_count == {"lick_left": 120, "lick_right": 120}
@@ -94,6 +98,21 @@ def test_monitor_rejects_non_idle_start_and_releases_claims():
     assert not monitor.started
     assert ("free", 9, 26) in api.calls
     assert ("close", 9) in api.calls
+
+
+def test_monitor_diagnostics_show_claims_and_callbacks_while_running():
+    api = FakeLgpio()
+    monitor = LgpioLickMonitor(HardwareConfig(), api=api)
+    monitor.start()
+
+    diagnostics = monitor.diagnostics()
+
+    assert diagnostics["started"] is True
+    assert diagnostics["handle_open"] is True
+    assert diagnostics["claimed_pins"] == {"lick_left": 26, "lick_right": 27}
+    assert diagnostics["callback_registration_count"] == 2
+    assert diagnostics["current_level"] == {"lick_left": 0, "lick_right": 0}
+    monitor.stop()
 
 
 def test_configured_timing_is_passed_to_each_channel():
