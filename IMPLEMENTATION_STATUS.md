@@ -1,5 +1,28 @@
 # Implementation status
 
+## Integrated natural-image demonstration — 2026-10-06
+
+- [x] Add `rpi-vstim natural-images run` composition of the real natural-image
+  planner, leased HDMI-A-2 KMS stream, BCM26/27 lick monitor, and stable-CSI
+  dual-camera supervisor.
+- [x] Add optional native `rpicam-vid --preview` side-by-side geometry on the
+  compositor-owned HDMI-A-1 display; no second preview renderer or KMS owner is
+  introduced.
+- [x] Add one clock-mapped, bounded asynchronous `events.jsonl` stream with
+  raw/classified lick events, camera lifecycle events, and retained DRM timing
+  metadata. Drop/error diagnostics are persisted in final artifacts.
+- [x] Keep the demonstration reward-free and GPIO-safe: only BCM26/27 may be
+  acquired; GPIO9, GPIO15, GPIO23, GPIO24, all reward/vacuum/airpuff outputs,
+  and IRIG remain untouched.
+- [ ] Complete the real-Pi three-case timing comparison and physical
+  approximately 10-left/10-right lick demonstration; this is hardware evidence
+  still pending for the current branch.
+
+The demo is an integrated validation runner, not the final production
+`rpi-vstim` experiment/session implementation. Production SSD acceptance,
+photodiode/optical acceptance, and per-frame camera timing remain separate
+gates.
+
 This status uses the phase numbering from
 `RPI5_UNIFIED_VSTIM_CODEX_IMPLEMENTATION_PLAN.md` (V2).
 

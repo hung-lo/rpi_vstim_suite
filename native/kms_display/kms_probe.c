@@ -18,6 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#define STREAM_EVENT_CAPACITY 8192U
+
 #include <drm.h>
 #include <drm_fourcc.h>
 #include <xf86drm.h>
@@ -1485,7 +1487,10 @@ int main(int argc, char **argv) {
         exit_code = 0;
         goto cleanup;
     }
-    flips.event_capacity = options.stream ? 0U : options.frames;
+    /* Keep a bounded presentation trace for streamed natural-image runs.  The
+     * payload is useful for mapping image/gray boundaries to actual DRM
+     * callback timestamps without retaining stimulus pixels in native memory. */
+    flips.event_capacity = options.stream ? STREAM_EVENT_CAPACITY : options.frames;
     if (flips.event_capacity > 0) {
         flips.events = calloc(flips.event_capacity, sizeof(*flips.events));
         if (flips.events == NULL) {

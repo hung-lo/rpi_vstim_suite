@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-from queue import Full, Queue
+import signal
 import struct
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
+from queue import Full, Queue
 from threading import Event, Thread
 from typing import Any
 
@@ -198,13 +199,13 @@ def run_native_sequence(
                         continue
                 if stop_producer.is_set():
                     return
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 — propagate producer cancellation safely
             producer_error.append(exc)
         finally:
             while not stop_producer.is_set():
                 try:
                     frame_queue.put(None, timeout=0.1)
-                    return
+                    return  # noqa: B012 — sentinel enqueue completed
                 except Full:
                     continue
 
@@ -242,7 +243,7 @@ def run_native_sequence(
                 process.stdin.write(payload)
                 frame_count += 1
                 producer_sequence += 1
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 — fail-safe native cleanup
             writer_error.append(exc)
             stop_producer.set()
             if process.poll() is None:
@@ -252,9 +253,29 @@ def run_native_sequence(
 
     producer = Thread(target=produce_frames, name="rpi-vstim-kms-stream-producer")
     writer = Thread(target=write_frames, name="rpi-vstim-kms-stream-writer")
-    producer.start()
-    writer.start()
-    writer.join()
+    try:
+        producer.start()
+        writer.start()
+        writer.join()
+    except BaseException:
+        # Ctrl-C/SIGTERM must not leave the native KMS owner or its producer
+        # threads behind.  The native process also restores the original CRTC
+        # during its normal signal-aware cleanup when it can do so.
+        stop_producer.set()
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
+        try:
+            process.stdin.close()
+        except (OSError, ValueError):
+            pass
+        producer.join(timeout=2.0)
+        writer.join(timeout=2.0)
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2.0)
+        raise
     stop_producer.set()
     producer.join()
     assert process.stdout is not None

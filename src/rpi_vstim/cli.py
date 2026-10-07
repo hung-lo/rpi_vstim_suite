@@ -14,6 +14,7 @@ from pathlib import Path
 from . import __version__
 from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
+from .core.natural_image_demo import run_natural_image_demo
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
@@ -148,6 +149,30 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--dry-run", action="store_true", help="report production contracts without hardware")
     run.add_argument("--json", action="store_true", dest="as_json")
+
+    natural_images = commands.add_parser("natural-images", help="real natural-image demonstrations")
+    natural_image_commands = natural_images.add_subparsers(dest="natural_image_command", required=True)
+    natural_image_run = natural_image_commands.add_parser(
+        "run", help="run natural images with optional real licks and CSI cameras"
+    )
+    natural_image_run.add_argument("--mouse-id", required=True)
+    natural_image_run.add_argument(
+        "--config",
+        type=Path,
+        default=Path(__file__).resolve().parents[2]
+        / "config"
+        / "rigs"
+        / "pi5_natural_image_demo.example.toml",
+    )
+    natural_image_run.add_argument("--output-root", type=Path)
+    natural_image_run.add_argument("--session-id")
+    natural_image_run.add_argument("--seed", type=int, default=0)
+    natural_image_run.add_argument("--image-count", type=int)
+    natural_image_run.add_argument("--licks", action="store_true")
+    natural_image_run.add_argument("--cameras", action="store_true")
+    natural_image_run.add_argument("--camera-preview", action="store_true")
+    natural_image_run.add_argument("--native-binary", type=Path)
+    natural_image_run.add_argument("--json", action="store_true", dest="as_json")
 
     virtual = commands.add_parser("virtual-run", help="run a production-shaped virtual rig")
     virtual.add_argument("protocol", choices=[p.name for p in available_protocols()])
@@ -405,6 +430,66 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(payload, sort_keys=True))
         return 0
+    if args.command == "natural-images" and args.natural_image_command == "run":
+        try:
+            config = load_config(args.config)
+            if args.output_root is not None:
+                config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+            session_id = args.session_id or (
+                f"{args.mouse_id}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+            )
+            print(
+                "\n".join(
+                    (
+                        f"Session: {session_id}",
+                        "Protocol: natural-images",
+                        "",
+                        f"Stimulus: {config.display.stimulus_connector} / leased KMS",
+                        f"  corpus: {config.paths.asset_root}",
+                        "Licks: LEFT BCM26, RIGHT BCM27" if args.licks else "Licks: DISABLED",
+                        "Cameras: two CSI recordings at 640x480 @ 30 fps"
+                        if args.cameras
+                        else "Cameras: DISABLED",
+                        "Preview: HDMI-A-1 side-by-side" if args.camera_preview else "Preview: DISABLED",
+                        "Reward: DISABLED",
+                        "Vacuum: DISABLED",
+                        "GPIO23: untouched",
+                        "GPIO9 IRIG: untouched",
+                        "",
+                        "Ctrl-C to stop safely.",
+                    )
+                ),
+                flush=True,
+            )
+            result = run_natural_image_demo(
+                config,
+                mouse_id=args.mouse_id,
+                session_id=session_id,
+                seed=args.seed,
+                image_count=args.image_count,
+                use_licks=args.licks,
+                use_cameras=args.cameras,
+                camera_preview=args.camera_preview,
+                native_binary=args.native_binary,
+            )
+        except (ConfigError, OSError, ValueError, RuntimeError) as exc:
+            print(f"natural-image demo failed: {exc}", file=sys.stderr)
+            return 2
+        payload = {
+            "session_root": str(result.session_root),
+            "status": result.status,
+            "error": result.error,
+            "raw_lick_count": result.raw_lick_count,
+            "classified_lick_count": result.classified_lick_count,
+            "camera_manifest": result.camera_manifest,
+            "event_diagnostics": result.event_diagnostics,
+        }
+        print(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if args.as_json
+            else f"{result.status}: {result.session_root}"
+        )
+        return 0 if result.ok else 1
     if args.command == "operator" and args.operator_command == "bait":
         try:
             config = load_config(args.config)

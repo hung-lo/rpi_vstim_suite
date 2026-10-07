@@ -5,10 +5,11 @@ from __future__ import annotations
 import subprocess
 import time
 from collections import deque
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Thread
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from rpi_vstim.camera.identity import ResolvedCamera
 from rpi_vstim.core.camera import CameraState
@@ -63,6 +64,9 @@ class CameraCaptureSpec:
     stall_timeout_s: float | None = 30.0
     max_diagnostic_bytes: int = 64 * 1024
     resolved_camera: ResolvedCamera | None = None
+    preview_enabled: bool = False
+    preview_geometry: tuple[int, int, int, int] | None = None
+    preview_connector: str | None = None
 
 
 @dataclass
@@ -93,6 +97,9 @@ class CameraWorkerStatus:
     exit_reason: str | None = None
     verification_state: str = "not_checked"
     diagnostic_log_path: str = ""
+    preview_enabled: bool = False
+    preview_geometry: tuple[int, int, int, int] | None = None
+    preview_connector: str | None = None
     last_growth_monotonic_ns: int | None = None
     last_growth_bytes: int = 0
     error: str | None = None
@@ -122,10 +129,17 @@ def build_rpicam_command(
         "--camera",
         resolved_camera.runtime_selector,
         "--no-raw",
-        "--nopreview",
+        "--timeout",
+        "0",
         "--output",
         str(output_path),
     ]
+    if spec.preview_enabled:
+        if spec.preview_geometry is None:
+            raise ValueError("preview geometry is required when camera preview is enabled")
+        command.extend(("--preview", ",".join(str(value) for value in spec.preview_geometry)))
+    else:
+        command.append("--nopreview")
     if spec.requested_width_px is not None:
         command.extend(("--width", str(spec.requested_width_px)))
     if spec.requested_height_px is not None:
@@ -175,6 +189,9 @@ class _CameraWorker:
             pixel_format_or_codec=spec.pixel_format_or_codec,
             output_path=str(output_path),
             diagnostic_log_path=str(diagnostic_path),
+            preview_enabled=spec.preview_enabled,
+            preview_geometry=spec.preview_geometry,
+            preview_connector=spec.preview_connector,
         )
 
     def _publish(self, event: str, detail: str = "") -> None:
