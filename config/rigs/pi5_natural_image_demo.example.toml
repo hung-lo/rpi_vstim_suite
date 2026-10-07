@@ -57,6 +57,6 @@ compatibility_profile = "natural_legacy_plain"
 image_count = 20
 repeat_count = 1
 selection_seed = 777
-image_duration_s = 0.5
+image_duration_s = 0.5015045135406219
 initial_gray_frames = 180
 final_gray_frames = 180
