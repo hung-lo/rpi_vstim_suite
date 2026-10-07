@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Thread
@@ -24,6 +25,86 @@ class CameraSupervisorError(RuntimeError):
 
 class CameraStartupError(CameraSupervisorError):
     pass
+
+
+@dataclass(frozen=True)
+class CameraPreviewEnvironment:
+    """The small, relevant environment selection for native camera preview."""
+
+    enabled: bool
+    environment: dict[str, str] | None
+    metadata: dict[str, object]
+
+
+def _local_display_usable(environment: Mapping[str, str]) -> bool:
+    """Probe XWayland without changing the parent process environment."""
+    try:
+        return subprocess.run(
+            ("xrandr", "--display", ":0", "--query"),
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def resolve_camera_preview_environment(
+    environment: Mapping[str, str] | None = None,
+    *,
+    uid: int | None = None,
+    runtime_root: Path = Path("/run/user"),
+    display_probe: Callable[[Mapping[str, str]], bool] = _local_display_usable,
+) -> CameraPreviewEnvironment:
+    """Select an SSH-safe native preview environment, only when it is usable."""
+    child_environment = dict(os.environ if environment is None else environment)
+    supplied_display = child_environment.get("DISPLAY")
+    if supplied_display:
+        return CameraPreviewEnvironment(
+            True,
+            child_environment,
+            {
+                "requested": True,
+                "enabled": True,
+                "selection": "user_environment",
+                "display": supplied_display,
+                "xdg_runtime_dir": child_environment.get("XDG_RUNTIME_DIR"),
+                "wayland_display": child_environment.get("WAYLAND_DISPLAY"),
+            },
+        )
+
+    runtime_dir = runtime_root / str(os.getuid() if uid is None else uid)
+    if runtime_dir.is_dir():
+        child_environment.setdefault("XDG_RUNTIME_DIR", str(runtime_dir))
+        if (runtime_dir / "wayland-0").is_socket():
+            child_environment.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    child_environment["DISPLAY"] = ":0"
+    if display_probe(child_environment):
+        return CameraPreviewEnvironment(
+            True,
+            child_environment,
+            {
+                "requested": True,
+                "enabled": True,
+                "selection": "local_xwayland",
+                "display": ":0",
+                "xdg_runtime_dir": child_environment.get("XDG_RUNTIME_DIR"),
+                "wayland_display": child_environment.get("WAYLAND_DISPLAY"),
+            },
+        )
+    return CameraPreviewEnvironment(
+        False,
+        None,
+        {
+            "requested": True,
+            "enabled": False,
+            "selection": "unavailable",
+            "reason": "local XWayland display :0 was not usable",
+        },
+    )
 
 
 class BoundedCameraStatusChannel:
@@ -67,8 +148,10 @@ class CameraCaptureSpec:
     max_diagnostic_bytes: int = 64 * 1024
     resolved_camera: ResolvedCamera | None = None
     preview_enabled: bool = False
+    preview_requested: bool = False
     preview_geometry: tuple[int, int, int, int] | None = None
     preview_connector: str | None = None
+    child_environment: Mapping[str, str] | None = None
 
 
 @dataclass
@@ -107,6 +190,7 @@ class CameraWorkerStatus:
     verification_state: str = "not_checked"
     diagnostic_log_path: str = ""
     preview_enabled: bool = False
+    preview_requested: bool = False
     preview_geometry: tuple[int, int, int, int] | None = None
     preview_connector: str | None = None
     last_growth_monotonic_ns: int | None = None
@@ -201,6 +285,7 @@ class _CameraWorker:
             output_path=str(output_path),
             diagnostic_log_path=str(diagnostic_path),
             preview_enabled=spec.preview_enabled,
+            preview_requested=spec.preview_requested,
             preview_geometry=spec.preview_geometry,
             preview_connector=spec.preview_connector,
         )
@@ -228,11 +313,10 @@ class _CameraWorker:
         self.status.start_utc_ns = utc_ns()
         self.status.start_monotonic_ns = monotonic_ns()
         try:
-            self.process = self._popen_factory(
-                self.spec.command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
+            kwargs: dict[str, Any] = {"stdout": subprocess.DEVNULL, "stderr": subprocess.PIPE}
+            if self.spec.child_environment is not None:
+                kwargs["env"] = self.spec.child_environment
+            self.process = self._popen_factory(self.spec.command, **kwargs)
         except OSError as exc:
             self._fail(f"camera process failed to start: {exc}")
             raise CameraStartupError(self.spec.camera_id) from exc

@@ -12,6 +12,7 @@ from rpi_vstim.camera.supervisor import (
     CameraStartupError,
     LocalCameraSupervisor,
     build_rpicam_command,
+    resolve_camera_preview_environment,
 )
 from rpi_vstim.core.camera import CameraState
 
@@ -162,6 +163,100 @@ def test_rpicam_mp4_command_preserves_h264_timing_in_a_native_container(tmp_path
         "libx264",
         "--libav-format",
         "mp4",
+    )
+
+
+def test_preview_off_does_not_inject_a_child_environment(tmp_path):
+    observed = {}
+
+    def popen(command, **kwargs):
+        observed.update(kwargs)
+        return FakeProcess(tmp_path / "session" / "camera" / command[1] / "capture.bin")
+
+    supervisor = LocalCameraSupervisor((spec("face", required=True),), popen_factory=popen)
+    supervisor.start(tmp_path / "session")
+    supervisor.stop()
+    assert "env" not in observed
+
+
+def test_preview_preserves_existing_display_environment():
+    environment = {
+        "DISPLAY": ":7",
+        "XDG_RUNTIME_DIR": "/run/user/77",
+        "WAYLAND_DISPLAY": "wayland-7",
+    }
+    selected = resolve_camera_preview_environment(
+        environment,
+        display_probe=lambda _environment: pytest.fail("existing DISPLAY must not be probed"),
+    )
+    assert selected.enabled
+    assert selected.environment == environment
+    assert selected.metadata["selection"] == "user_environment"
+
+
+def test_preview_detects_local_xwayland_and_passes_it_to_child(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / "runtime" / "1000"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setattr(Path, "is_socket", lambda path: path.name == "wayland-0")
+    selected = resolve_camera_preview_environment(
+        {"PATH": "/usr/bin"},
+        uid=1000,
+        runtime_root=tmp_path / "runtime",
+        display_probe=lambda environment: environment["DISPLAY"] == ":0",
+    )
+    observed = {}
+
+    def popen(command, **kwargs):
+        observed.update(kwargs)
+        return FakeProcess(tmp_path / "session" / "camera" / command[1] / "capture.bin")
+
+    camera_spec = CameraCaptureSpec(
+        **{
+            **spec("face", required=True).__dict__,
+            "preview_enabled": True,
+            "preview_requested": True,
+            "preview_geometry": (0, 0, 512, 384),
+            "child_environment": selected.environment,
+        }
+    )
+    supervisor = LocalCameraSupervisor((camera_spec,), popen_factory=popen)
+    supervisor.start(tmp_path / "session")
+    supervisor.stop()
+    assert selected.enabled
+    assert observed["env"]["DISPLAY"] == ":0"
+    assert observed["env"]["XDG_RUNTIME_DIR"] == str(runtime_dir)
+    assert observed["env"]["WAYLAND_DISPLAY"] == "wayland-0"
+
+
+def test_preview_without_a_usable_desktop_stays_disabled(tmp_path):
+    selected = resolve_camera_preview_environment(
+        {"PATH": "/usr/bin"},
+        uid=1000,
+        runtime_root=tmp_path / "runtime",
+        display_probe=lambda _environment: False,
+    )
+    assert not selected.enabled
+    assert selected.environment is None
+    assert selected.metadata["reason"] == "local XWayland display :0 was not usable"
+
+
+def test_rpicam_recording_command_changes_only_preview_arguments(tmp_path):
+    resolved = ResolvedCamera("face", "serial", "imx708", "0", "platform:0")
+    base = CameraCaptureSpec("face", "face", "serial", True, "rpicam", ())
+    recording = build_rpicam_command(base, tmp_path / "capture.mp4", resolved_camera=resolved)
+    preview = build_rpicam_command(
+        CameraCaptureSpec(
+            **{
+                **base.__dict__,
+                "preview_enabled": True,
+                "preview_geometry": (0, 0, 512, 384),
+            }
+        ),
+        tmp_path / "capture.mp4",
+        resolved_camera=resolved,
+    )
+    assert tuple(item for item in recording if item != "--nopreview") == tuple(
+        item for item in preview if item not in {"--preview", "0,0,512,384"}
     )
 
 

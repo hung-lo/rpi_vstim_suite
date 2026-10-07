@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
@@ -12,10 +12,12 @@ from typing import Any
 from rpi_vstim.camera import (
     CameraCaptureSpec,
     CameraIdentity,
+    CameraPreviewEnvironment,
     LocalCameraSupervisor,
     build_rpicam_command,
     enumerate_rpicam_cameras,
     resolve_camera_identities,
+    resolve_camera_preview_environment,
 )
 from rpi_vstim.core.assets import AssetPreparer, AssetResolver, build_selected_asset_manifest
 from rpi_vstim.core.config import Config, ConfigError
@@ -51,6 +53,7 @@ class NaturalImageDemoResult:
     camera_manifest: list[dict[str, Any]]
     event_diagnostics: dict[str, Any]
     display_payload: dict[str, Any] | None = None
+    camera_preview: dict[str, object] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -121,6 +124,7 @@ def _resolve_camera_specs(
     session_root: Path,
     *,
     preview: bool,
+    preview_environment: CameraPreviewEnvironment | None = None,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
 ) -> tuple[tuple[CameraCaptureSpec, ...], tuple[str, ...]]:
     available = enumerate_cameras()
@@ -136,7 +140,8 @@ def _resolve_camera_specs(
     commands: list[str] = []
     for index, device in enumerate(config.cameras.devices):
         resolved = by_id[device.id]
-        geometry = DEMO_PREVIEW_GEOMETRIES[index] if preview else None
+        preview_enabled = bool(preview_environment and preview_environment.enabled)
+        geometry = DEMO_PREVIEW_GEOMETRIES[index] if preview_enabled else None
         output_path = session_root / "camera" / device.id / f"capture.{DEMO_CAMERA_EXTENSION}"
         base = CameraCaptureSpec(
             camera_id=device.id,
@@ -154,9 +159,11 @@ def _resolve_camera_specs(
             stop_timeout_s=device.stop_timeout_s,
             stall_timeout_s=device.stall_timeout_s,
             resolved_camera=resolved,
-            preview_enabled=preview,
+            preview_enabled=preview_enabled,
+            preview_requested=preview,
             preview_geometry=geometry,
-            preview_connector=config.display.preview_connector if preview else None,
+            preview_connector=config.display.preview_connector if preview_enabled else None,
+            child_environment=preview_environment.environment if preview_enabled else None,
         )
         command = build_rpicam_command(base, output_path, resolved_camera=resolved)
         specs.append(base.__class__(**{**base.__dict__, "command": command}))
@@ -177,6 +184,7 @@ def _camera_event_fields(status: Any) -> dict[str, Any]:
         "codec": status.pixel_format_or_codec,
         "recording_path": status.output_path,
         "preview_enabled": status.preview_enabled,
+        "preview_requested": status.preview_requested,
         "preview_geometry": status.preview_geometry,
         "preview_connector": status.preview_connector,
     }
@@ -298,6 +306,7 @@ def _write_demo_metadata(
     camera_manifest: list[dict[str, Any]],
     camera_commands: tuple[str, ...],
     lick_monitor_diagnostics: dict[str, Any] | None,
+    camera_preview: dict[str, object],
 ) -> None:
     for name in ("provenance.json", "final_status.json"):
         path = session_root / name
@@ -315,6 +324,7 @@ def _write_demo_metadata(
             "lick_monitor": lick_monitor_diagnostics,
             "camera_manifest": camera_manifest,
             "camera_commands": list(camera_commands),
+            "camera_preview": camera_preview,
             "event_log": event_diagnostics,
         }
         if name == "final_status.json":
@@ -363,6 +373,8 @@ def run_natural_image_demo(
     camera_failures: list[str] = []
     display_payload: dict[str, Any] | None = None
     camera_commands: tuple[str, ...] = ()
+    camera_preview_metadata: dict[str, object] = {"requested": camera_preview, "enabled": False}
+    preview_environment: CameraPreviewEnvironment | None = None
     lick_monitor_diagnostics: dict[str, Any] | None = None
     status = "FAILED"
     error: str | None = None
@@ -416,6 +428,12 @@ def run_natural_image_demo(
     try:
         events.emit("SESSION_START", mouse_id=mouse_id, protocol="natural-images")
         events.emit("CLOCK_SYNC", source_monotonic_ns=clock.reference_monotonic_ns, **clock.sync_fields())
+        if use_cameras and camera_preview:
+            preview_environment = resolve_camera_preview_environment()
+            camera_preview_metadata = preview_environment.metadata
+            events.emit("CAMERA_PREVIEW_SELECTION", **camera_preview_metadata)
+            if not preview_environment.enabled:
+                events.emit("CAMERA_PREVIEW_UNAVAILABLE", **camera_preview_metadata)
         session.write_plan(plan)
         resolver = AssetResolver(config.paths.asset_root)
         manifest = build_selected_asset_manifest(
@@ -443,6 +461,7 @@ def run_natural_image_demo(
                 "mode": "natural_image_demo",
                 "display_connector": config.display.stimulus_connector,
                 "camera_preview_connector": config.display.preview_connector,
+                "camera_preview": camera_preview_metadata,
                 "camera_width_px": DEMO_CAMERA_WIDTH,
                 "camera_height_px": DEMO_CAMERA_HEIGHT,
                 "camera_fps": DEMO_CAMERA_FPS,
@@ -471,6 +490,7 @@ def run_natural_image_demo(
                 config,
                 session.context.session_root,
                 preview=camera_preview,
+                preview_environment=preview_environment,
                 enumerate_cameras=enumerate_cameras,
             )
             cameras = LocalCameraSupervisor(
@@ -508,7 +528,7 @@ def run_natural_image_demo(
             cameras_active = True
             for camera_status in cameras.manifest():
                 events.emit("CAMERA_READY", **camera_status)
-                if camera_preview:
+                if camera_status.preview_enabled:
                     events.emit("CAMERA_PREVIEW_READY", verification="process_started", **camera_status)
             camera_watch_thread = Thread(target=watch_cameras, name="rpi-vstim-camera-watch", daemon=True)
             camera_watch_thread.start()
@@ -679,6 +699,7 @@ def run_natural_image_demo(
             camera_manifest=camera_manifest,
             camera_commands=camera_commands,
             lick_monitor_diagnostics=lick_monitor_diagnostics,
+            camera_preview=camera_preview_metadata,
         )
 
     return NaturalImageDemoResult(
@@ -690,4 +711,5 @@ def run_natural_image_demo(
         camera_manifest,
         event_diagnostics,
         display_payload,
+        camera_preview_metadata,
     )

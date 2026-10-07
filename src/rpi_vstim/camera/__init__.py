@@ -12,14 +12,17 @@ from .identity import (
 )
 from .supervisor import (
     CameraCaptureSpec,
+    CameraPreviewEnvironment,
     CameraWorkerStatus,
     LocalCameraSupervisor,
     build_rpicam_command,
+    resolve_camera_preview_environment,
 )
 
 __all__ = [
     "CameraCaptureSpec",
     "CameraIdentity",
+    "CameraPreviewEnvironment",
     "CameraResolutionReport",
     "CameraWorkerStatus",
     "EnumeratedCamera",
@@ -30,4 +33,5 @@ __all__ = [
     "parse_enumerated_cameras",
     "parse_rpicam_camera_listing",
     "resolve_camera_identities",
+    "resolve_camera_preview_environment",
 ]

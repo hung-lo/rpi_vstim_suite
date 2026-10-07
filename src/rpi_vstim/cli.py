@@ -450,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
                         "Cameras: two CSI recordings at 640x480 @ 30 fps"
                         if args.cameras
                         else "Cameras: DISABLED",
-                        "Preview: HDMI-A-1 side-by-side" if args.camera_preview else "Preview: DISABLED",
+                        "Preview: requested on HDMI-A-1 side-by-side" if args.camera_preview else "Preview: DISABLED",
                         "Reward: DISABLED",
                         "Vacuum: DISABLED",
                         "GPIO23: untouched",
@@ -483,7 +483,10 @@ def main(argv: list[str] | None = None) -> int:
             "classified_lick_count": result.classified_lick_count,
             "camera_manifest": result.camera_manifest,
             "event_diagnostics": result.event_diagnostics,
+            "camera_preview": result.camera_preview,
         }
+        if args.camera_preview and not result.camera_preview.get("enabled"):
+            print(f"WARNING: camera preview unavailable: {result.camera_preview.get('reason')}", file=sys.stderr)
         print(
             json.dumps(payload, indent=2, sort_keys=True)
             if args.as_json
