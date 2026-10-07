@@ -1,6 +1,7 @@
 import json
 import struct
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -62,6 +63,30 @@ def test_native_probe_wrapper_builds_bounded_command(monkeypatch, tmp_path):
     assert "--frame-file" in calls["command"]
     assert calls["kwargs"]["timeout"] >= 10.0
     assert "--probe-only" not in calls["command"]
+
+
+def test_leased_probe_discovers_local_wayland_runtime_over_ssh(monkeypatch, tmp_path):
+    calls = {}
+
+    class Completed:
+        returncode = 0
+        stdout = '{"connector": "HDMI-A-1"}'
+        stderr = ""
+
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr("rpi_vstim.display.native_probe.os.getuid", lambda: 1000)
+    monkeypatch.setattr(Path, "is_dir", lambda path: str(path) == "/run/user/1000")
+    monkeypatch.setattr(Path, "is_socket", lambda path: str(path) == "/run/user/1000/wayland-0")
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.run",
+        lambda command, **kwargs: (calls.update(kwargs) or Completed()),
+    )
+
+    run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe", lease=True)
+
+    assert calls["env"]["XDG_RUNTIME_DIR"] == "/run/user/1000"
+    assert calls["env"]["WAYLAND_DISPLAY"] == "wayland-0"
 
 
 def test_native_sequence_uses_one_stream_process_and_preserves_frame_metadata(monkeypatch, tmp_path):

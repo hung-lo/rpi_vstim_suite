@@ -42,6 +42,18 @@ def default_binary() -> Path:
     return Path(__file__).resolve().parents[3] / "native" / "kms_display" / "kms_probe"
 
 
+def _lease_environment() -> dict[str, str]:
+    """Supply the local Wayland runtime to a leased child launched over SSH."""
+    environment = dict(os.environ)
+    if environment.get("XDG_RUNTIME_DIR"):
+        return environment
+    runtime_dir = Path("/run/user") / str(os.getuid())
+    if runtime_dir.is_dir() and (runtime_dir / "wayland-0").is_socket():
+        environment["XDG_RUNTIME_DIR"] = str(runtime_dir)
+        environment.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    return environment
+
+
 def run_native_probe(
     config: DisplayConfig,
     *,
@@ -106,6 +118,7 @@ def run_native_probe(
             capture_output=True,
             text=True,
             timeout=timeout,
+            **({"env": _lease_environment()} if lease else {}),
         )
     except FileNotFoundError as exc:
         raise NativeKmsError(f"native KMS probe is unavailable: {executable}") from exc
@@ -180,6 +193,7 @@ def run_native_sequence(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=False,
+        **({"env": _lease_environment()} if lease else {}),
     )
     frame_queue: Queue[DisplaySequenceFrame | None] = Queue(maxsize=_STREAM_QUEUE_CAPACITY)
     stop_producer = Event()
@@ -284,7 +298,9 @@ def run_native_sequence(
     stderr = process.stderr.read()
     process.wait()
     if writer_error:
-        raise NativeKmsError(f"native KMS sequence input failed: {writer_error[0]}")
+        detail = stderr.decode(errors="replace").strip()
+        message = f"native KMS sequence input failed: {writer_error[0]}"
+        raise NativeKmsError(f"{message}: {detail}" if detail else message)
     if process.returncode != 0:
         detail = (stderr or stdout).decode(errors="replace").strip()
         message = f"native KMS sequence failed ({process.returncode}): {detail}"
