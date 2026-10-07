@@ -32,6 +32,7 @@ DEMO_CAMERA_WIDTH = 640
 DEMO_CAMERA_HEIGHT = 480
 DEMO_CAMERA_FPS = 30.0
 DEMO_CAMERA_CODEC = "h264"
+DEMO_CAMERA_EXTENSION = "mp4"
 DEMO_PREVIEW_GEOMETRIES = ((0, 0, 512, 384), (512, 0, 512, 384))
 DEFAULT_DEMO_IMAGE_COUNT = 20
 
@@ -136,7 +137,7 @@ def _resolve_camera_specs(
     for index, device in enumerate(config.cameras.devices):
         resolved = by_id[device.id]
         geometry = DEMO_PREVIEW_GEOMETRIES[index] if preview else None
-        output_path = session_root / "camera" / device.id / "capture.h264"
+        output_path = session_root / "camera" / device.id / f"capture.{DEMO_CAMERA_EXTENSION}"
         base = CameraCaptureSpec(
             camera_id=device.id,
             role=device.role,
@@ -144,7 +145,7 @@ def _resolve_camera_specs(
             required=True,
             backend=device.backend,
             command=(),
-            output_extension="h264",
+            output_extension=DEMO_CAMERA_EXTENSION,
             requested_width_px=DEMO_CAMERA_WIDTH,
             requested_height_px=DEMO_CAMERA_HEIGHT,
             requested_fps=DEMO_CAMERA_FPS,
@@ -489,7 +490,12 @@ def run_natural_image_demo(
                     fps=spec.requested_fps,
                     codec=spec.pixel_format_or_codec,
                     recording_path=str(
-                        (session.context.session_root / "camera" / spec.camera_id / "capture.h264").relative_to(
+                        (
+                            session.context.session_root
+                            / "camera"
+                            / spec.camera_id
+                            / f"capture.{spec.output_extension}"
+                        ).relative_to(
                             session.context.session_root
                         )
                     ),

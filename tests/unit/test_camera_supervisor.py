@@ -149,6 +149,65 @@ def test_rpicam_command_does_not_guess_transient_video_nodes(tmp_path):
     assert "--width" in command and "1280" in command
 
 
+def test_rpicam_mp4_command_preserves_h264_timing_in_a_native_container(tmp_path):
+    command = build_rpicam_command(
+        CameraCaptureSpec("face", "face", "serial", True, "rpicam", ()),
+        tmp_path / "capture.mp4",
+        resolved_camera=ResolvedCamera("face", "serial", "imx708", "0", "platform:0"),
+    )
+    assert command[-6:] == (
+        "--codec",
+        "libav",
+        "--libav-video-codec",
+        "libx264",
+        "--libav-format",
+        "mp4",
+    )
+
+
+def test_rpicam_stop_uses_sigint_and_requires_a_decodable_frame_count(tmp_path, monkeypatch):
+    class InterruptibleProcess(FakeProcess):
+        def __init__(self, output_path):
+            super().__init__(output_path)
+            self.signal = None
+
+        def send_signal(self, value):
+            self.signal = value
+            self.returncode = 0
+
+    processes = []
+    monkeypatch.setattr(
+        "rpi_vstim.camera.supervisor.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            (), 0, '{"streams": [{"nb_read_frames": "17", "duration": "0.5"}]}', ""
+        ),
+    )
+    camera_spec = CameraCaptureSpec(
+        **{
+            **spec("face", required=True).__dict__,
+            "backend": "rpicam",
+            "output_extension": "mp4",
+            "requested_fps": 30.0,
+        }
+    )
+
+    def popen(*_args, **_kwargs):
+        process = InterruptibleProcess(tmp_path / "session" / "camera" / "face" / "capture.mp4")
+        processes.append(process)
+        return process
+
+    supervisor = LocalCameraSupervisor(
+        (camera_spec,),
+        popen_factory=popen,
+    )
+    supervisor.start(tmp_path / "session")
+    status = supervisor.stop()[0]
+    assert processes[0].signal is not None
+    assert status.verification_state == "recorded"
+    assert status.decoded_frame_count == status.reported_frames == 17
+    assert status.effective_fps == 34.0
+
+
 def test_camera_stop_is_idempotent_and_records_monotonic_status_events(tmp_path):
     processes = []
 

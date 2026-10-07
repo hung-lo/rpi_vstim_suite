@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import signal
 import subprocess
 import time
 from collections import deque
@@ -92,6 +94,13 @@ class CameraWorkerStatus:
     stop_monotonic_ns: int | None = None
     bytes_written: int = 0
     reported_frames: int | None = None
+    decoded_frame_count: int | None = None
+    active_runtime_s: float | None = None
+    media_duration_s: float | None = None
+    expected_frame_count: float | None = None
+    effective_fps: float | None = None
+    frame_count_discrepancy: float | None = None
+    decode_probe_success: bool | None = None
     dropped_frames: int | None = None
     exit_status: int | None = None
     exit_reason: str | None = None
@@ -146,7 +155,9 @@ def build_rpicam_command(
         command.extend(("--height", str(spec.requested_height_px)))
     if spec.requested_fps is not None:
         command.extend(("--framerate", f"{spec.requested_fps:g}"))
-    if spec.pixel_format_or_codec:
+    if output_path.suffix == ".mp4":
+        command.extend(("--codec", "libav", "--libav-video-codec", "libx264", "--libav-format", "mp4"))
+    elif spec.pixel_format_or_codec:
         command.extend(("--codec", spec.pixel_format_or_codec))
     return tuple(command)
 
@@ -297,6 +308,7 @@ class _CameraWorker:
         self.status.stop_utc_ns = utc_ns()
         self.status.stop_monotonic_ns = monotonic_ns()
         self._refresh_bytes()
+        self._probe_output()
         self.status.verification_state = self._verification_state()
         self._write_diagnostic()
         self._stopped = True
@@ -315,7 +327,11 @@ class _CameraWorker:
             self.status.exit_reason = "forced_kill_after_stop_timeout"
             return False
         try:
-            self.process.terminate()
+            sender = getattr(self.process, "send_signal", None)
+            if self.spec.backend != "rpicam" or sender is None:
+                self.process.terminate()
+            else:
+                sender(signal.SIGINT)
         except OSError as exc:
             self._fail(f"camera terminate failed: {exc}")
             return False
@@ -373,10 +389,57 @@ class _CameraWorker:
 
     def _verification_state(self) -> str:
         if self.status.state == CameraState.COMPLETED:
-            return "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
+            if self.spec.backend != "rpicam":
+                return "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
+            return "recorded" if self.status.decode_probe_success else "recorded_unverified"
         if self.status.bytes_written > 0:
             return "output_nonempty_failed"
         return "recording_failed"
+
+    def _probe_output(self) -> None:
+        """Record cheap post-stop decode evidence for native rpicam outputs."""
+        if self.spec.backend != "rpicam" or self.status.bytes_written <= 0:
+            return
+        try:
+            result = subprocess.run(
+                (
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-count_frames",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=nb_read_frames,duration",
+                    "-of",
+                    "json",
+                    str(self.output_path),
+                ),
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            stream = json.loads(result.stdout).get("streams", [{}])[0]
+            frames = int(stream.get("nb_read_frames", 0)) if result.returncode == 0 else 0
+            duration_s = float(stream.get("duration", 0) or 0)
+        except (IndexError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+            frames = 0
+            duration_s = 0
+        self.status.decoded_frame_count = frames or None
+        self.status.reported_frames = self.status.decoded_frame_count
+        self.status.decode_probe_success = frames > 0
+        if self.status.start_monotonic_ns is None or self.status.stop_monotonic_ns is None:
+            return
+        runtime_s = (self.status.stop_monotonic_ns - self.status.start_monotonic_ns) / 1_000_000_000
+        self.status.active_runtime_s = runtime_s
+        self.status.media_duration_s = duration_s or None
+        measured_runtime_s = duration_s or runtime_s
+        if self.spec.requested_fps is not None and measured_runtime_s > 0:
+            expected = measured_runtime_s * self.spec.requested_fps
+            self.status.expected_frame_count = expected
+            self.status.effective_fps = frames / measured_runtime_s
+            self.status.frame_count_discrepancy = frames - expected
 
     def _start_stderr_capture(self) -> None:
         stream = getattr(self.process, "stderr", None)
