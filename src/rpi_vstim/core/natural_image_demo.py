@@ -528,7 +528,7 @@ def run_natural_image_demo(
             cameras_active = True
             for camera_status in cameras.manifest():
                 events.emit("CAMERA_READY", **camera_status)
-                if camera_status.preview_enabled:
+                if camera_status.get("preview_enabled"):
                     events.emit("CAMERA_PREVIEW_READY", verification="process_started", **camera_status)
             camera_watch_thread = Thread(target=watch_cameras, name="rpi-vstim-camera-watch", daemon=True)
             camera_watch_thread.start()
