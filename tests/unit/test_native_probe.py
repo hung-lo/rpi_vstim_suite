@@ -73,8 +73,8 @@ def test_leased_probe_discovers_local_wayland_runtime_over_ssh(monkeypatch, tmp_
         stdout = '{"connector": "HDMI-A-1"}'
         stderr = ""
 
-    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/foreign/runtime")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-9")
     monkeypatch.setattr("rpi_vstim.display.native_probe.os.getuid", lambda: 1000)
     monkeypatch.setattr(Path, "is_dir", lambda path: str(path) == "/run/user/1000")
     monkeypatch.setattr(Path, "is_socket", lambda path: str(path) == "/run/user/1000/wayland-0")

@@ -45,12 +45,15 @@ def default_binary() -> Path:
 def _lease_environment() -> dict[str, str]:
     """Supply the local Wayland runtime to a leased child launched over SSH."""
     environment = dict(os.environ)
-    if environment.get("XDG_RUNTIME_DIR"):
+    runtime_dir = Path(environment.get("XDG_RUNTIME_DIR", "/run/user"))
+    wayland_display = environment.get("WAYLAND_DISPLAY", "wayland-0")
+    if runtime_dir.is_dir() and (runtime_dir / wayland_display).is_socket():
+        environment.setdefault("WAYLAND_DISPLAY", wayland_display)
         return environment
     runtime_dir = Path("/run/user") / str(os.getuid())
     if runtime_dir.is_dir() and (runtime_dir / "wayland-0").is_socket():
         environment["XDG_RUNTIME_DIR"] = str(runtime_dir)
-        environment.setdefault("WAYLAND_DISPLAY", "wayland-0")
+        environment["WAYLAND_DISPLAY"] = "wayland-0"
     return environment
 
 
