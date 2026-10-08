@@ -18,8 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
-/* ponytail: supports about 73 minutes at 59.82 Hz; use streamed trace output for longer runs. */
-#define STREAM_EVENT_CAPACITY 262144U
+/* 48-byte FlipEvent records: 24 MiB, enough for ~146 min at 59.82 Hz. */
+#define STREAM_EVENT_CAPACITY 524288U
 
 #include <drm.h>
 #include <drm_fourcc.h>
@@ -1222,9 +1222,11 @@ static void print_result(
                " \"modeset_count\": 1, \"restore_count\": %u,"
                " \"lease_release_count\": %u},\n",
                options->lease ? 1U : 0U, restored ? 1U : 0U, options->lease ? 1U : 0U);
-        printf("  \"flip_event_count\": %" PRIu64 ",\n  \"flip_events_stored\": %u,\n",
+        printf("  \"flip_event_count\": %" PRIu64 ",\n  \"flip_events_stored\": %u,\n"
+               "  \"flip_trace_truncated\": %s,\n",
                completed,
-               flips->event_capacity < completed ? flips->event_capacity : (unsigned int)completed);
+               flips->event_capacity < completed ? flips->event_capacity : (unsigned int)completed,
+               flips->event_capacity < completed ? "true" : "false");
         printf("  \"flip_events\": [");
         unsigned int stored_events = flips->event_capacity < completed
                                          ? flips->event_capacity
