@@ -70,8 +70,10 @@ class UnifiedEventHandoff:
         self._thread = Thread(target=self._run, name="rpi-vstim-unified-event-writer", daemon=True)
         self._thread.start()
         self.dropped_count = 0
+        self.enqueue_count = 0
         self.error_count = 0
         self.written_count = 0
+        self.high_water_mark = 0
         self.writer_error: str | None = None
 
     def publish(self, event: dict[str, Any]) -> bool:
@@ -81,7 +83,15 @@ class UnifiedEventHandoff:
         except Full:
             self.dropped_count += 1
             return False
+        self.enqueue_count += 1
+        self.high_water_mark = max(self.high_water_mark, self._queue.qsize())
         return True
+
+    def publish_reliable(self, event: dict[str, Any]) -> None:
+        """Drainable post-acquisition writes; timing callbacks must use publish()."""
+        self._queue.put(event)
+        self.enqueue_count += 1
+        self.high_water_mark = max(self.high_water_mark, self._queue.qsize())
 
     def _run(self) -> None:
         while True:
@@ -122,9 +132,17 @@ class UnifiedEventHandoff:
         return {
             "path": str(self.path),
             "capacity": self.capacity,
+            "enqueue_count": self.enqueue_count,
             "written_count": self.written_count,
             "dropped_count": self.dropped_count,
             "error_count": self.error_count,
+            "high_water_mark": self.high_water_mark,
+            "event_enqueue_count": self.enqueue_count,
+            "event_written_count": self.written_count,
+            "event_drop_count": self.dropped_count,
+            "event_writer_error_count": self.error_count,
+            "event_queue_capacity": self.capacity,
+            "event_queue_high_water_mark": self.high_water_mark,
             "writer_alive": self._thread.is_alive(),
             "writer_error": self.writer_error,
         }
@@ -163,6 +181,22 @@ class UnifiedEventStream:
 
     def close(self) -> dict[str, Any]:
         return self.handoff.close()
+
+    def emit_reliable(
+        self,
+        event: str,
+        *,
+        source_monotonic_ns: int | None = None,
+        **fields: Any,
+    ) -> None:
+        record = {
+            "schema_version": 1,
+            "event": event,
+            "session_id": self.session_id,
+            **self.clock.fields(source_monotonic_ns),
+            **fields,
+        }
+        self.handoff.publish_reliable(record)
 
     def diagnostics(self) -> dict[str, Any]:
         return self.handoff.diagnostics()

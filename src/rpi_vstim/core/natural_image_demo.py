@@ -270,7 +270,7 @@ def _emit_display_boundary_events(
         if event.kind == "image":
             filename = str(event.metadata["image"])
             entry = by_name[filename]
-            stream.emit(
+            stream.emit_reliable(
                 "IMAGE_ONSET",
                 source_monotonic_ns=source,
                 image_index=int(event.trial_id or 0),
@@ -285,7 +285,7 @@ def _emit_display_boundary_events(
                 fallback_start_ns=int(first_callback) if first_callback else None,
                 refresh_hz=refresh_hz,
             )
-            stream.emit(
+            stream.emit_reliable(
                 "IMAGE_OFFSET",
                 source_monotonic_ns=end_source,
                 image_index=int(event.trial_id or 0),
@@ -295,9 +295,9 @@ def _emit_display_boundary_events(
                 timing_source=end_timing["timing_source"],
             )
         else:
-            stream.emit("GRAY_ONSET", source_monotonic_ns=source, **fields)
+            stream.emit_reliable("GRAY_ONSET", source_monotonic_ns=source, **fields)
     if total_frames:
-        stream.emit(
+        stream.emit_reliable(
             "DISPLAY_TRACE_COMPLETE",
             source_monotonic_ns=payload.get("last_page_flip_callback_monotonic_ns") or None,
             completed_frame_count=total_frames,
@@ -696,9 +696,12 @@ def run_natural_image_demo(
         except Exception as exc:  # noqa: BLE001 — preserve final status
             event_diagnostics = events.diagnostics() | {"close_error": str(exc)}
             degraded.append(f"event writer cleanup: {exc}")
-        if event_diagnostics["error_count"]:
+        if event_diagnostics["error_count"] or event_diagnostics["dropped_count"]:
             status = "FAILED"
-            error = f"event log writer failure: {event_diagnostics['writer_error'] or 'unknown error'}"
+            error = (
+                f"event log integrity failure: {event_diagnostics['dropped_count']} dropped, "
+                f"{event_diagnostics['error_count']} writer errors"
+            )
             degraded.append("event log")
         camera_manifest = cameras.manifest() if cameras is not None else []
         try:
