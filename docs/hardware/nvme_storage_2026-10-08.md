@@ -22,3 +22,24 @@ rpi-vstim natural-images run --mouse-id V1_2 \
 ```
 
 PoE is not part of NVMe validation and remains pending hardware investigation.
+
+## Validation results
+
+The short full-stack session `V1_2_20261008T131729Z` completed on the NVMe
+mount. Both camera files decoded: 1,062 frames at 30.0134 fps and 1,081 frames
+at 30.0134 fps; both exited 0. HDMI-A-2 KMS requested and completed its frames,
+HDMI-A-1 previews were active, and the JSONL event writer recorded 81 events
+with zero drops and errors. The session provenance records source commit
+`9179efeaff316fcfce5408512e3e38462adcafbb` and the expected NVMe identity.
+
+The full-stack soak `V1_2_SSDsoak_20261008T132000Z` ran for about 30 minutes:
+107,492 KMS frames requested/completed, 3,981 event records with zero drops or
+errors, and both cameras exited 0. The two MP4s are 109,796,108 and
+134,830,168 bytes; direct post-run container probes report 1799.30 and 1813.66
+seconds respectively. The session occupied 250,383,012 bytes. NVMe free space
+changed from 955,744,399,360 to 955,493,949,440 bytes; peak sampled temperature
+was 54.9°C and `vcgencmd get_throttled` remained `0x0`. No NVMe I/O errors were
+found in the kernel log.
+
+After a clean reboot, `findmnt` again reported `/dev/nvme0n1p1` mounted rw at
+`/mnt/behavbox_ssd`, and a one-image session smoke test completed on the NVMe.
