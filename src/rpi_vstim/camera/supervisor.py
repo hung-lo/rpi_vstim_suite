@@ -36,14 +36,16 @@ def probe_camera_output(
 ) -> dict[str, Any]:
     """Read container metadata, optionally counting frames for offline QC."""
     command = ["ffprobe", "-v", "error"]
+    stream_fields = "codec_name,width,height,avg_frame_rate,r_frame_rate,time_base,start_time,duration"
     if count_frames:
         command.append("-count_frames")
+        stream_fields += ",nb_read_frames"
     command.extend(
         (
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,time_base,start_time,duration,nb_read_frames:format=format_name,start_time,duration,size",
+            f"stream={stream_fields}:format=format_name,start_time,duration,size",
             "-of",
             "json",
             str(path),

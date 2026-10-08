@@ -366,6 +366,7 @@ def test_rpicam_fast_qc_uses_metadata_and_checks_scientific_coverage(tmp_path, m
     assert status.scientific_interval_covered
     assert status.coverage_timing_source == "kernel_event_monotonic"
     assert "-count_frames" not in commands[0][0]
+    assert not any("nb_read_frames" in item for item in commands[0][0])
     assert commands[0][1]["timeout"] == 5.0
 
 
@@ -475,6 +476,7 @@ def test_exhaustive_probe_is_explicit_and_counts_frames(tmp_path, monkeypatch):
     )
     result = probe_camera_output(tmp_path / "long.mp4", count_frames=True, timeout_s=3600)
     assert "-count_frames" in commands[0][0]
+    assert any("nb_read_frames" in item for item in commands[0][0])
     assert commands[0][1]["timeout"] == 3600
     assert result["streams"][0]["nb_read_frames"] == "12"
 
