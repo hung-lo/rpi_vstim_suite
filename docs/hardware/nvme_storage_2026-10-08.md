@@ -152,6 +152,22 @@ remained ext4/rw. Temperature peaked at 52.1°C and was 45.0°C after shutdown;
 GiB during recording to 1.5 GiB afterward. No camera recording processes
 remained, and LabWC stayed alive after KMS restoration.
 
+The final deployed commit `b29e34542969d451d2a81f73578949f00a29a3ad` then ran
+`V1_2_mp4_fast_qc_final_20261008T210947Z` for an exact-revision shutdown check.
+It completed 305.576 s of KMS acquisition with status `COMPLETE`. Both
+camera processes exited 0 and their fast shutdown checks reported
+`verification_state=recorded` and full KMS interval coverage. Noir was
+16,871,048 bytes / 307.862773 s / 30.01337 metadata fps; wide was
+25,130,009 bytes / 306.929917 s / 30.01337 metadata fps. KMS requested and
+completed 18,280 flips, retained all 18,280 records without truncation,
+reported one estimated extended refresh and zero missed vblanks, and restored
+the display. All 681 enqueued events were written with zero drops/errors
+(queue high-water 664/4,096). NVMe free space changed from 953,679,147,008 to
+953,632,296,960 bytes; the session occupied 46,786,993 bytes. Temperature
+peaked at 52.1°C and was 47.2°C after shutdown, `get_throttled` was `0x0`, and
+available memory returned to 1.5 GiB. No camera process remained and LabWC
+stayed alive.
+
 For explicit offline exhaustive frame counting, run
 `cd /home/pi/rpi_vstim_suite` followed by
 `PYTHONPATH=src python3 -m rpi_vstim inspect-session <session-path> --deep-camera-qc --json`.
