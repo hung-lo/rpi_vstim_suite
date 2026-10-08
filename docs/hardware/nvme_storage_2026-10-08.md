@@ -105,3 +105,51 @@ read-only-remount errors were found. Peak/final temperature was 45.5°C,
 `vcgencmd get_throttled` remained `0x0`, and available memory remained about
 1.5 GiB at final inspection. No recording `rpicam-vid` processes remained and
 LabWC/KMS restoration was successful.
+
+## Fast bounded MP4 QC validation
+
+Commit `b864af2a67b032fd7d3fa0b1d724f021ba988fb0` was deployed to the
+permanent Pi checkout. The new normal-shutdown verifier uses metadata-only
+`ffprobe` with a five-second timeout per camera; it does not request
+`-count_frames`. It checks file size (at least 1 KiB), MP4/container and video
+stream readability, H.264 codec, requested dimensions and sensible frame
+rate, stream time base, start time and positive duration. It also checks the
+media duration against the camera process lifetime and, when available, checks
+the ready/stop lifecycle and media duration against the first/last KMS
+CLOCK_MONOTONIC presentation timestamps. A failed check marks a required
+camera failed and prevents a healthy `COMPLETE` result.
+
+The preserved 90-minute session above was inspected read-only with the new
+`inspect-session` fast checks. Both historical camera manifest entries remain
+unchanged as `recorded_unverified`; the new inspection independently reported
+both files healthy and covering the KMS interval. Metadata probes took 0.172 s
+for noir and 0.169 s for wide; complete `inspect-session --json` took 1.455 s.
+The files reported H.264 640x480, 30.0133/30.0131 metadata fps, and durations
+of 5,436.384854 s / 5,435.451186 s. The original session artifacts were not
+modified.
+
+The short real full-stack validation session
+`V1_2_mp4_fast_qc_short_20261008T205408Z` completed on the NVMe with status
+`COMPLETE` after 414.233 s of KMS acquisition. Both in-shutdown verifiers
+reported `recorded`, production QC success, and scientific interval coverage;
+both camera processes exited 0. The noir MP4 was 22,054,748 bytes,
+416.647467 s, and 30.01338 metadata fps; the wide MP4 was 32,965,391 bytes,
+415.714585 s, and 30.01338 metadata fps. No exhaustive frame count was run.
+
+KMS requested/completed 24,777/24,777 flips and retained 24,777/24,777 timing
+records without truncation. It reported four estimated extended refreshes,
+zero missed vblanks, and non-contiguous kernel sequence; restoration succeeded.
+Event logging wrote all 921 enqueued events with zero drops and errors and a
+queue high-water mark of 900/4,096. The session occupied 61,497,715 bytes;
+free space changed from 953,740,718,080 to 953,679,147,008 bytes. NVMe
+remained ext4/rw. Temperature peaked at 52.1°C and was 45.0°C after shutdown;
+`get_throttled` remained `0x0`. Available memory returned from about 1.2–1.3
+GiB during recording to 1.5 GiB afterward. No camera recording processes
+remained, and LabWC stayed alive after KMS restoration.
+
+For explicit offline exhaustive frame counting, run
+`cd /home/pi/rpi_vstim_suite` followed by
+`PYTHONPATH=src python3 -m rpi_vstim inspect-session <session-path> --deep-camera-qc --json`.
+The production verifier does not prove that every encoded frame decodes cleanly,
+contains no timestamp gaps, or has no duplicates; frame-level integrity
+requires this optional offline QC.
