@@ -35,8 +35,9 @@ with zero drops and errors. The session provenance records source commit
 The full-stack soak `V1_2_SSDsoak_20261008T132000Z` ran for about 30 minutes:
 107,492 KMS frames requested/completed, 3,981 event records with zero drops or
 errors, and both cameras exited 0. The two MP4s are 109,796,108 and
-134,830,168 bytes; direct post-run container probes report 1799.30 and 1813.66
-seconds respectively. The session occupied 250,383,012 bytes. NVMe free space
+134,830,168 bytes; direct full decode probes report 54,003 frames in 1799.30 s
+(30.014 fps) and 54,434 frames in 1813.66 s (30.013 fps), respectively. The
+session occupied 250,383,012 bytes. NVMe free space
 changed from 955,744,399,360 to 955,493,949,440 bytes; peak sampled temperature
 was 54.9°C and `vcgencmd get_throttled` remained `0x0`. No NVMe I/O errors were
 found in the kernel log.
