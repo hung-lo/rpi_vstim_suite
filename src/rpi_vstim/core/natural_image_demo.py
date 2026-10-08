@@ -232,6 +232,23 @@ def _trace_timestamp(
     return None, {"timing_source": "dispatch_only"}
 
 
+def _scientific_display_interval(
+    payload: dict[str, Any] | None,
+) -> tuple[tuple[int, int] | None, str | None]:
+    if payload is None:
+        return None, None
+    if payload.get("kernel_timestamp_clock") == "monotonic":
+        start = payload.get("first_page_flip_kernel_event_ns")
+        end = payload.get("last_page_flip_kernel_event_ns")
+        if start and end:
+            return (int(start), int(end)), "kernel_event_monotonic"
+    start = payload.get("first_page_flip_callback_monotonic_ns")
+    end = payload.get("last_page_flip_callback_monotonic_ns")
+    if start and end:
+        return (int(start), int(end)), "callback_monotonic"
+    return None, None
+
+
 def _emit_display_boundary_events(
     stream: UnifiedEventStream,
     plan: Any,
@@ -666,7 +683,11 @@ def run_natural_image_demo(
             camera_watch_thread.join(timeout=2.0)
         if cameras_active and cameras is not None:
             try:
-                statuses = cameras.stop()
+                scientific_interval, coverage_timing_source = _scientific_display_interval(display_payload)
+                statuses = cameras.stop(
+                    scientific_interval_monotonic_ns=scientific_interval,
+                    coverage_timing_source=coverage_timing_source,
+                )
                 for camera_status in statuses:
                     events.emit(
                         "CAMERA_STOP",
@@ -683,6 +704,11 @@ def run_natural_image_demo(
                         message = f"{camera_status.camera_id}: {camera_status.error or 'camera failed'}"
                         if message not in camera_failures:
                             camera_failures.append(message)
+                    elif camera_status.state == CameraState.DEGRADED:
+                        degraded.append(
+                            f"optional camera {camera_status.camera_id}: "
+                            f"{camera_status.error or camera_status.verification_error or 'degraded'}"
+                        )
             except Exception as exc:  # noqa: BLE001 — continue finalization
                 degraded.append(f"camera cleanup: {exc}")
         if camera_failures and "camera" not in degraded:

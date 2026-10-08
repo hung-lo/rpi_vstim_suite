@@ -435,7 +435,7 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def inspect_session(root: Path | str) -> dict[str, object]:
+def inspect_session(root: Path | str, *, deep_camera_qc: bool = False) -> dict[str, object]:
     """Inspect session state without changing any file."""
     session_root = Path(root).resolve()
     manifest_path = session_root / "session_manifest.json"
@@ -492,21 +492,34 @@ def inspect_session(root: Path | str) -> dict[str, object]:
             read_json(session_root / name, artifact)
     display_stream = session_root / "display_results.jsonl"
     stream_records = 0
+    display_timing: dict[str, Any] | None = None
     if display_stream.is_file():
-        for line_number, line in enumerate(display_stream.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            try:
-                value = json.loads(line)
-            except ValueError as exc:
-                corrupt_artifacts.append(display_stream.name)
-                schema_errors.append(f"{display_stream.name}:{line_number}: invalid JSON: {exc}")
-                continue
-            error = validate_schema(value, "display_result")
-            if error is not None:
-                corrupt_artifacts.append(display_stream.name)
-                schema_errors.append(f"{display_stream.name}:{line_number}: {error}")
-            stream_records += 1
+        with display_stream.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                if not line.strip():
+                    continue
+                try:
+                    value = json.loads(line)
+                except ValueError as exc:
+                    corrupt_artifacts.append(display_stream.name)
+                    schema_errors.append(f"{display_stream.name}:{line_number}: invalid JSON: {exc}")
+                    continue
+                error = validate_schema(value, "display_result")
+                if error is not None:
+                    corrupt_artifacts.append(display_stream.name)
+                    schema_errors.append(f"{display_stream.name}:{line_number}: {error}")
+                if isinstance(value, dict):
+                    display_timing = {
+                        name: value.get(name)
+                        for name in (
+                            "kernel_timestamp_clock",
+                            "first_page_flip_kernel_event_ns",
+                            "last_page_flip_kernel_event_ns",
+                            "first_page_flip_callback_monotonic_ns",
+                            "last_page_flip_callback_monotonic_ns",
+                        )
+                    }
+                stream_records += 1
     summary_path = session_root / "display_results.json"
     if summary_path.is_file():
         summary = read_json(summary_path, "display_summary")
@@ -516,6 +529,110 @@ def inspect_session(root: Path | str) -> dict[str, object]:
                 f"{summary_path.name}: record_count {summary.get('record_count')!r} "
                 f"does not match JSONL records {stream_records}"
             )
+    display_interval = None
+    coverage_timing_source = None
+    if display_timing:
+        if display_timing.get("kernel_timestamp_clock") == "monotonic":
+            start_ns = display_timing.get("first_page_flip_kernel_event_ns")
+            end_ns = display_timing.get("last_page_flip_kernel_event_ns")
+            if start_ns and end_ns:
+                display_interval = (int(start_ns), int(end_ns))
+                coverage_timing_source = "kernel_event_monotonic"
+        if display_interval is None:
+            start_ns = display_timing.get("first_page_flip_callback_monotonic_ns")
+            end_ns = display_timing.get("last_page_flip_callback_monotonic_ns")
+            if start_ns and end_ns:
+                display_interval = (int(start_ns), int(end_ns))
+                coverage_timing_source = "callback_monotonic"
+
+    camera_ready_times: dict[str, int] = {}
+    camera_events = session_root / "events.jsonl"
+    if camera_events.is_file():
+        with camera_events.open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(event, dict) and event.get("event") == "CAMERA_READY":
+                    camera_id = event.get("camera_id")
+                    ready_ns = event.get("recording_ready_monotonic_ns") or event.get("monotonic_ns")
+                    if camera_id is not None and ready_ns is not None:
+                        camera_ready_times[str(camera_id)] = int(ready_ns)
+
+    camera_fast_qc: list[dict[str, object]] = []
+    camera_deep_qc: list[dict[str, object]] = []
+    if any(
+        isinstance(camera, dict)
+        and (camera.get("backend") == "rpicam" or str(camera.get("output_path", "")).lower().endswith(".mp4"))
+        for camera in cameras
+    ):
+        from rpi_vstim.camera.supervisor import probe_camera_output, verify_camera_output
+
+        for camera in cameras:
+            if not isinstance(camera, dict) or not (
+                camera.get("backend") == "rpicam"
+                or str(camera.get("output_path", "")).lower().endswith(".mp4")
+            ):
+                continue
+            output = camera.get("output_path")
+            relative_output = Path(output) if isinstance(output, str) else Path(".")
+            output_path = (session_root / relative_output).resolve()
+            if relative_output.is_absolute() or not output_path.is_relative_to(session_root):
+                fast_qc: dict[str, Any] = {
+                    "ok": False,
+                    "verification_method": "ffprobe_stream_metadata",
+                    "verification_error": "camera output path escapes session directory",
+                    "scientific_interval_covered": None,
+                }
+            else:
+                fast_qc = verify_camera_output(
+                    output_path,
+                    expected={
+                        "codec": camera.get("pixel_format_or_codec"),
+                        "width_px": camera.get("requested_width_px"),
+                        "height_px": camera.get("requested_height_px"),
+                        "fps": camera.get("requested_fps"),
+                    },
+                    camera_start_monotonic_ns=camera.get("start_monotonic_ns"),
+                    camera_ready_monotonic_ns=(
+                        camera.get("recording_ready_monotonic_ns")
+                        or camera_ready_times.get(str(camera.get("camera_id", "")))
+                    ),
+                    camera_stop_monotonic_ns=camera.get("stop_monotonic_ns"),
+                    scientific_interval_monotonic_ns=display_interval,
+                    coverage_timing_source=coverage_timing_source,
+                )
+            camera_fast_qc.append({"camera_id": camera.get("camera_id"), **fast_qc})
+            if not fast_qc["ok"]:
+                corrupt_artifacts.append("camera_output")
+                schema_errors.append(
+                    f"camera {camera.get('camera_id', '<unknown>')}: "
+                    f"{fast_qc.get('verification_error', 'fast MP4 verification failed')}"
+                )
+            if deep_camera_qc:
+                deep: dict[str, Any] = {"camera_id": camera.get("camera_id"), "ok": False}
+                if output_path.is_relative_to(session_root):
+                    try:
+                        payload = probe_camera_output(output_path, count_frames=True, timeout_s=3600)
+                        streams = payload.get("streams")
+                        stream = streams[0] if isinstance(streams, list) and streams else {}
+                        count = int(stream.get("nb_read_frames", 0)) if isinstance(stream, dict) else 0
+                        if count > 0:
+                            deep.update(ok=True, decoded_frame_count=count)
+                        else:
+                            deep["error"] = "exhaustive probe found no decoded frames"
+                    except Exception as exc:  # noqa: BLE001 — report offline QC failures
+                        deep["error"] = str(exc)
+                else:
+                    deep["error"] = "camera output path escapes session directory"
+                camera_deep_qc.append(deep)
+                if not deep["ok"]:
+                    corrupt_artifacts.append("camera_deep_qc")
+                    schema_errors.append(
+                        f"camera {camera.get('camera_id', '<unknown>')} deep QC: "
+                        f"{deep.get('error', 'failed')}"
+                    )
     missing_camera_outputs = []
     for camera in cameras:
         output = camera.get("output_path")
@@ -547,6 +664,8 @@ def inspect_session(root: Path | str) -> dict[str, object]:
         "required_files_present": not missing,
         "missing_required_files": missing,
         "camera_outcomes": cameras,
+        "camera_fast_qc": camera_fast_qc,
+        "camera_deep_qc": camera_deep_qc if deep_camera_qc else None,
         "missing_camera_outputs": missing_camera_outputs,
         "orphan_artifacts": orphan_artifacts,
         "corrupt_artifacts": sorted(set(corrupt_artifacts)),

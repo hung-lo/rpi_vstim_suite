@@ -69,6 +69,34 @@ and finalizes the session. A clean second run should be possible immediately.
 The runner now accepts direct SSD session output. Optical photodiode timing and
 the broader production-session protocol remain separate validation gates.
 
+## Camera recording verification
+
+At normal shutdown each rpicam MP4 receives a bounded metadata-only `ffprobe`
+check with a five-second per-camera timeout. It requires a file of at least
+1 KiB, a readable MP4 container and video stream, the requested codec and
+dimensions, sensible frame-rate and timestamp metadata, and a positive media
+duration consistent with the camera process lifetime. When display timing and
+camera lifecycle timestamps are available, it also checks that camera output
+was ready before the first KMS presentation, remained active through the last
+presentation, and has enough media duration to cover that interval. Failed
+checks fail a required-camera session; the manifest records the check method,
+result, and coverage evidence. This uses lifecycle bounds and container
+duration; it does not invent camera-frame timestamps.
+
+The normal verifier does not decode or count every frame, so `recorded` means
+the bounded production checks passed, not that every encoded frame was proven
+perfect. For a later exhaustive frame-count probe, run:
+
+```text
+rpi-vstim inspect-session /mnt/behavbox_ssd/sessions/<session-id> --deep-camera-qc --json
+```
+
+`inspect-session` always performs the fast checks read-only. The explicit
+`--deep-camera-qc` option adds full-file `ffprobe -count_frames` scans and can
+take a long time; it never rewrites the session artifacts. A long recording
+is no longer marked `recorded_unverified` just because this optional scan was
+not run or exceeded the old shutdown timeout.
+
 ## Production storage policy
 
 `/mnt/behavbox_ssd/sessions` is validated before the runner creates session

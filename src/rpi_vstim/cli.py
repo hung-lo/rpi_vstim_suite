@@ -56,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect-session", help="inspect a session without mutating it")
     inspect.add_argument("path", type=Path)
     inspect.add_argument("--json", action="store_true", dest="as_json")
+    inspect.add_argument(
+        "--deep-camera-qc",
+        action="store_true",
+        help="optionally count every decodable camera frame; may take a long time",
+    )
     session = commands.add_parser("session", help="session artifact operations")
     session_commands = session.add_subparsers(dest="session_command", required=True)
     validate_session = session_commands.add_parser(
@@ -409,7 +414,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inspect-session" or (
         args.command == "session" and args.session_command == "validate"
     ):
-        report = inspect_session(args.path)
+        report = inspect_session(args.path, deep_camera_qc=getattr(args, "deep_camera_qc", False))
         print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_inspection(report))
         return 1 if report["corrupt_artifacts"] else 0
     if args.command == "doctor":

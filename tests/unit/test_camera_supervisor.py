@@ -12,6 +12,7 @@ from rpi_vstim.camera.supervisor import (
     CameraStartupError,
     LocalCameraSupervisor,
     build_rpicam_command,
+    probe_camera_output,
     resolve_camera_preview_environment,
 )
 from rpi_vstim.core.camera import CameraState
@@ -51,6 +52,29 @@ def spec(camera_id: str, *, required: bool = False) -> CameraCaptureSpec:
         output_extension="bin",
         startup_timeout_s=0.05,
         stop_timeout_s=0.05,
+    )
+
+
+def valid_mp4_probe(duration: str = "0.5") -> str:
+    return json.dumps(
+        {
+            "streams": [
+                {
+                    "codec_name": "h264",
+                    "width": 640,
+                    "height": 480,
+                    "avg_frame_rate": "30/1",
+                    "time_base": "1/90000",
+                    "start_time": "0.000000",
+                    "duration": duration,
+                }
+            ],
+            "format": {
+                "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+                "start_time": "0.000000",
+                "duration": duration,
+            },
+        }
     )
 
 
@@ -285,7 +309,7 @@ def test_rpicam_recording_command_changes_only_preview_arguments(tmp_path):
     )
 
 
-def test_rpicam_stop_uses_sigint_and_requires_a_decodable_frame_count(tmp_path, monkeypatch):
+def test_rpicam_fast_qc_uses_metadata_and_checks_scientific_coverage(tmp_path, monkeypatch):
     class InterruptibleProcess(FakeProcess):
         def __init__(self, output_path):
             super().__init__(output_path)
@@ -296,18 +320,22 @@ def test_rpicam_stop_uses_sigint_and_requires_a_decodable_frame_count(tmp_path, 
             self.returncode = 0
 
     processes = []
-    monkeypatch.setattr(
-        "rpi_vstim.camera.supervisor.subprocess.run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            (), 0, '{"streams": [{"nb_read_frames": "17", "duration": "0.5"}]}', ""
-        ),
-    )
+    commands = []
+
+    def fake_probe(command, **kwargs):
+        commands.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, valid_mp4_probe(), "")
+
+    monkeypatch.setattr("rpi_vstim.camera.supervisor.subprocess.run", fake_probe)
     camera_spec = CameraCaptureSpec(
         **{
             **spec("face", required=True).__dict__,
             "backend": "rpicam",
             "output_extension": "mp4",
+            "requested_width_px": 640,
+            "requested_height_px": 480,
             "requested_fps": 30.0,
+            "pixel_format_or_codec": "h264",
         }
     )
 
@@ -321,11 +349,134 @@ def test_rpicam_stop_uses_sigint_and_requires_a_decodable_frame_count(tmp_path, 
         popen_factory=popen,
     )
     supervisor.start(tmp_path / "session")
-    status = supervisor.stop()[0]
+    output = tmp_path / "session" / "camera" / "face" / "capture.mp4"
+    output.write_bytes(b"x" * 2048)
+    ready = supervisor.manifest()[0]["recording_ready_monotonic_ns"]
+    interval = (ready + 1, time.monotonic_ns())
+    status = supervisor.stop(
+        scientific_interval_monotonic_ns=interval,
+        coverage_timing_source="kernel_event_monotonic",
+    )[0]
     assert processes[0].signal is not None
     assert status.verification_state == "recorded"
-    assert status.decoded_frame_count == status.reported_frames == 17
-    assert status.effective_fps == 34.0
+    assert status.production_qc_success
+    assert status.verification_method == "ffprobe_stream_metadata"
+    assert status.decoded_frame_count is status.reported_frames is None
+    assert status.metadata_avg_fps == 30
+    assert status.scientific_interval_covered
+    assert status.coverage_timing_source == "kernel_event_monotonic"
+    assert "-count_frames" not in commands[0][0]
+    assert commands[0][1]["timeout"] == 5.0
+
+
+@pytest.mark.parametrize(
+    ("probe_result", "error"),
+    [
+        ('{"streams": [], "format": {}}', "no video stream"),
+        (valid_mp4_probe("0"), "duration or stream time base"),
+        (valid_mp4_probe(), "does not match requested 1920"),
+    ],
+)
+def test_rpicam_fast_qc_rejects_invalid_stream_metadata(tmp_path, monkeypatch, probe_result, error):
+    class InterruptibleProcess(FakeProcess):
+        def send_signal(self, _value):
+            self.returncode = 0
+
+    def fake_probe(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, probe_result, "")
+
+    monkeypatch.setattr("rpi_vstim.camera.supervisor.subprocess.run", fake_probe)
+    camera_spec = CameraCaptureSpec(
+        **{
+            **spec("face", required=True).__dict__,
+            "backend": "rpicam",
+            "output_extension": "mp4",
+            "requested_width_px": 1920 if "1920" in error else 640,
+            "requested_height_px": 480,
+            "requested_fps": 30.0,
+            "pixel_format_or_codec": "h264",
+        }
+    )
+    supervisor = LocalCameraSupervisor(
+        (camera_spec,),
+        popen_factory=lambda *_args, **_kwargs: InterruptibleProcess(
+            tmp_path / "session" / "camera" / "face" / "capture.mp4"
+        ),
+    )
+    supervisor.start(tmp_path / "session")
+    output = tmp_path / "session" / "camera" / "face" / "capture.mp4"
+    output.write_bytes(b"x" * 2048)
+    status = supervisor.stop()[0]
+    assert status.state == CameraState.FAILED
+    assert status.verification_state == "output_nonempty_failed"
+    assert error in status.verification_error
+
+
+def test_fast_qc_rejects_missing_empty_unreadable_and_short_coverage(tmp_path, monkeypatch):
+    output = tmp_path / "capture.mp4"
+    assert "unavailable" in verify_output_for_test(output)["verification_error"]
+    output.write_bytes(b"")
+    assert "too small" in verify_output_for_test(output)["verification_error"]
+    output.write_bytes(b"x" * 2048)
+    monkeypatch.setattr(
+        "rpi_vstim.camera.supervisor.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess((), 1, "", "bad container"),
+    )
+    assert "bad container" in verify_output_for_test(output)["verification_error"]
+    monkeypatch.setattr(
+        "rpi_vstim.camera.supervisor.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess((), 0, valid_mp4_probe("0.1"), ""),
+    )
+    qc = verify_output_for_test(
+        output,
+        camera_start_monotonic_ns=10,
+        camera_stop_monotonic_ns=1_000_000_000,
+        scientific_interval_monotonic_ns=(20, 2_000_000_000),
+    )
+    assert not qc["ok"]
+    assert qc["scientific_interval_covered"] is False
+    assert "does not cover" in qc["verification_error"]
+
+
+def test_fast_qc_handles_long_duration_without_counting_frames(tmp_path, monkeypatch):
+    output = tmp_path / "90min.mp4"
+    output.write_bytes(b"x" * 2048)
+    commands = []
+
+    def fake_probe(command, **kwargs):
+        commands.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, valid_mp4_probe("5436.4"), "")
+
+    monkeypatch.setattr("rpi_vstim.camera.supervisor.subprocess.run", fake_probe)
+    qc = verify_output_for_test(
+        output,
+        expected={"codec": "h264", "width_px": 640, "height_px": 480, "fps": 30},
+    )
+    assert qc["ok"]
+    assert qc["media_duration_s"] == 5436.4
+    assert "-count_frames" not in commands[0][0]
+    assert commands[0][1]["timeout"] == 5.0
+
+
+def verify_output_for_test(path, **kwargs):
+    from rpi_vstim.camera.supervisor import verify_camera_output
+
+    return verify_camera_output(path, **kwargs)
+
+
+def test_exhaustive_probe_is_explicit_and_counts_frames(tmp_path, monkeypatch):
+    commands = []
+    monkeypatch.setattr(
+        "rpi_vstim.camera.supervisor.subprocess.run",
+        lambda command, **kwargs: (
+            commands.append((command, kwargs))
+            or subprocess.CompletedProcess(command, 0, '{"streams": [{"nb_read_frames": "12"}]}', "")
+        ),
+    )
+    result = probe_camera_output(tmp_path / "long.mp4", count_frames=True, timeout_s=3600)
+    assert "-count_frames" in commands[0][0]
+    assert commands[0][1]["timeout"] == 3600
+    assert result["streams"][0]["nb_read_frames"] == "12"
 
 
 def test_rpicam_nonzero_sigint_exit_is_not_mislabeled_graceful(tmp_path):
@@ -376,6 +527,20 @@ def test_camera_supervisor_rejects_repeated_active_start(tmp_path):
     with pytest.raises(RuntimeError, match="already active"):
         supervisor.start(tmp_path / "other")
     supervisor.stop()
+
+
+def test_camera_output_path_cannot_escape_session_root(tmp_path):
+    outside = tmp_path / "outside"
+    camera_spec = CameraCaptureSpec(
+        **{**spec("../../outside", required=True).__dict__, "output_extension": "mp4"}
+    )
+    supervisor = LocalCameraSupervisor(
+        (camera_spec,),
+        popen_factory=lambda *_args, **_kwargs: pytest.fail("must not start camera"),
+    )
+    with pytest.raises(CameraStartupError, match="escapes session directory"):
+        supervisor.start(tmp_path / "session")
+    assert not outside.exists()
 
 
 class TimeoutProcess(FakeProcess):

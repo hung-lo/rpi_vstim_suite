@@ -10,6 +10,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from fractions import Fraction
 from pathlib import Path
 from threading import Thread
 from typing import Any
@@ -25,6 +26,188 @@ class CameraSupervisorError(RuntimeError):
 
 class CameraStartupError(CameraSupervisorError):
     pass
+
+
+def probe_camera_output(
+    path: Path | str,
+    *,
+    count_frames: bool = False,
+    timeout_s: float = 5.0,
+) -> dict[str, Any]:
+    """Read container metadata, optionally counting frames for offline QC."""
+    command = ["ffprobe", "-v", "error"]
+    if count_frames:
+        command.append("-count_frames")
+    command.extend(
+        (
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,time_base,start_time,duration,nb_read_frames:format=format_name,start_time,duration,size",
+            "-of",
+            "json",
+            str(path),
+        )
+    )
+    try:
+        result = subprocess.run(
+            tuple(command),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CameraSupervisorError(f"ffprobe failed: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"ffprobe exited {result.returncode}"
+        raise CameraSupervisorError(detail)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise CameraSupervisorError(f"ffprobe returned invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise CameraSupervisorError("ffprobe returned invalid metadata")
+    return payload
+
+
+def verify_camera_output(
+    path: Path | str,
+    *,
+    expected: Mapping[str, Any] | None = None,
+    camera_start_monotonic_ns: int | None = None,
+    camera_ready_monotonic_ns: int | None = None,
+    camera_stop_monotonic_ns: int | None = None,
+    scientific_interval_monotonic_ns: tuple[int, int] | None = None,
+    coverage_timing_source: str | None = None,
+    timeout_s: float = 5.0,
+    min_size_bytes: int = 1024,
+) -> dict[str, Any]:
+    """Perform bounded, metadata-only production checks on a recording."""
+    # shortcut: frame-level integrity requires the explicit offline deep-QC path.
+    path = Path(path)
+    result: dict[str, Any] = {
+        "ok": False,
+        "verification_method": "ffprobe_stream_metadata",
+        "verification_error": None,
+        "file_size_bytes": 0,
+        "codec_name": None,
+        "width_px": None,
+        "height_px": None,
+        "media_duration_s": None,
+        "media_start_time_s": None,
+        "media_end_time_s": None,
+        "metadata_avg_fps": None,
+        "scientific_interval_covered": None,
+        "coverage_timing_source": coverage_timing_source,
+    }
+    try:
+        file_size = path.stat().st_size
+    except OSError as exc:
+        result["verification_error"] = f"recording file is unavailable: {exc}"
+        return result
+    result["file_size_bytes"] = file_size
+    if file_size < min_size_bytes:
+        result["verification_error"] = f"recording is too small ({file_size} bytes)"
+        return result
+    try:
+        payload = probe_camera_output(path, timeout_s=timeout_s)
+    except CameraSupervisorError as exc:
+        result["verification_error"] = str(exc)
+        return result
+
+    streams = payload.get("streams")
+    formats = payload.get("format")
+    if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
+        result["verification_error"] = "container has no video stream"
+        return result
+    stream = streams[0]
+    container = formats if isinstance(formats, dict) else {}
+    codec = str(stream.get("codec_name") or "").lower()
+    width = stream.get("width")
+    height = stream.get("height")
+    format_name = str(container.get("format_name") or "").lower()
+    result.update(codec_name=codec or None, width_px=width, height_px=height)
+    if path.suffix.lower() == ".mp4" and not any(name in format_name for name in ("mp4", "mov")):
+        result["verification_error"] = f"unexpected MP4 container metadata: {format_name or 'missing'}"
+        return result
+    checks = (
+        (expected.get("codec") if expected else None, codec, "codec"),
+        (expected.get("width_px") if expected else None, width, "width"),
+        (expected.get("height_px") if expected else None, height, "height"),
+    )
+    for wanted, actual, name in checks:
+        if wanted is not None and str(wanted).lower() != str(actual).lower():
+            result["verification_error"] = f"recording {name} {actual!r} does not match requested {wanted!r}"
+            return result
+    duration_s = None
+    for value in (stream.get("duration"), container.get("duration")):
+        try:
+            duration_s = float(value)
+            break
+        except (TypeError, ValueError):
+            continue
+    start_s = None
+    for value in (stream.get("start_time"), container.get("start_time")):
+        try:
+            start_s = float(value)
+            break
+        except (TypeError, ValueError):
+            continue
+    try:
+        time_base = Fraction(str(stream.get("time_base")))
+    except (ValueError, ZeroDivisionError):
+        time_base = Fraction(0)
+    if duration_s is None or start_s is None:
+        result["verification_error"] = "container duration or start timestamp is unavailable"
+        return result
+    if duration_s <= 0 or time_base <= 0:
+        result["verification_error"] = "container duration or stream time base is invalid"
+        return result
+    result.update(
+        media_duration_s=duration_s,
+        media_start_time_s=start_s,
+        media_end_time_s=start_s + duration_s,
+    )
+    rate = 0.0
+    for rate_value in (stream.get("avg_frame_rate"), stream.get("r_frame_rate")):
+        try:
+            rate = float(Fraction(str(rate_value)))
+        except (ValueError, ZeroDivisionError):
+            continue
+        if rate > 0:
+            break
+    result["metadata_avg_fps"] = rate or None
+    requested_fps = expected.get("fps") if expected else None
+    if requested_fps is not None and (rate <= 0 or abs(rate - float(requested_fps)) > float(requested_fps) * 0.1):
+        result["verification_error"] = f"recording frame rate {rate:g} is not sensible for requested {requested_fps:g} fps"
+        return result
+
+    if camera_start_monotonic_ns is not None and camera_stop_monotonic_ns is not None:
+        camera_runtime_s = (camera_stop_monotonic_ns - camera_start_monotonic_ns) / 1_000_000_000
+        if abs(duration_s - camera_runtime_s) > 5.0:
+            result["verification_error"] = "media duration is inconsistent with the camera process lifecycle"
+            return result
+
+    if scientific_interval_monotonic_ns is not None:
+        interval_start_ns, interval_end_ns = scientific_interval_monotonic_ns
+        interval_s = (interval_end_ns - interval_start_ns) / 1_000_000_000
+        ready_ns = camera_ready_monotonic_ns or camera_start_monotonic_ns
+        result["scientific_interval_covered"] = bool(
+            interval_end_ns >= interval_start_ns
+            and camera_start_monotonic_ns is not None
+            and ready_ns is not None
+            and camera_stop_monotonic_ns is not None
+            and camera_start_monotonic_ns <= interval_start_ns
+            and ready_ns <= interval_start_ns
+            and camera_stop_monotonic_ns >= interval_end_ns
+            and duration_s >= interval_s
+        )
+        if not result["scientific_interval_covered"]:
+            result["verification_error"] = "recording lifecycle or media duration does not cover the scientific display interval"
+            return result
+    result["ok"] = True
+    return result
 
 
 @dataclass(frozen=True)
@@ -173,6 +356,7 @@ class CameraWorkerStatus:
     output_path: str = ""
     start_utc_ns: int | None = None
     start_monotonic_ns: int | None = None
+    recording_ready_monotonic_ns: int | None = None
     stop_utc_ns: int | None = None
     stop_monotonic_ns: int | None = None
     bytes_written: int = 0
@@ -180,10 +364,20 @@ class CameraWorkerStatus:
     decoded_frame_count: int | None = None
     active_runtime_s: float | None = None
     media_duration_s: float | None = None
+    media_start_time_s: float | None = None
+    media_end_time_s: float | None = None
+    metadata_avg_fps: float | None = None
     expected_frame_count: float | None = None
     effective_fps: float | None = None
     frame_count_discrepancy: float | None = None
     decode_probe_success: bool | None = None
+    production_qc_success: bool | None = None
+    verification_method: str = "not_checked"
+    verification_error: str | None = None
+    scientific_interval_start_monotonic_ns: int | None = None
+    scientific_interval_end_monotonic_ns: int | None = None
+    scientific_interval_covered: bool | None = None
+    coverage_timing_source: str | None = None
     dropped_frames: int | None = None
     exit_status: int | None = None
     exit_reason: str | None = None
@@ -335,6 +529,7 @@ class _CameraWorker:
             self._reap(self.spec.stop_timeout_s)
             raise CameraStartupError(self.spec.camera_id)
         self._refresh_bytes()
+        self.status.recording_ready_monotonic_ns = monotonic_ns()
 
     def _wait_for_output_growth(self, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
@@ -419,6 +614,8 @@ class _CameraWorker:
             return
         self._probe_output()
         self.status.verification_state = self._verification_state()
+        if self.status.state == CameraState.COMPLETED and self.status.verification_state != "recorded":
+            self._fail(self.status.verification_error or "production recording verification failed")
         self._write_diagnostic()
         self._stopped = True
         self._publish("CAMERA_STOPPED")
@@ -499,55 +696,54 @@ class _CameraWorker:
         if self.status.state == CameraState.COMPLETED:
             if self.spec.backend != "rpicam":
                 return "recorded" if self.status.bytes_written > 0 else "recorded_unverified"
-            return "recorded" if self.status.decode_probe_success else "recorded_unverified"
+            return "recorded" if self.status.production_qc_success else "output_nonempty_failed"
         if self.status.bytes_written > 0:
             return "output_nonempty_failed"
         return "recording_failed"
 
     def _probe_output(self) -> None:
-        """Record cheap post-stop decode evidence for native rpicam outputs."""
-        if self.spec.backend != "rpicam" or self.status.bytes_written <= 0:
+        """Record bounded post-stop metadata evidence for native rpicam outputs."""
+        if self.spec.backend != "rpicam":
             return
-        try:
-            result = subprocess.run(
-                (
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-count_frames",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=nb_read_frames,duration",
-                    "-of",
-                    "json",
-                    str(self.output_path),
-                ),
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
+        if self.status.start_monotonic_ns is not None and self.status.stop_monotonic_ns is not None:
+            self.status.active_runtime_s = (
+                self.status.stop_monotonic_ns - self.status.start_monotonic_ns
+            ) / 1_000_000_000
+        self.status.verification_method = "ffprobe_stream_metadata"
+        self.status.reported_frames = None
+        self.status.decoded_frame_count = None
+        self.status.decode_probe_success = None
+        interval = None
+        if (
+            self.status.scientific_interval_start_monotonic_ns is not None
+            and self.status.scientific_interval_end_monotonic_ns is not None
+        ):
+            interval = (
+                self.status.scientific_interval_start_monotonic_ns,
+                self.status.scientific_interval_end_monotonic_ns,
             )
-            stream = json.loads(result.stdout).get("streams", [{}])[0]
-            frames = int(stream.get("nb_read_frames", 0)) if result.returncode == 0 else 0
-            duration_s = float(stream.get("duration", 0) or 0)
-        except (IndexError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
-            frames = 0
-            duration_s = 0
-        self.status.decoded_frame_count = frames or None
-        self.status.reported_frames = self.status.decoded_frame_count
-        self.status.decode_probe_success = frames > 0
-        if self.status.start_monotonic_ns is None or self.status.stop_monotonic_ns is None:
-            return
-        runtime_s = (self.status.stop_monotonic_ns - self.status.start_monotonic_ns) / 1_000_000_000
-        self.status.active_runtime_s = runtime_s
-        self.status.media_duration_s = duration_s or None
-        measured_runtime_s = duration_s or runtime_s
-        if self.spec.requested_fps is not None and measured_runtime_s > 0:
-            expected = measured_runtime_s * self.spec.requested_fps
-            self.status.expected_frame_count = expected
-            self.status.effective_fps = frames / measured_runtime_s
-            self.status.frame_count_discrepancy = frames - expected
+        qc = verify_camera_output(
+            self.output_path,
+            expected={
+                "codec": self.spec.pixel_format_or_codec or None,
+                "width_px": self.spec.requested_width_px,
+                "height_px": self.spec.requested_height_px,
+                "fps": self.spec.requested_fps,
+            },
+            camera_start_monotonic_ns=self.status.start_monotonic_ns,
+            camera_ready_monotonic_ns=self.status.recording_ready_monotonic_ns,
+            camera_stop_monotonic_ns=self.status.stop_monotonic_ns,
+            scientific_interval_monotonic_ns=interval,
+            coverage_timing_source=self.status.coverage_timing_source,
+        )
+        self.status.bytes_written = int(qc["file_size_bytes"])
+        self.status.media_duration_s = qc["media_duration_s"]
+        self.status.media_start_time_s = qc["media_start_time_s"]
+        self.status.media_end_time_s = qc["media_end_time_s"]
+        self.status.metadata_avg_fps = qc["metadata_avg_fps"]
+        self.status.scientific_interval_covered = qc["scientific_interval_covered"]
+        self.status.production_qc_success = bool(qc["ok"])
+        self.status.verification_error = qc["verification_error"]
 
     def _start_stderr_capture(self) -> None:
         stream = getattr(self.process, "stderr", None)
@@ -606,14 +802,19 @@ class LocalCameraSupervisor:
         self.session_root = session_root or self.session_root
         if self.session_root is None:
             raise ValueError("session_root is required")
-        started: list[_CameraWorker] = []
-        for spec in self.specs:
-            output = (
-                self.session_root
-                / "camera"
-                / spec.camera_id
-                / f"capture.{spec.output_extension}"
+        session_root_resolved = self.session_root.resolve()
+        outputs = tuple(
+            (
+                spec,
+                self.session_root / "camera" / spec.camera_id / f"capture.{spec.output_extension}",
             )
+            for spec in self.specs
+        )
+        for _spec, output in outputs:
+            if not output.resolve().is_relative_to(session_root_resolved):
+                raise CameraStartupError(f"camera output path escapes session directory: {output}")
+        started: list[_CameraWorker] = []
+        for spec, output in outputs:
             diagnostic = output.with_name("stderr.log")
             worker = _CameraWorker(
                 spec,
@@ -642,8 +843,18 @@ class LocalCameraSupervisor:
     def poll(self) -> tuple[CameraWorkerStatus, ...]:
         return tuple(worker.poll() for worker in self._workers.values())
 
-    def stop(self) -> tuple[CameraWorkerStatus, ...]:
+    def stop(
+        self,
+        *,
+        scientific_interval_monotonic_ns: tuple[int, int] | None = None,
+        coverage_timing_source: str | None = None,
+    ) -> tuple[CameraWorkerStatus, ...]:
         workers = tuple(self._workers.values())
+        if scientific_interval_monotonic_ns is not None:
+            for worker in workers:
+                worker.status.scientific_interval_start_monotonic_ns = scientific_interval_monotonic_ns[0]
+                worker.status.scientific_interval_end_monotonic_ns = scientific_interval_monotonic_ns[1]
+                worker.status.coverage_timing_source = coverage_timing_source
         # Never let an MP4 probe for camera A keep camera B recording.
         for worker in workers:
             worker.request_stop()
