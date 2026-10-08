@@ -88,7 +88,9 @@ the bounded production checks passed, not that every encoded frame was proven
 perfect. For a later exhaustive frame-count probe, run:
 
 ```text
-rpi-vstim inspect-session /mnt/behavbox_ssd/sessions/<session-id> --deep-camera-qc --json
+cd /home/pi/rpi_vstim_suite
+PYTHONPATH=src python3 -m rpi_vstim inspect-session \
+  /mnt/behavbox_ssd/sessions/<session-id> --deep-camera-qc --json
 ```
 
 `inspect-session` always performs the fast checks read-only. The explicit
