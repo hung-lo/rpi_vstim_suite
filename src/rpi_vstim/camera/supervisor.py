@@ -364,15 +364,36 @@ class _CameraWorker:
     def stop(self) -> CameraWorkerStatus:
         if self._stopped:
             return self.status
+        self.request_stop()
+        self.finish_stop()
+        self.verify_stop()
+        return self.status
+
+    def request_stop(self) -> None:
+        """Signal promptly; the supervisor signals every camera before waiting."""
+        if self._stopped or self.process is None:
+            return
+        if self.status.state == CameraState.RECORDING:
+            self._publish("CAMERA_STOP_REQUESTED")
+        if self.process.poll() is None:
+            try:
+                sender = getattr(self.process, "send_signal", None)
+                if self.spec.backend == "rpicam" and sender is not None:
+                    sender(signal.SIGINT)
+                else:
+                    self.process.terminate()
+            except OSError as exc:
+                self._fail(f"camera terminate failed: {exc}")
+
+    def finish_stop(self) -> None:
+        """Reap after all children have received their stop request."""
+        if self._stopped:
+            return
         if self.process is None:
             self._stopped = True
             self._write_diagnostic()
             return self.status
-        graceful_exit = False
-        if self.status.state == CameraState.RECORDING:
-            self._publish("CAMERA_STOP_REQUESTED")
-        if self.process.poll() is None:
-            graceful_exit = self._terminate(force=False)
+        graceful_exit = self.process.poll() is not None or self._reap(self.spec.stop_timeout_s)
         if self.process.poll() is None:
             self._terminate(force=True)
         self._reap(self.spec.stop_timeout_s)
@@ -392,12 +413,15 @@ class _CameraWorker:
         self.status.stop_utc_ns = utc_ns()
         self.status.stop_monotonic_ns = monotonic_ns()
         self._refresh_bytes()
+
+    def verify_stop(self) -> None:
+        if self._stopped or self.process is None:
+            return
         self._probe_output()
         self.status.verification_state = self._verification_state()
         self._write_diagnostic()
         self._stopped = True
         self._publish("CAMERA_STOPPED")
-        return self.status
 
     def _terminate(self, *, force: bool) -> bool:
         if self.process is None or self.process.poll() is not None:
@@ -619,7 +643,15 @@ class LocalCameraSupervisor:
         return tuple(worker.poll() for worker in self._workers.values())
 
     def stop(self) -> tuple[CameraWorkerStatus, ...]:
-        statuses = tuple(worker.stop() for worker in self._workers.values())
+        workers = tuple(self._workers.values())
+        # Never let an MP4 probe for camera A keep camera B recording.
+        for worker in workers:
+            worker.request_stop()
+        for worker in workers:
+            worker.finish_stop()
+        for worker in workers:
+            worker.verify_stop()
+        statuses = tuple(worker.status for worker in workers)
         self._active = False
         self._write_manifest()
         return statuses

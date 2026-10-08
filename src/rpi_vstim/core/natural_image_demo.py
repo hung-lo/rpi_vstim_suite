@@ -206,6 +206,18 @@ def _trace_timestamp(
             if isinstance(item, dict) and "frame_index" in item
         }
     item = traces.get(frame_index)
+    if (
+        item is not None
+        and payload.get("kernel_timestamp_clock") == "monotonic"
+        and int(item.get("kernel_event_ns", 0)) > 0
+    ):
+        return int(item["kernel_event_ns"]), {
+            "timing_source": "drm_kernel_vblank_monotonic",
+            "kernel_sequence": item.get("kernel_sequence"),
+            "kernel_event_ns": item.get("kernel_event_ns"),
+            "callback_monotonic_ns": item.get("callback_monotonic_ns"),
+            "callback_realtime_ns": item.get("callback_realtime_ns"),
+        }
     if item is not None and int(item.get("callback_monotonic_ns", 0)) > 0:
         return int(item["callback_monotonic_ns"]), {
             "timing_source": "drm_callback_monotonic",

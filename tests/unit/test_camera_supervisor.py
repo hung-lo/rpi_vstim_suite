@@ -78,6 +78,31 @@ def test_supervisor_starts_and_stops_independent_local_workers(tmp_path):
     assert processes and all(process.terminated for process in processes)
 
 
+def test_supervisor_signals_all_cameras_before_any_post_stop_probe(tmp_path, monkeypatch):
+    events = []
+
+    class OrderedProcess(FakeProcess):
+        def terminate(self):
+            events.append(f"signal:{self.output_path.parent.name}")
+            super().terminate()
+
+    def popen(command, **_kwargs):
+        path = tmp_path / "session" / "camera" / command[1] / "capture.bin"
+        process = OrderedProcess(path)
+        process.output_path = path
+        return process
+
+    monkeypatch.setattr(
+        "rpi_vstim.camera.supervisor._CameraWorker._probe_output",
+        lambda worker: events.append(f"probe:{worker.spec.camera_id}"),
+    )
+    supervisor = LocalCameraSupervisor((spec("one"), spec("two")), popen_factory=popen)
+    supervisor.start(tmp_path / "session")
+    supervisor.stop()
+    assert events[:2] == ["signal:one", "signal:two"]
+    assert events[2:] == ["probe:one", "probe:two"]
+
+
 def test_optional_worker_crash_degrades_without_stopping_other_worker(tmp_path):
     processes = {}
 

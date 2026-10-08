@@ -18,7 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define STREAM_EVENT_CAPACITY 8192U
+/* ponytail: supports about 73 minutes at 59.82 Hz; use streamed trace output for longer runs. */
+#define STREAM_EVENT_CAPACITY 262144U
 
 #include <drm.h>
 #include <drm_fourcc.h>
