@@ -63,3 +63,45 @@ kernel CLOCK_MONOTONIC vblank timestamp; session UTC is reconstructed from the
 `CLOCK_SYNC` mapping, rather than from callback-receipt time. Event logging had
 zero drops/errors, NVMe remained rw with no I/O errors, and throttling was
 `0x0`.
+
+## 90-minute event-queue-fix endurance retry
+
+Commit `bd09b258f2eae117fb75cd7a5048ae8e7da3bbbe` passed the production-like
+retry session `V1_2_90min_soak_retry_20261008T160000Z`. The display +
+dual-camera + event logging + NVMe stack passed a 90-minute production-like
+endurance validation after the event-queue overflow fix.
+
+The session ran for 5,429.947 s of KMS acquisition on
+`/mnt/behavbox_ssd/sessions/V1_2_90min_soak_retry_20261008T160000Z`.
+The event queue remained bounded at 4,096 entries and reached a high-water
+mark of 4,096, but the reliable shutdown handoff drained it completely:
+12,021 enqueued, 12,021 written, zero dropped, and zero writer errors. The
+session finalized `COMPLETE`; the failed earlier session
+`V1_2_90min_soak_20261008T141500Z` remains preserved as evidence.
+
+KMS requested/completed 324,774/324,774 presentations and retained
+324,774/324,774 timing records with no truncation. It reported 54 estimated
+extended refreshes, zero missed vblanks, and non-contiguous kernel sequence.
+The first and last kernel presentation timestamps were
+15,210,589,360,000 ns and 20,640,536,458,000 ns on CLOCK_MONOTONIC. The KMS
+path remains droppable but timing-observable: scientific reconstruction must
+use the retained kernel-vblank timestamps, with UTC derived through
+`CLOCK_SYNC`, rather than nominal frame rate or callback receipt time.
+
+Both cameras started before display acquisition, stopped together, and exited
+0. Stop/reap skew was 134.13 µs. The noir and wide MP4s were 312,382,700 and
+399,800,245 bytes with container durations 5,436.384854 s and 5,435.451186 s;
+both therefore cover the complete 5,429.947 s scientific display interval and
+include only ordinary lead-in/tail footage. The supervisor's bounded 15-second
+full-frame probe reported `recorded_unverified` for these large files, so an
+exact decoded-frame count was not attempted during shutdown; lightweight
+container duration/size checks succeeded.
+
+The session occupied 795,711,631 bytes. NVMe free space changed from
+954,536,501,248 to 953,740,722,176 bytes. The mount remained
+`/dev/nvme0n1p1`/ext4/rw with UUID
+`18d6cbdf-378a-4b0a-a3fb-15c23b4eeb99`; no new NVMe, PCIe, ext4, I/O, or
+read-only-remount errors were found. Peak/final temperature was 45.5°C,
+`vcgencmd get_throttled` remained `0x0`, and available memory remained about
+1.5 GiB at final inspection. No recording `rpicam-vid` processes remained and
+LabWC/KMS restoration was successful.
