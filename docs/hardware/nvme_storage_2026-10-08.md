@@ -44,3 +44,22 @@ found in the kernel log.
 
 After a clean reboot, `findmnt` again reported `/dev/nvme0n1p1` mounted rw at
 `/mnt/behavbox_ssd`, and a one-image session smoke test completed on the NVMe.
+
+## Coordinated camera-stop validation
+
+Commit `f1dd3d7` was validated by the full-stack session
+`V1_2_camera_stop_20261008T140000Z`. Both camera stop/reap timestamps were
+recorded within 75.8 µs of one another, after 254.481 s of KMS acquisition;
+the previous 15-second sequential-finalization skew is gone. The noir MP4 had
+7,608 frames in 253.487109 s (30.01336 fps) and the wide MP4 had 7,579 frames
+in 252.520815 s (30.01337 fps); both exited 0 and decoded cleanly. Their
+0.966294 s duration difference is consistent with their 1.152 s serial startup
+offset, and both cover the full display interval.
+
+KMS requested and completed 15,026 flips, retained all 15,026 flip records,
+restored cleanly, and reported two estimated extended refreshes, zero missed
+vblanks, and non-contiguous kernel sequence. Each retained record has the true
+kernel CLOCK_MONOTONIC vblank timestamp; session UTC is reconstructed from the
+`CLOCK_SYNC` mapping, rather than from callback-receipt time. Event logging had
+zero drops/errors, NVMe remained rw with no I/O errors, and throttling was
+`0x0`.
