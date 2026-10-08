@@ -108,10 +108,13 @@ LabWC/KMS restoration was successful.
 
 ## Fast bounded MP4 QC validation
 
-Commit `b864af2a67b032fd7d3fa0b1d724f021ba988fb0` was deployed to the
-permanent Pi checkout. The new normal-shutdown verifier uses metadata-only
-`ffprobe` with a five-second timeout per camera; it does not request
-`-count_frames`. It checks file size (at least 1 KiB), MP4/container and video
+Commit `b864af2a67b032fd7d3fa0b1d724f021ba988fb0` introduced the verifier.
+The full-stack short recording below was created on that commit. Follow-up
+commit `b29e34542969d451d2a81f73578949f00a29a3ad` removed even the unused
+`nb_read_frames` field from the fast probe request and is deployed to the
+permanent Pi checkout. The normal-shutdown verifier uses metadata-only
+`ffprobe` with a five-second timeout per camera and does not request
+`-count_frames` or `nb_read_frames`. It checks file size (at least 1 KiB), MP4/container and video
 stream readability, H.264 codec, requested dimensions and sensible frame
 rate, stream time base, start time and positive duration. It also checks the
 media duration against the camera process lifetime and, when available, checks
@@ -122,8 +125,8 @@ camera failed and prevents a healthy `COMPLETE` result.
 The preserved 90-minute session above was inspected read-only with the new
 `inspect-session` fast checks. Both historical camera manifest entries remain
 unchanged as `recorded_unverified`; the new inspection independently reported
-both files healthy and covering the KMS interval. Metadata probes took 0.172 s
-for noir and 0.169 s for wide; complete `inspect-session --json` took 1.455 s.
+both files healthy and covering the KMS interval. Final metadata probes took
+0.185 s per camera; complete final `inspect-session --json` took 1.475 s.
 The files reported H.264 640x480, 30.0133/30.0131 metadata fps, and durations
 of 5,436.384854 s / 5,435.451186 s. The original session artifacts were not
 modified.
@@ -132,7 +135,9 @@ The short real full-stack validation session
 `V1_2_mp4_fast_qc_short_20261008T205408Z` completed on the NVMe with status
 `COMPLETE` after 414.233 s of KMS acquisition. Both in-shutdown verifiers
 reported `recorded`, production QC success, and scientific interval coverage;
-both camera processes exited 0. The noir MP4 was 22,054,748 bytes,
+both camera processes exited 0. The saved short-session MP4s were then
+re-inspected read-only with final commit `b29e345`; both fast checks passed.
+The noir MP4 was 22,054,748 bytes,
 416.647467 s, and 30.01338 metadata fps; the wide MP4 was 32,965,391 bytes,
 415.714585 s, and 30.01338 metadata fps. No exhaustive frame count was run.
 
