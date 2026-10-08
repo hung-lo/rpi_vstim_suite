@@ -1,5 +1,5 @@
 # Explicit validation/demo configuration for the real Pi 5 integrated runner.
-# This is not the final production animal-data storage configuration.
+# This profile writes production sessions directly to the NVMe-backed root.
 
 [display]
 backend = "kms"
@@ -15,8 +15,8 @@ pixel_format = "RGB565"
 calibration_id = "pi5-hdmi-a2-demo"
 
 [paths]
-# Kept explicit and repository-relative for the short lab demonstration.
-output_root = "../../demo_sessions"
+# Must remain the mounted NVMe filesystem; the runner rejects a missing/wrong mount.
+output_root = "/mnt/behavbox_ssd/sessions"
 asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
 
 [hardware]

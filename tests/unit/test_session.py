@@ -1,6 +1,8 @@
 import json
 from dataclasses import replace
 
+import pytest
+
 from rpi_vstim.core.config import Config
 from rpi_vstim.core.session import new_session
 
@@ -53,3 +55,9 @@ def test_session_records_selected_asset_identities(tmp_path):
         {"filename": "a.png", "sha256": "image-sha"}
     ]
     assert table["images"][0]["sha256"] == "image-sha"
+
+
+def test_session_id_cannot_escape_output_root(tmp_path):
+    config = replace(Config(), paths=replace(Config().paths, output_root=tmp_path))
+    with pytest.raises(ValueError, match="unsupported"):
+        new_session(config, session_id="../not-a-session")

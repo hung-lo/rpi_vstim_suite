@@ -16,6 +16,7 @@ from .event_log import EventLogger
 from .provenance import collect_provenance, resolve_source_commit
 from .schema import validate as validate_schema
 from .schema import versioned
+from .storage import StorageSnapshot, prepare_session_output_root, storage_snapshot
 from .timestamps import monotonic_ns, utc_ns
 
 _SESSION_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -48,6 +49,7 @@ class SessionContext:
     random_seeds: dict[str, int]
     source_commit: str
     host_provenance: dict[str, Any]
+    storage_start: StorageSnapshot
 
 
 class SessionOutput:
@@ -75,7 +77,8 @@ class SessionOutput:
         self._incomplete_marker: Path | None = None
 
     def write_initial_outputs(self) -> None:
-        self.context.session_root.mkdir(parents=True, exist_ok=True)
+        # A session ID is an immutable record identity, never an overwrite target.
+        self.context.session_root.mkdir()
         self._incomplete_marker = self.context.session_root / ".session-incomplete"
         self._incomplete_marker.write_text("incomplete\n", encoding="utf-8")
         atomic_write_json(
@@ -83,6 +86,7 @@ class SessionOutput:
             versioned(self.context.resolved_config, "config"),
         )
         provenance = dict(self.context.host_provenance)
+        provenance["storage_start"] = self.context.storage_start.as_dict()
         if self._reward_resolution is not None:
             provenance.update(self._reward_resolution.provenance_dict())
         provenance.update(self._operator_bait_provenance)
@@ -101,6 +105,7 @@ class SessionOutput:
             "phase": "00",
             "degraded": [],
             "incomplete": True,
+            "storage_start": self.context.storage_start.as_dict(),
         }
         self._write_manifest()
         self._events = EventLogger(self.context.session_root / "events.csv")
@@ -334,6 +339,15 @@ class SessionOutput:
                 self._events.close()
             self._events = None
         if self._manifest:
+            try:
+                storage_end = storage_snapshot(self.context.session_root).as_dict()
+                self._manifest["storage_end"] = storage_end
+                provenance_path = self.context.session_root / "provenance.json"
+                provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+                provenance["storage_end"] = storage_end
+                atomic_write_json(provenance_path, provenance)
+            except OSError as exc:
+                self._manifest["storage_end_error"] = str(exc)
             self._manifest["outputs_finalized"] = True
             self._manifest["incomplete"] = False
             self._write_manifest()
@@ -352,6 +366,7 @@ def new_session(
 ) -> SessionOutput:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("session_id contains unsupported characters")
+    storage_start = prepare_session_output_root(config.paths.output_root)
     protocol = protocol_name or config.protocol.name
     source_commit = resolve_source_commit()
     context = SessionContext(
@@ -365,6 +380,7 @@ def new_session(
         random_seeds={"protocol": seed},
         source_commit=source_commit,
         host_provenance=collect_provenance(source_commit=source_commit),
+        storage_start=storage_start,
     )
     reward_resolution = None
     operator_bait_provenance: dict[str, Any] = {}

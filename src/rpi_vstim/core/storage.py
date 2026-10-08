@@ -1,15 +1,16 @@
-"""Explicit storage-path inspection; this module never mounts anything."""
+"""Storage inspection and fail-closed NVMe preflight; never mounts anything."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import subprocess
 import tempfile
 import uuid
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
-from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -107,24 +108,23 @@ class StorageMonitor:
 
 
 def inspect_storage(path: Path | str, *, minimum_free_bytes: int = 0) -> StorageInspection:
-    """Inspect a configured path and reject absent/unmounted production roots."""
     path = Path(path)
     if not path.exists():
         return StorageInspection(path, False, False, False, False, None, "absent")
-    is_directory = path.is_dir()
-    if not is_directory:
+    if not path.is_dir():
         return StorageInspection(path, True, False, False, False, None, "not_directory")
     mounted = os.path.ismount(path)
     writable = os.access(path, os.W_OK)
     free_bytes = shutil.disk_usage(path).free
-    if not mounted:
-        status = "not_mounted"
-    elif not writable:
-        status = "not_writable"
-    elif free_bytes < minimum_free_bytes:
-        status = "low_space"
-    else:
-        status = "ready"
+    status = (
+        "not_mounted"
+        if not mounted
+        else "not_writable"
+        if not writable
+        else "low_space"
+        if free_bytes < minimum_free_bytes
+        else "ready"
+    )
     return StorageInspection(path, True, True, mounted, writable, free_bytes, status)
 
 
@@ -139,21 +139,17 @@ def preflight_storage(
     allow_test_path: bool = False,
     write_probe: bool = False,
 ) -> StoragePreflight:
-    """Fail closed before production writes; never mounts or selects a fallback.
-
-    `allow_test_path` is for temporary-directory tests only. Production callers
-    should leave it false so `/`, the home directory, and temporary storage
-    cannot silently become the recording root.
-    """
+    """Fail closed before production writes; never mounts or selects a fallback."""
     root = Path(path).resolve()
-    checks: list[dict[str, object]] = []
-
-    unsafe = _unsafe_fallback(root)
-    checks.append({
-        "name": "safe_production_root",
-        "passed": allow_test_path or not unsafe,
-        "detail": "temporary/test override" if allow_test_path and unsafe else str(root),
-    })
+    checks: list[dict[str, object]] = [
+        {
+            "name": "safe_production_root",
+            "passed": allow_test_path or not _unsafe_fallback(root),
+            "detail": "temporary/test override"
+            if allow_test_path and _unsafe_fallback(root)
+            else str(root),
+        }
+    ]
     inspection = inspect_storage(root, minimum_free_bytes=minimum_free_bytes)
     checks.extend(
         (
@@ -202,7 +198,10 @@ def preflight_storage(
 def open_storage_session(preflight: StoragePreflight, session_id: str) -> StorageSession:
     if not preflight.passed:
         raise ValueError(f"storage preflight failed: {preflight.status}")
-    if not session_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in session_id):
+    if not session_id or any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+        for char in session_id
+    ):
         raise ValueError("session_id contains unsupported characters")
     session_root = preflight.path / session_id
     session_root.mkdir()
@@ -214,24 +213,15 @@ def open_storage_session(preflight: StoragePreflight, session_id: str) -> Storag
     finally:
         os.close(descriptor)
     return StorageSession(
-        preflight.path,
-        session_root,
-        marker,
-        preflight,
-        shutil.disk_usage(preflight.path).free,
+        preflight.path, session_root, marker, preflight, shutil.disk_usage(preflight.path).free
     )
 
 
 def finalize_storage_session(
-    session: StorageSession,
-    *,
-    required_files: Iterable[Path | str],
-    success: bool,
+    session: StorageSession, *, required_files: Iterable[Path | str], success: bool
 ) -> StorageFinalizeResult:
     missing = tuple(
-        str(path)
-        for path in required_files
-        if not (session.session_root / path).is_file()
+        str(path) for path in required_files if not (session.session_root / path).is_file()
     )
     for path in session.session_root.rglob("*"):
         if path.is_file():
@@ -256,14 +246,10 @@ def finalize_storage_session(
 
 def _unsafe_fallback(path: Path) -> bool:
     resolved = path.resolve()
-    unsafe_roots = {
-        Path("/").resolve(),
-        Path.home().resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-    }
+    roots = {Path("/").resolve(), Path.home().resolve(), Path(tempfile.gettempdir()).resolve()}
     if os.name == "posix":
-        unsafe_roots.add(Path("/var/tmp").resolve())
-    return any(resolved == root or root in resolved.parents for root in unsafe_roots)
+        roots.add(Path("/var/tmp").resolve())
+    return any(resolved == root or root in resolved.parents for root in roots)
 
 
 def _write_probe(root: Path) -> tuple[bool, str]:
@@ -282,3 +268,111 @@ def _write_probe(root: Path) -> tuple[bool, str]:
         if descriptor is not None:
             os.close(descriptor)
         path.unlink(missing_ok=True)
+
+
+PRODUCTION_STORAGE_MOUNT = Path("/mnt/behavbox_ssd")
+PRODUCTION_SESSION_ROOT = PRODUCTION_STORAGE_MOUNT / "sessions"
+PRODUCTION_STORAGE_UUID = "18d6cbdf-378a-4b0a-a3fb-15c23b4eeb99"
+PRODUCTION_STORAGE_SOURCE = "/dev/nvme0n1p1"
+DEFAULT_MIN_FREE_BYTES = 20 * 1024**3
+
+
+class StoragePreflightError(RuntimeError):
+    """The requested session storage is not safe to use."""
+
+
+@dataclass(frozen=True)
+class StorageSnapshot:
+    output_root: str
+    filesystem_type: str | None
+    mount_source: str | None
+    filesystem_uuid: str | None
+    total_bytes: int
+    free_bytes: int
+    production_storage: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def _is_production_root(root: Path) -> bool:
+    try:
+        root.resolve(strict=False).relative_to(PRODUCTION_STORAGE_MOUNT)
+    except ValueError:
+        return False
+    return True
+
+
+def _mount_info(path: Path) -> dict[str, str | None]:
+    try:
+        result = subprocess.run(
+            ("findmnt", "--json", "--target", str(path), "--output", "TARGET,SOURCE,FSTYPE,UUID"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        filesystems = json.loads(result.stdout).get("filesystems", [])
+        entry = filesystems[0] if result.returncode == 0 and filesystems else {}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        entry = {}
+    return {"source": entry.get("source"), "fstype": entry.get("fstype"), "uuid": entry.get("uuid")}
+
+
+def _writable(path: Path) -> bool:
+    if not os.access(path, os.W_OK | os.X_OK):
+        return False
+    try:
+        descriptor, probe = tempfile.mkstemp(prefix=".rpi-vstim-storage-", dir=path)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(b"storage preflight\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(probe).unlink()
+    except OSError:
+        return False
+    return True
+
+
+def storage_snapshot(output_root: Path | str) -> StorageSnapshot:
+    root = Path(output_root)
+    usage = shutil.disk_usage(root)
+    mount = _mount_info(root)
+    return StorageSnapshot(
+        str(root),
+        mount["fstype"],
+        mount["source"],
+        mount["uuid"],
+        usage.total,
+        usage.free,
+        _is_production_root(root),
+    )
+
+
+def prepare_session_output_root(output_root: Path | str) -> StorageSnapshot:
+    """Create and validate the one root from which a session may write."""
+    root = Path(output_root)
+    production = _is_production_root(root)
+    if production:
+        if not PRODUCTION_STORAGE_MOUNT.exists() or not os.path.ismount(PRODUCTION_STORAGE_MOUNT):
+            raise StoragePreflightError(
+                "Production storage unavailable: /mnt/behavbox_ssd is not mounted from the expected filesystem."
+            )
+        mount = _mount_info(PRODUCTION_STORAGE_MOUNT)
+        if (
+            mount["source"] != PRODUCTION_STORAGE_SOURCE
+            or mount["fstype"] != "ext4"
+            or mount["uuid"] != PRODUCTION_STORAGE_UUID
+        ):
+            raise StoragePreflightError(
+                "Production storage unavailable: /mnt/behavbox_ssd is not mounted from the expected filesystem."
+            )
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir() or not _writable(root):
+        raise StoragePreflightError(f"Session output root is not writable: {root}")
+    snapshot = storage_snapshot(root)
+    if production and snapshot.free_bytes < DEFAULT_MIN_FREE_BYTES:
+        raise StoragePreflightError(
+            f"Production storage unavailable: only {snapshot.free_bytes} bytes free; need at least {DEFAULT_MIN_FREE_BYTES}."
+        )
+    return snapshot

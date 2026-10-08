@@ -5,11 +5,13 @@ the existing natural-image planner, continuous leased KMS renderer, dual lick
 monitor, camera supervisor, session output, and bounded event handoff. It is a
 demo/validation runner, not the final production animal-data session runner.
 
-From the repository checkout:
+On the production Pi, the bundled profile writes directly to the mounted NVMe
+filesystem at `/mnt/behavbox_ssd/sessions` (not to the checkout or SD card):
 
 ```text
 rpi-vstim natural-images run \
   --mouse-id V1_2 \
+  --output-root /mnt/behavbox_ssd/sessions \
   --licks \
   --cameras \
   --camera-preview
@@ -44,7 +46,8 @@ ownership of HDMI-A-1. Recording takes priority over preview. The optional
 rpicam ROI/crop feature is intentionally deferred; the demo does not add a
 software crop, decoder, or re-encoder path.
 
-Each session is written below the explicit demo output root in the config and
+Each session is written below the explicit output root in the config (or its
+`--output-root` override) and
 contains the current repository artifacts, including `plan.json`,
 `asset_manifest.json`, `camera_manifest.json`, `display_results.json`,
 `provenance.json`, and `final_status.json`. The authoritative integrated event
@@ -63,6 +66,15 @@ Ctrl-C stops the KMS sequence, restores the stimulus display, releases both
 lick callbacks, reaps both camera processes, flushes the bounded event writer,
 and finalizes the session. A clean second run should be possible immediately.
 
-The current runner has not accepted final SSD storage, optical photodiode
-timing, or full production-session semantics. Those remain separate validation
-gates.
+The runner now accepts direct SSD session output. Optical photodiode timing and
+the broader production-session protocol remain separate validation gates.
+
+## Production storage policy
+
+`/mnt/behavbox_ssd/sessions` is validated before the runner creates session
+artifacts or acquires KMS, cameras, or GPIO. It must be a writable mount of
+`/dev/nvme0n1p1`, formatted as ext4 with UUID
+`18d6cbdf-378a-4b0a-a3fb-15c23b4eeb99`, and have at least 20 GiB free. A failed
+check aborts; it never falls back to `demo_sessions`, `/tmp`, the home
+directory, or the SD card. Storage identity and free space are captured at
+session start and end in `provenance.json` and `final_status.json`.

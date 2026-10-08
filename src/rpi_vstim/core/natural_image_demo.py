@@ -20,6 +20,7 @@ from rpi_vstim.camera import (
     resolve_camera_preview_environment,
 )
 from rpi_vstim.core.assets import AssetPreparer, AssetResolver, build_selected_asset_manifest
+from rpi_vstim.core.camera import CameraState
 from rpi_vstim.core.config import Config, ConfigError
 from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.core.session import atomic_write_json, new_session
@@ -666,16 +667,27 @@ def run_natural_image_demo(
                         verification_state=camera_status.verification_state,
                         failure_reason=camera_status.error,
                     )
+                    if camera_status.state == CameraState.FAILED:
+                        message = f"{camera_status.camera_id}: {camera_status.error or 'camera failed'}"
+                        if message not in camera_failures:
+                            camera_failures.append(message)
             except Exception as exc:  # noqa: BLE001 — continue finalization
                 degraded.append(f"camera cleanup: {exc}")
         if camera_failures and "camera" not in degraded:
             degraded.append("camera")
+        if camera_failures and status == "COMPLETE":
+            status = "FAILED"
+            error = "required camera failed: " + "; ".join(camera_failures)
         events.emit("SESSION_END", status=status, error=error, interrupted=interrupted)
         try:
             event_diagnostics = events.close()
         except Exception as exc:  # noqa: BLE001 — preserve final status
             event_diagnostics = events.diagnostics() | {"close_error": str(exc)}
             degraded.append(f"event writer cleanup: {exc}")
+        if event_diagnostics["error_count"]:
+            status = "FAILED"
+            error = f"event log writer failure: {event_diagnostics['writer_error'] or 'unknown error'}"
+            degraded.append("event log")
         camera_manifest = cameras.manifest() if cameras is not None else []
         try:
             session.update_status(
