@@ -15,8 +15,6 @@ from rpi_vstim.hardware.policy import (
     LICK_CENTER_GPIO_BCM,
     OPERATOR_BAIT_GPIO_BCM,
     RESERVED_GPIO_BCM,
-    SOUND_TRIGGER_1_GPIO_BCM,
-    SOUND_TRIGGER_2_GPIO_BCM,
     reserved_gpio_message,
 )
 
@@ -274,12 +272,6 @@ class Config:
         reserved = RESERVED_GPIO_BCM.intersection(pins.values())
         if reserved:
             raise ConfigError(reserved_gpio_message(min(reserved)))
-        for pin, roles in (
-            (SOUND_TRIGGER_1_GPIO_BCM, {"sound_trigger_1", "operator_bait_button"}),
-            (SOUND_TRIGGER_2_GPIO_BCM, {"sound_trigger_2", "ttl"}),
-        ):
-            if any(name not in roles and assigned == pin for name, assigned in pins.items()):
-                raise ConfigError(reserved_gpio_message(pin))
         for name, level in {
             "reward_initial_level": self.hardware.reward_initial_level,
             "suction_initial_level": self.hardware.suction_initial_level,

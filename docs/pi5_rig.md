@@ -14,11 +14,30 @@ used in validation is not redistributed or assigned a license here. The
 production storage guard checks this rig's NVMe and aborts on mismatch.
 Reward, vacuum, and airpuff stay disabled in this demo.
 
-BCM GPIO23 and GPIO24 connect to Robertsonics WAV Trigger external inputs 1
-and 2. They are configured as `sound_trigger_1` and `sound_trigger_2`, but
-VStim does not claim or pulse them yet. The sound associated with each input
-depends on the WAV Trigger SD-card/configuration; neither is assigned a
-protocol cue here. There is no GPIO23 operator bait button on this rig.
+BCM GPIO23 and GPIO24 are unassigned on this rig. There is no GPIO23 operator
+bait button. Audio currently uses a Pi 5 USB audio adapter, its 3.5 mm analog
+output, and a speaker. No VStim audio backend is installed or enabled.
+
+## Provisional USB audio characterization
+
+The detected adapter is a C-Media Electronics Inc. USB Audio Device, Unitek
+Y-247A, seen as ALSA card 2, device 0 (`hw:2,0`) during this test. Playback
+at 48 kHz through the speaker worked. A standalone persistent/preloaded
+playback test requested 180 sounds, received 180 audio callbacks, and missed
+zero requests.
+
+| Standalone measurement | Median | Mean | SD | Minimum | Maximum |
+|---|---:|---:|---:|---:|---:|
+| Python trigger interval (ms) | 1000.000 | 1000.000 | 0.006 | 999.971 | 1000.046 |
+| Trigger to audio callback (ms) | 2.654 | 2.696 | 1.572 | 0.068 | 5.957 |
+
+A phone recording of the speaker showed stable acoustic onset at the few-ms
+level with no missing beeps. This standalone variability was below one
+approximately 16.7 ms display frame at 60 Hz. Absolute command-to-acoustic
+latency has not been measured. This is provisional hardware characterization,
+not full-stack validation; VStim with KMS, cameras, logging, and NeuroKairos
+coexistence remains to be tested. ALSA card numbering may change between
+boots. Audio implementation is a separate follow-up.
 
 NeuroKairos is an [external service](https://github.com/SjulsonLab/neurokairos),
 optional to VStim. It and chrony may continuously send IRIG-H through BCM

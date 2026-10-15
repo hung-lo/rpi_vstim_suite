@@ -1,7 +1,7 @@
 # Manual bait and water-service operator controls
 
-Historical software-path record. The current Pi 5 rig uses GPIO23/24 for WAV
-Trigger inputs, not an operator button; see [current GPIO mapping](../gpio.md).
+Historical software-path record. The current Pi 5 rig leaves GPIO23/24
+unassigned and uses USB audio; see [current GPIO mapping](../gpio.md).
 Do not enable this physical-button service with the current-rig profile.
 
 ## Canonical behavior

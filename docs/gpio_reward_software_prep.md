@@ -1,7 +1,7 @@
 # GPIO/reward software preparation
 
-Historical software preparation. GPIO23/24 on the current Pi 5 rig connect
-to Robertsonics WAV Trigger inputs 1 and 2. The operator-button and generic
+Historical software preparation. GPIO23/24 on the current Pi 5 rig are
+unassigned; audio uses a USB adapter. The operator-button and generic
 `trigger_out` descriptions below are superseded; see [GPIO](gpio.md).
 
 The desktop test suite does not access GPIO. The simulated hardware worker

@@ -13,8 +13,9 @@ refresh_tolerance_hz = 0.05
 pixel_format = "RGB565"
 
 [hardware]
-sound_trigger_1_pin_bcm = 23
-sound_trigger_2_pin_bcm = 24
+# GPIO23/24 are unassigned; audio uses a USB adapter.
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
 
 [operator_controls]
 bait_button_gpio = -1

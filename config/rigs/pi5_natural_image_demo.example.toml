@@ -32,9 +32,9 @@ reward_center_pin_bcm = 21
 reward_4_pin_bcm = 7
 airpuff_pin_bcm = 8
 suction_pin_bcm = 25
-# Robertsonics WAV Trigger inputs; this suite does not drive them yet.
-sound_trigger_1_pin_bcm = 23
-sound_trigger_2_pin_bcm = 24
+# Audio uses a USB adapter; GPIO23/24 have no verified current-rig role.
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
 # GPIO4/10 are user pins; GPIO11 is header-only.
 lick_idle_level = 0
 lick_active_level = 1
@@ -42,7 +42,7 @@ release_stable_ms = 25
 min_classified_lick_interval_ms = 70
 
 [operator_controls]
-# GPIO23 is sound_trigger_1 here, never an operator bait button.
+# No operator bait button is assigned on this rig.
 manual_bait_enabled = false
 bait_button_enabled = false
 bait_button_gpio = -1

@@ -440,5 +440,4 @@ def test_gpio9_is_rejected_for_button_or_normal_outputs():
         config_from_mapping({"hardware": {"ttl_pin_bcm": 9}})
     config = config_from_mapping({"hardware": {"ttl_pin_bcm": 24}})
     assert config.hardware.ttl_pin_bcm == 24
-    with pytest.raises(ValueError, match="GPIO24.*sound_trigger_2"):
-        config_from_mapping({"hardware": {"reward_pin_bcm": 24}})
+    assert config_from_mapping({"hardware": {"reward_pin_bcm": 24}}).hardware.reward_pin_bcm == 24

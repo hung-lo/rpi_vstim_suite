@@ -25,8 +25,8 @@ a persistent storage root before collecting real data. Package defaults use
 Generic and simulation profiles set GPIO roles to `-1` (unassigned). Fill
 verified BCM numbers before using those inputs or outputs on a new rig.
 They do not assume a WAV Trigger, NeuroKairos, camera topology, or SSD UUID.
-The current Pi 5 profile assigns GPIO23/24 to sound trigger inputs and leaves
-the legacy operator button unassigned.
+The current Pi 5 profiles leave GPIO23/24 and the legacy operator button
+unassigned. Audio uses a USB adapter, with no audio GPIO assignment.
 
 The inherited hardware dataclass contains the lab GPIO map for compatibility.
 It does not claim or drive pins until a service is explicitly started. For a

@@ -50,6 +50,6 @@ guides separate the generic API from that deployment. The accidental generic
 `/mnt/hd` and `/home/pi` path defaults were removed. Generic/simulation
 profiles explicitly leave GPIO roles unassigned; the inherited dataclass map
 remains for legacy config compatibility and is never acquired implicitly.
-Current-rig profiles assign GPIO23/24 to Robertsonics WAV Trigger inputs,
-leave the legacy GPIO23 operator button unassigned, and never claim the sound
-pins during a VStim session.
+Current-rig profiles leave GPIO23/24 and the legacy GPIO23 operator button
+unassigned. The current audio path uses a USB adapter; no audio backend is
+part of this productization pass.

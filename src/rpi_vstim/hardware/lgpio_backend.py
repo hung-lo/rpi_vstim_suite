@@ -11,7 +11,7 @@ from typing import Any, Self
 
 from .models import HardwareStatus, OutputLineConfig
 from .ownership import RewardHardwareOwnership
-from .policy import RESERVED_GPIO_BCM, SOUND_TRIGGER_GPIO_BCM, reserved_gpio_message
+from .policy import RESERVED_GPIO_BCM, reserved_gpio_message
 
 
 class LgpioUnavailableError(RuntimeError):
@@ -99,8 +99,13 @@ class LgpioBackend:
         if normalized not in self._roles:
             raise LgpioBackendError(f"GPIO role is not owned by this session: {role}")
         line = self._hardware_config.output_line(normalized)
-        if line.bcm_pin in RESERVED_GPIO_BCM | SOUND_TRIGGER_GPIO_BCM:
+        if line.bcm_pin in RESERVED_GPIO_BCM:
             raise LgpioBackendError(reserved_gpio_message(line.bcm_pin))
+        if line.bcm_pin in (
+            self._hardware_config.sound_trigger_1_pin_bcm,
+            self._hardware_config.sound_trigger_2_pin_bcm,
+        ):
+            raise LgpioBackendError(f"BCM GPIO{line.bcm_pin} is assigned to a sound trigger role")
         return line
 
     def line_config(self, role: str) -> OutputLineConfig:

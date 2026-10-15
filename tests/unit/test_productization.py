@@ -1,7 +1,7 @@
 import importlib.util
 import json
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ from rpi_vstim.doctor import inspect_machine
 from rpi_vstim.session import new_session
 
 
-def test_profiles_separate_current_rig_sound_pins_from_generic_profiles():
+def test_profiles_leave_audio_gpio_unassigned():
     root = Path(__file__).resolve().parents[2]
     generic = load_config(root / "config/rigs/pi5_default.toml")
     simulation = load_config(root / "config/rigs/simulation.toml")
@@ -22,40 +22,48 @@ def test_profiles_separate_current_rig_sound_pins_from_generic_profiles():
     assert generic.operator_controls.bait_button_gpio == -1
     assert (generic.hardware.sound_trigger_1_pin_bcm, generic.hardware.sound_trigger_2_pin_bcm) == (-1, -1)
     assert (simulation.hardware.sound_trigger_1_pin_bcm, simulation.hardware.sound_trigger_2_pin_bcm) == (-1, -1)
+    for profile in (generic, simulation):
+        assert all(value in (-1, None) for name, value in asdict(profile.hardware).items() if name.endswith("pin_bcm"))
     with pytest.raises(ConfigError, match="reward GPIO is unassigned"):
         generic.hardware.output_line("reward")
     assert "/mnt/behavbox_ssd" not in str(generic.paths.output_root)
     assert current_rig.hardware.lick_pin_bcm == 26
     assert current_rig.paths.output_root == Path("/mnt/behavbox_ssd/sessions")
     assert (current_rig.hardware.sound_trigger_1_pin_bcm,
-            current_rig.hardware.sound_trigger_2_pin_bcm) == (23, 24)
+            current_rig.hardware.sound_trigger_2_pin_bcm) == (-1, -1)
     assert current_rig.operator_controls.bait_button_gpio == -1
     assert not current_rig.operator_controls.bait_button_enabled
+    assert not {9, 23, 24}.intersection(
+        value for name, value in asdict(current_rig.hardware).items() if name.endswith("pin_bcm")
+    )
     for path in (
         "config/rigs/pi5_dual_display_preflight.example.toml",
         "config/rigs/pi5_dual_display_provisional.example.toml",
     ):
         profile = load_config(root / path)
         assert (profile.hardware.sound_trigger_1_pin_bcm,
-                profile.hardware.sound_trigger_2_pin_bcm) == (23, 24)
+                profile.hardware.sound_trigger_2_pin_bcm) == (-1, -1)
         assert profile.operator_controls.bait_button_gpio == -1
+        assert not {9, 23, 24}.intersection(
+            value for name, value in asdict(profile.hardware).items() if name.endswith("pin_bcm")
+        )
     with pytest.raises(ConfigError, match="BCM GPIO9 is reserved for IRIG output"):
         config_from_mapping({"hardware": {"ttl_pin_bcm": 9}})
     with pytest.raises(ConfigError, match="paths must not be empty"):
         config_from_mapping({"paths": {"output_root": ""}})
 
 
-def test_sound_pin_ownership_conflicts_are_rejected():
+def test_explicit_sound_pin_ownership_conflicts_are_rejected():
     assert config_from_mapping({"hardware": {"sound_trigger_1_pin_bcm": 23}}).hardware.sound_trigger_1_pin_bcm == 23
     with pytest.raises(ConfigError, match="GPIO pins must be unique"):
         config_from_mapping({"hardware": {"sound_trigger_1_pin_bcm": 23},
                              "operator_controls": {"bait_button_gpio": 23}})
     with pytest.raises(ConfigError, match="GPIO pins must be unique"):
         config_from_mapping({"hardware": {"sound_trigger_2_pin_bcm": 24, "ttl_pin_bcm": 24}})
-    with pytest.raises(ConfigError, match="GPIO23.*sound_trigger_1"):
-        config_from_mapping({"hardware": {"reward_pin_bcm": 23}})
-    with pytest.raises(ConfigError, match="GPIO24.*sound_trigger_2"):
-        config_from_mapping({"hardware": {"reward_pin_bcm": 24}})
+    assert config_from_mapping({"hardware": {"reward_pin_bcm": 23}}).hardware.reward_pin_bcm == 23
+    assert config_from_mapping({"hardware": {"ttl_pin_bcm": 24}}).hardware.ttl_pin_bcm == 24
+    with pytest.raises(ConfigError, match="GPIO pins must be unique"):
+        config_from_mapping({"hardware": {"sound_trigger_1_pin_bcm": 23, "reward_pin_bcm": 23}})
 
 
 def test_doctor_read_only_with_missing_optional_services(tmp_path, monkeypatch, capsys):

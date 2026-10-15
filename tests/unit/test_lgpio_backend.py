@@ -141,19 +141,26 @@ def test_irig_role_is_not_a_normal_output_role():
         LgpioBackend(HardwareConfig(), roles=("irig_output",))
 
 
-def test_sound_trigger_gpio24_is_not_acquired_by_reward_backend():
+def test_explicit_sound_trigger_gpio24_is_not_acquired_by_reward_backend():
     api = FakeLgpio()
-    config = replace(HardwareConfig(), reward_pin_bcm=24)
+    config = replace(HardwareConfig(), reward_pin_bcm=24, sound_trigger_2_pin_bcm=24)
     backend = LgpioBackend(config, roles=("reward",), api=api)
-    with pytest.raises(LgpioBackendError, match="GPIO24.*sound_trigger_2"):
+    with pytest.raises(LgpioBackendError, match="GPIO24.*sound trigger role"):
         backend.start()
     assert not any(call[0] == "claim" for call in api.calls)
 
 
-def test_sound_trigger_gpio23_is_not_acquired_by_reward_backend():
+def test_explicit_sound_trigger_gpio23_is_not_acquired_by_reward_backend():
     api = FakeLgpio()
-    config = replace(HardwareConfig(), reward_pin_bcm=23)
+    config = replace(HardwareConfig(), reward_pin_bcm=23, sound_trigger_1_pin_bcm=23)
     backend = LgpioBackend(config, roles=("reward",), api=api)
-    with pytest.raises(LgpioBackendError, match="GPIO23.*sound_trigger_1"):
+    with pytest.raises(LgpioBackendError, match="GPIO23.*sound trigger role"):
         backend.start()
     assert not any(call[0] == "claim" for call in api.calls)
+
+
+@pytest.mark.parametrize("pin", (23, 24))
+def test_unassigned_sound_pins_do_not_block_other_rig_outputs(pin):
+    config = replace(HardwareConfig(), reward_pin_bcm=pin)
+    backend = LgpioBackend(config, roles=("reward",), api=FakeLgpio())
+    assert backend.line_config("reward").bcm_pin == pin

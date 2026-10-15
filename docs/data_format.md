@@ -35,4 +35,4 @@ a six-pulse behavioral reward.
 In legacy operator-button configurations, an operator bait press is logged as
 `manual_bait_request` before the same reward event sequence. Its input
 identity and request timestamp remain separate from GPIO19 delivery events.
-The current Pi 5 rig assigns GPIO23/24 to sound trigger inputs instead.
+The current Pi 5 rig leaves GPIO23/24 unassigned; its audio path uses a USB adapter.

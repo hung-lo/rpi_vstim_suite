@@ -65,7 +65,7 @@ slower offline counting. See [cameras](docs/cameras.md).
 
 GPIO is configured per rig. Doctor never claims pins; input examples require
 an explicit pin. The current rig reserves BCM GPIO9 for external NeuroKairos
-IRIG and assigns GPIO23/24 to WAV Trigger inputs. See
+IRIG; GPIO23/24 are unassigned. Audio currently uses a USB adapter. See
 [GPIO](docs/gpio.md).
 
 ## Protocols and validation

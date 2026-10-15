@@ -1,7 +1,7 @@
 # Pi 5 GPIO/reward preflight — 2026-09-26
 
-Historical source audit. Current Pi 5 GPIO23/24 roles are WAV Trigger inputs
-1 and 2; see [current GPIO mapping](../gpio.md).
+Historical source audit. Current Pi 5 GPIO23/24 are unassigned and audio uses
+a USB adapter; see [current GPIO mapping](../gpio.md).
 
 This is a read-only source audit for Monday’s hardware bring-up. No GPIO was
 exported, claimed, toggled, or electrically probed during the audit. The
@@ -21,8 +21,8 @@ The lab-wide map supersedes the earlier preflight snapshot below:
 | reserved output | 24 | unused |
 | `irig_output` / PCB `DIO4` | 9 | reserved exclusively for future IRIG |
 
-The current software rejects GPIO9 and GPIO24 for ordinary output use and does
-not implement IRIG generation. The earlier source-audit material remains below
+The current software rejects GPIO9 for ordinary output use and does not
+implement IRIG generation. The earlier source-audit material remains below
 as historical evidence and must not override this canonical policy.
 
 ## Canonical lab BehavBox mapping — 2026-09-30
