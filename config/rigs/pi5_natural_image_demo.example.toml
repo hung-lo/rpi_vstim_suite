@@ -1,5 +1,6 @@
-# Explicit validation/demo configuration for the real Pi 5 integrated runner.
+# Box151 validated deployment profile for the real Pi 5 integrated runner.
 # This profile writes production sessions directly to the NVMe-backed root.
+# BCM GPIO9 is reserved exclusively for NeuroKairos IRIG; do not assign it.
 
 [display]
 backend = "kms"
@@ -24,6 +25,15 @@ backend = "lgpio"
 chip = 0
 lick_pin_bcm = 26
 lick_right_pin_bcm = 27
+lick_center_pin_bcm = 15
+reward_pin_bcm = 19
+reward_right_pin_bcm = 20
+reward_center_pin_bcm = 21
+reward_4_pin_bcm = 7
+airpuff_pin_bcm = 8
+suction_pin_bcm = 25
+# GPIO23 operator button; GPIO24 trigger_out is currently unused.
+# GPIO4/10 are user pins; GPIO11 is header-only.
 lick_idle_level = 0
 lick_active_level = 1
 release_stable_ms = 25

@@ -45,10 +45,10 @@ def _legacy_reward_fields(value: Any) -> set[str]:
 
 @dataclass(frozen=True)
 class PathsConfig:
-    output_root: Path = Path("/mnt/hd")
-    cache_root: Path = Path("/mnt/hd/vstim_cache")
-    asset_root: Path = Path("/home/pi/stimulus_assets")
-    reward_state_root: Path = Path("/mnt/hd/vstim_reward_assignments")
+    output_root: Path = Path("sessions")
+    cache_root: Path = Path("cache")
+    asset_root: Path = Path("assets")
+    reward_state_root: Path = Path("reward_state")
     reward_hardware_lock_path: Path = Path("/tmp/rpi-vstim-reward.lock")
     operator_control_socket: Path = Path("/tmp/rpi-vstim-operator.sock")
     operator_event_log: Path = Path("/tmp/rpi-vstim-operator-events.jsonl")
@@ -458,6 +458,10 @@ def _replace_section(current: Any, values: dict[str, Any], section: str) -> Any:
     if unknown:
         raise ConfigError(f"unknown {section} setting(s): {', '.join(sorted(unknown))}")
     converted = dict(values)
+    if section == "paths" and any(
+        isinstance(value, str) and not value.strip() for value in converted.values()
+    ):
+        raise ConfigError("paths must not be empty")
     for name in known & {
         "output_root",
         "cache_root",

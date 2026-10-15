@@ -1,8 +1,8 @@
 [paths]
-output_root = "/mnt/hd"
-cache_root = "/mnt/hd/vstim_cache"
-asset_root = "/home/pi/stimulus_assets"
-reward_state_root = "/mnt/hd/vstim_reward_assignments"
+output_root = "../sessions"
+cache_root = "../cache"
+asset_root = "../assets"
+reward_state_root = "../reward_state"
 
 [display]
 backend = "fake"

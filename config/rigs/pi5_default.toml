@@ -1,0 +1,13 @@
+# Starting point for a new Pi 5 rig. Set connector, camera identities, and GPIO
+# wiring only after inspecting the machine. No output line is enabled here.
+[paths]
+output_root = "../../sessions"
+
+[display]
+backend = "fake"
+
+[hardware]
+backend = "simulated"
+
+[session]
+simulation = true

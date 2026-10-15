@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rpi-vstim"
 version = "0.1.0"
-description = "Pi 5 visual-stimulus suite skeleton"
+description = "Raspberry Pi 5 visual stimulus and behavioral session framework"
 requires-python = ">=3.13,<3.14"
 dependencies = []
 
