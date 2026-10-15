@@ -27,6 +27,7 @@ def main() -> None:
     display = FakeDisplayBackend() if args.display else None
     cameras = FakeLocalCameraService(config.cameras) if args.cameras else None
     status = "COMPLETE"
+    cleanup_error = None
     try:
         session.write_initial_outputs()
         session.record_event("PROTOCOL_STARTED")
@@ -36,17 +37,26 @@ def main() -> None:
         if cameras:
             cameras.start(session.context.session_root)
         session.record_event("PROTOCOL_FINISHED")
-    except (Exception, KeyboardInterrupt):
+    except KeyboardInterrupt:
         status = "ABORTED"
         raise
+    except Exception:
+        status = "FAILED"
+        raise
     finally:
-        if cameras:
-            cameras.stop()
-        if display:
-            display.close()
+        for close in (cameras.stop if cameras else None, display.close if display else None):
+            if close is None:
+                continue
+            try:
+                close()
+            except (OSError, RuntimeError) as exc:
+                cleanup_error = str(exc)
+                status = "CLEANUP_FAILED"
         if session.context.session_root.exists():
-            session.update_status(status, lifecycle=status)
+            session.update_status(status, lifecycle=status, cleanup_errors=[cleanup_error] if cleanup_error else None)
             session.close()
+    if cleanup_error:
+        raise RuntimeError(cleanup_error)
     print(session.context.session_root)
 
 

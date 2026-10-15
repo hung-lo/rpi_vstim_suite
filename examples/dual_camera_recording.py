@@ -65,6 +65,8 @@ def main() -> None:
             session.update_status(status, lifecycle=status)
             session.close()
     print(f"{status}: {session.context.session_root}")
+    if status != "COMPLETE":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

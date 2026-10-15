@@ -18,11 +18,11 @@ from .core.natural_image_demo import run_natural_image_demo
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
-from .doctor import inspect_machine
 from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
 from .display.photodiode import PhotodiodePatch
+from .doctor import inspect_machine
 from .hardware.lgpio_backend import LgpioBackend
 from .hardware.operator_bait import LgpioOperatorBaitMonitor
 from .hardware.operator_control import (

@@ -1,4 +1,6 @@
+import importlib.util
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,6 +18,10 @@ def test_profiles_load_without_hardware_or_box151_storage():
     simulation = load_config(root / "config/rigs/simulation.toml")
     box151 = load_config(root / "config/rigs/pi5_natural_image_demo.example.toml")
     assert generic.display.backend == simulation.display.backend == "fake"
+    assert generic.hardware.reward_pin_bcm == simulation.hardware.reward_pin_bcm == -1
+    assert generic.operator_controls.bait_button_gpio == -1
+    with pytest.raises(ConfigError, match="reward GPIO is unassigned"):
+        generic.hardware.output_line("reward")
     assert "/mnt/behavbox_ssd" not in str(generic.paths.output_root)
     assert box151.hardware.lick_pin_bcm == 26
     assert box151.paths.output_root == Path("/mnt/behavbox_ssd/sessions")
@@ -49,3 +55,19 @@ def test_public_session_api_finalizes_with_no_hardware(tmp_path):
     session.update_status("COMPLETE", lifecycle="COMPLETE")
     session.close()
     assert json.loads((tmp_path / "example/final_status.json").read_text())["status"] == "COMPLETE"
+
+
+def test_examples_run_with_fake_services(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[2] / "examples"
+    for name, args in (
+        ("minimal_display", []),
+        ("image_sequence", []),
+        ("minimal_session", ["--output-root", str(tmp_path), "--display", "--cameras"]),
+    ):
+        spec = importlib.util.spec_from_file_location(name, root / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setattr(sys, "argv", [name, *args])
+        module.main()
+    assert (tmp_path / "minimal-session/final_status.json").is_file()
+    assert (tmp_path / "minimal-session/camera_manifest.json").is_file()

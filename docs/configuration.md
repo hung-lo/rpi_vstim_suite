@@ -18,6 +18,12 @@ display combinations, and incompatible experimental/simulation settings.
 Live connectors and cameras are checked by discovery or at run time. Box151
 production output is checked against its mounted NVMe before acquisition.
 Generic profiles can point at any writable directory.
+The supplied neutral profiles use temporary output for safe learning; choose
+a persistent storage root before collecting real data. Package defaults use
+`~/rpi_vstim/` and never point into the checkout.
+
+Generic and simulation profiles set GPIO roles to `-1` (unassigned). Fill
+verified BCM numbers before using those inputs or outputs on a new rig.
 
 The inherited hardware dataclass contains the lab GPIO map for compatibility.
 It does not claim or drive pins until a service is explicitly started. For a

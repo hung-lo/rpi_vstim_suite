@@ -45,10 +45,10 @@ def _legacy_reward_fields(value: Any) -> set[str]:
 
 @dataclass(frozen=True)
 class PathsConfig:
-    output_root: Path = Path("sessions")
-    cache_root: Path = Path("cache")
-    asset_root: Path = Path("assets")
-    reward_state_root: Path = Path("reward_state")
+    output_root: Path = Path.home() / "rpi_vstim" / "sessions"
+    cache_root: Path = Path.home() / "rpi_vstim" / "cache"
+    asset_root: Path = Path.home() / "rpi_vstim" / "stimulus_assets"
+    reward_state_root: Path = Path.home() / "rpi_vstim" / "reward_state"
     reward_hardware_lock_path: Path = Path("/tmp/rpi-vstim-reward.lock")
     operator_control_socket: Path = Path("/tmp/rpi-vstim-operator.sock")
     operator_event_log: Path = Path("/tmp/rpi-vstim-operator-events.jsonl")
@@ -116,6 +116,10 @@ class HardwareConfig:
         """Resolve only the supported electrical output roles from rig config."""
         from rpi_vstim.hardware.models import OutputLineConfig
 
+        if role in {"reward", "reward_left"} and self.reward_pin_bcm == -1:
+            raise ConfigError("reward GPIO is unassigned")
+        if role in {"vacuum", "suction"} and self.suction_pin_bcm == -1:
+            raise ConfigError("vacuum GPIO is unassigned")
         if role == "reward":
             return OutputLineConfig(
                 "reward_left",
@@ -244,8 +248,10 @@ class Config:
             raise ConfigError("display geometry must be positive")
         if self.photodiode.size_px <= 0 or not 0 <= self.photodiode.on_value <= 255 or not 0 <= self.photodiode.off_value <= 255:
             raise ConfigError("invalid photodiode settings")
-        if self.operator_controls.bait_button_gpio != OPERATOR_BAIT_GPIO_BCM:
+        if self.operator_controls.bait_button_gpio not in {-1, OPERATOR_BAIT_GPIO_BCM}:
             raise ConfigError("operator bait button must use canonical BCM GPIO23")
+        if self.operator_controls.bait_button_enabled and self.operator_controls.bait_button_gpio == -1:
+            raise ConfigError("enabled operator bait button requires BCM GPIO23")
         pins = {
             "reward": self.hardware.reward_pin_bcm,
             "reward_right": self.hardware.reward_right_pin_bcm,
@@ -260,8 +266,8 @@ class Config:
         if self.hardware.ttl_pin_bcm is not None:
             pins["ttl"] = self.hardware.ttl_pin_bcm
         pins["operator_bait_button"] = self.operator_controls.bait_button_gpio
-        if any(not isinstance(pin, int) or pin < 0 or pin > 27 for pin in pins.values()):
-            raise ConfigError("BCM pins must be between 0 and 27")
+        if any(not isinstance(pin, int) or pin < -1 or pin > 27 for pin in pins.values()):
+            raise ConfigError("BCM pins must be -1 (unassigned) or between 0 and 27")
         reserved = RESERVED_GPIO_BCM.intersection(pins.values())
         if reserved:
             raise ConfigError(reserved_gpio_message(min(reserved)))
@@ -284,7 +290,8 @@ class Config:
                 raise ConfigError(f"{name} must be 0, 1, or unset")
         if (self.hardware.lick_idle_level, self.hardware.lick_active_level) != (0, 1):
             raise ConfigError("lick inputs must be configured idle LOW (0) and active HIGH (1)")
-        if len(set(pins.values())) != len(pins):
+        assigned_pins = [pin for pin in pins.values() if pin != -1]
+        if len(set(assigned_pins)) != len(assigned_pins):
             raise ConfigError("GPIO pins must be unique")
         if (
             not isinstance(self.hardware.release_stable_ms, int)

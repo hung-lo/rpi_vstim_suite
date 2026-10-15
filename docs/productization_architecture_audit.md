@@ -32,3 +32,17 @@ have useful boundaries and need no restructuring. Existing docs mix current
 reference pages with historical hardware reports; the entry path needs a
 new-user guide. This pass changes callers/config profiles, CLI diagnostics,
 exports, examples, and docs while keeping validated run paths stable.
+
+## Assumption search
+
+Search terms: `Box151`, `behavbox`, `/mnt/behavbox_ssd`, `V1_2`, `GPIO9`,
+`connector42`, `connector33`, `HDMI-A-1`, `HDMI-A-2`, `/home/pi`.
+`core.natural_image_demo` and its CLI text are Box151-specific integration
+code. `core.storage` contains the intentional fail-closed Box151 NVMe guard.
+`hardware.policy` contains the intentional GPIO9 safety guard. The rig TOML
+files with fixed connectors/topology are deployment profiles. `docs/hardware`,
+the older phase pages, and archived plans are historical evidence; the new
+guides separate the generic API from that deployment. The accidental generic
+`/mnt/hd` and `/home/pi` path defaults were removed. Generic/simulation
+profiles explicitly leave GPIO roles unassigned; the inherited dataclass map
+remains for legacy config compatibility and is never acquired implicitly.

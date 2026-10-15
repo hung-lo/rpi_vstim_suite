@@ -1,8 +1,8 @@
 [paths]
-output_root = "../sessions"
-cache_root = "../cache"
-asset_root = "../assets"
-reward_state_root = "../reward_state"
+output_root = "/tmp/rpi-vstim-sessions"
+cache_root = "/tmp/rpi-vstim-cache"
+asset_root = "/tmp/rpi-vstim-assets"
+reward_state_root = "/tmp/rpi-vstim-reward-state"
 
 [display]
 backend = "fake"
