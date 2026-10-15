@@ -24,6 +24,6 @@ boundaries. `protocols.base.ExperimentProtocol` describes `build_plan` and
 can also be a normal script using the public service modules.
 
 The [natural-image protocol](../src/rpi_vstim/protocols/natural_images/) shows
-deterministic planning and selection. Its Box151 runner in
+deterministic planning and selection. Its current Pi 5 runner in
 `core.natural_image_demo` integrates KMS, cameras, licks, logs, and storage.
 Supply your own image corpus; this repository grants no dataset rights.

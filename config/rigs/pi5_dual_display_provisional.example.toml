@@ -24,9 +24,11 @@ asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
 # Prototype output-line validation only. The real reward/vacuum circuits are not attached.
 backend = "lgpio"
 chip = 0
-# Canonical lab BehavBox map: reward_left/pump1 and vacuum/pump_en.
+# Current Pi 5 rig reward_left/pump1 and vacuum/pump_en assignments.
 reward_pin_bcm = 19
 suction_pin_bcm = 25
+sound_trigger_1_pin_bcm = 23
+sound_trigger_2_pin_bcm = 24
 reward_initial_level = 0
 suction_initial_level = 0
 # Active polarity is intentionally unset until the final circuits are validated.
@@ -42,14 +44,10 @@ release_stable_ms = 25
 min_classified_lick_interval_ms = 70
 
 [operator_controls]
-# Disabled on the prototype until the conditioned button input is validated.
+# No operator button on the current Pi 5 rig; GPIO23 drives WAV Trigger input 1.
 manual_bait_enabled = false
 bait_button_enabled = false
-bait_button_gpio = 23
-# Set these only after measuring the physical button circuit:
-# bait_button_idle_level = 0
-# bait_button_active_level = 1
-# bait_reward_ul = 3.0
+bait_button_gpio = -1
 minimum_interval_ms = 1000
 bait_button_release_stable_ms = 25
 # Optional cumulative operator-bait water budget; unset means no configured cap.

@@ -12,6 +12,13 @@ require_exact_refresh = true
 refresh_tolerance_hz = 0.05
 pixel_format = "RGB565"
 
+[hardware]
+sound_trigger_1_pin_bcm = 23
+sound_trigger_2_pin_bcm = 24
+
+[operator_controls]
+bait_button_gpio = -1
+
 [cameras]
 enabled_by_default = true
 record_to_session = true

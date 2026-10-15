@@ -14,7 +14,8 @@ def test_example_toml_loads_and_preserves_sections():
     assert config.display.ownership == ""
     assert config.display.stimulus_connector == ""
     assert config.display.preview_connector is None
-    assert config.hardware.reward_pin_bcm == 19
+    assert config.hardware.reward_pin_bcm == -1
+    assert config.hardware.sound_trigger_1_pin_bcm == -1
     assert config.telemetry.port == 5055
     assert config.protocol.name == "natural-images"
 

@@ -14,4 +14,4 @@ Camera MP4 PTS is available. Per-frame camera hardware timestamps are not
 claimed. IRIG physically captured by camera/DAQ can provide independent
 absolute time for offline alignment. NeuroKairos is an optional external
 service that may continuously provide IRIG-H; VStim does not control it.
-Box151 reserves BCM GPIO9 for that sender.
+The current Pi 5 rig reserves BCM GPIO9 for that sender.

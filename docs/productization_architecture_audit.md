@@ -16,15 +16,15 @@ placeholder.
 TOML is mapped to frozen dataclasses in `core.config`. Validation already
 catches duplicate pins, reserved GPIO9, required camera identities, and
 unsafe experimental combinations. `core.storage` has generic preflight and
-a separate fail-closed Box151 NVMe check. Public package entry points are
+a separate fail-closed current Pi 5 NVMe check. Public package entry points are
 currently sparse; useful classes live in submodules. Dependency direction is
 mostly protocol/CLI to core and backends; config imports the GPIO pin policy.
 Simulation uses fake display, simulated hardware/cameras, and in-memory
 telemetry. Tests are grouped into unit, contract, integration, stress, and
 hardware directories.
 
-Box151 assumptions are concentrated in the real natural-image demo, its rig
-TOML, the production storage guard, the GPIO policy, and old default paths.
+Current Pi 5 assumptions are concentrated in the real natural-image demo, its
+rig TOML, the production storage guard, the GPIO policy, and old default paths.
 Pi-specific backends are imported without acquiring devices; actual access
 occurs only on explicit run/probe. The generic default paths and stale docs
 need cleanup. The validated KMS, camera, event, and storage internals already
@@ -37,8 +37,12 @@ exports, examples, and docs while keeping validated run paths stable.
 
 Search terms: `Box151`, `behavbox`, `/mnt/behavbox_ssd`, `V1_2`, `GPIO9`,
 `connector42`, `connector33`, `HDMI-A-1`, `HDMI-A-2`, `/home/pi`.
-`core.natural_image_demo` and its CLI text are Box151-specific integration
-code. `core.storage` contains the intentional fail-closed Box151 NVMe guard.
+Box151 is the older 2-photon rig and appears legitimately in the legacy Pi 4
+profile, reference calibration, and archived planning documents. The first
+productization draft incorrectly applied that name to the current Pi 5 rig;
+the correction pass removed those uses. `core.natural_image_demo` and its CLI
+text are current Pi 5 integration code. `core.storage` contains the
+intentional fail-closed current-rig NVMe guard.
 `hardware.policy` contains the intentional GPIO9 safety guard. The rig TOML
 files with fixed connectors/topology are deployment profiles. `docs/hardware`,
 the older phase pages, and archived plans are historical evidence; the new
@@ -46,3 +50,6 @@ guides separate the generic API from that deployment. The accidental generic
 `/mnt/hd` and `/home/pi` path defaults were removed. Generic/simulation
 profiles explicitly leave GPIO roles unassigned; the inherited dataclass map
 remains for legacy config compatibility and is never acquired implicitly.
+Current-rig profiles assign GPIO23/24 to Robertsonics WAV Trigger inputs,
+leave the legacy GPIO23 operator button unassigned, and never claim the sound
+pins during a VStim session.

@@ -122,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     operator_bait.add_argument("--config", type=Path)
     operator_bait.add_argument("--json", action="store_true", dest="as_json")
     operator_service = operator_commands.add_parser(
-        "service", help="run the GPIO23/keyboard/manual-bait service"
+        "service", help="run legacy GPIO23 or keyboard manual-bait controls"
     )
     operator_service.add_argument("--config", type=Path)
     operator_service.add_argument("--session-id", default="operator-control")
@@ -135,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     water_prime.add_argument("--config", type=Path)
     water_prime.add_argument("--json", action="store_true", dest="as_json")
     water_service = water_commands.add_parser(
-        "service", help="hold GPIO23 to open reward_left for plumbing service"
+        "service", help="legacy GPIO23 button plumbing service (not current Pi 5 rig)"
     )
     water_service.add_argument("--config", type=Path)
 
@@ -339,6 +339,10 @@ def _run_water_service(args: argparse.Namespace) -> int:
     stopped = False
     try:
         config = load_config(args.config)
+        controls = config.operator_controls
+        validate_service_button_gpio(controls.bait_button_gpio)
+        if controls.bait_button_idle_level is None or controls.bait_button_active_level is None:
+            raise ConfigError("water service requires explicit GPIO23 idle and active levels")
         backend = LgpioBackend(
             config.hardware,
             roles=("reward_left",),
@@ -347,10 +351,6 @@ def _run_water_service(args: argparse.Namespace) -> int:
         backend.start()
         logger = JsonlEventLog(config.paths.operator_event_log)
         controller = WaterServiceController(backend, config.hardware, event_sink=logger)
-        controls = config.operator_controls
-        validate_service_button_gpio(controls.bait_button_gpio)
-        if controls.bait_button_idle_level is None or controls.bait_button_active_level is None:
-            raise ConfigError("water service requires explicit GPIO23 idle and active levels")
         hold = WaterHoldStateMachine(
             controller,
             idle_level=controls.bait_button_idle_level,

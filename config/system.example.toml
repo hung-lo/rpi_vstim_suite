@@ -27,12 +27,19 @@ on_value = 255
 off_value = 0
 
 [gpio]
-backend = "lgpio"
+backend = "simulated"
 chip = 0
-reward_pin_bcm = 19
-suction_pin_bcm = 25
-lick_pin_bcm = 26
-lick_right_pin_bcm = 27
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
 lick_idle_level = 0
 lick_active_level = 1
 release_stable_ms = 25
@@ -41,11 +48,8 @@ min_classified_lick_interval_ms = 70
 [operator_controls]
 manual_bait_enabled = false
 bait_button_enabled = false
-bait_button_gpio = 23
-# Configure measured button polarity before enabling:
-# bait_button_idle_level = 0
-# bait_button_active_level = 1
-# bait_reward_ul = 3.0
+bait_button_gpio = -1
+# No physical button is assigned in this generic example.
 minimum_interval_ms = 1000
 bait_button_release_stable_ms = 25
 # Optional cumulative operator-bait water budget; unset means no configured cap.

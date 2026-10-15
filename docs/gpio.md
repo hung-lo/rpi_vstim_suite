@@ -6,13 +6,17 @@ pins. Validation rejects duplicates and preserves the exact guard:
 [gpio_input.py](../examples/gpio_input.py) requires an explicit input pin and
 records edges without driving outputs.
 
-Box151: licks are GPIO26 left, 27 right, 15 center; reward/pump lines are
-19/20/21/7, airpuff 8, vacuum 25, operator button 23. GPIO24 is unused
-trigger_out; GPIO4/10 are user pins and GPIO11 is header-only. GPIO9 belongs
-exclusively to NeuroKairos. The left/right software lick path and physical
+Current Pi 5 rig: licks are GPIO26 left, 27 right, 15 center; reward/pump
+lines are 19/20/21/7, airpuff 8, vacuum 25. GPIO23 is
+`sound_trigger_1` and GPIO24 is `sound_trigger_2` for the Robertsonics WAV
+Trigger. They are not claimed or driven by VStim yet. The actual WAV files
+depend on the sound board's SD-card/configuration. GPIO4/10 are user pins;
+GPIO11 is header-only. GPIO9 belongs exclusively to NeuroKairos. The
+left/right software lick path and physical
 26/27 inputs were tested; center remains less validated. Reward/vacuum
 software and line-level checks exist; complete fluidics, spout, water
 calibration, and vacuum plumbing remain deployment-specific.
 
-No example automatically toggles reward, vacuum, airpuff, or GPIO9. Output
+No example automatically toggles reward, vacuum, airpuff, sound triggers, or
+GPIO9. Output
 control requires an explicit calibrated hardware task.

@@ -254,6 +254,7 @@ def test_physical_and_terminal_requests_share_service_global_ids():
             base.operator_controls,
             manual_bait_enabled=True,
             bait_button_enabled=True,
+            bait_button_gpio=23,
             bait_button_idle_level=0,
             bait_button_active_level=1,
             bait_reward_ul=3.0,
@@ -439,5 +440,5 @@ def test_gpio9_is_rejected_for_button_or_normal_outputs():
         config_from_mapping({"hardware": {"ttl_pin_bcm": 9}})
     config = config_from_mapping({"hardware": {"ttl_pin_bcm": 24}})
     assert config.hardware.ttl_pin_bcm == 24
-    with pytest.raises(ValueError, match="GPIO24.*trigger_out"):
+    with pytest.raises(ValueError, match="GPIO24.*sound_trigger_2"):
         config_from_mapping({"hardware": {"reward_pin_bcm": 24}})

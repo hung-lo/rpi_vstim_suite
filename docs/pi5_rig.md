@@ -1,4 +1,4 @@
-# Box151 deployment
+# Current Pi 5 deployment
 
 The validated real runner uses
 `config/rigs/pi5_natural_image_demo.example.toml`: leased KMS on HDMI-A-2,
@@ -11,8 +11,14 @@ rpi-vstim natural-images run --mouse-id <id> --config config/rigs/pi5_natural_im
 
 It requires a user-supplied natural-image corpus. The 2,800-image dataset
 used in validation is not redistributed or assigned a license here. The
-production storage guard checks the Box151 NVMe and aborts on mismatch.
+production storage guard checks this rig's NVMe and aborts on mismatch.
 Reward, vacuum, and airpuff stay disabled in this demo.
+
+BCM GPIO23 and GPIO24 connect to Robertsonics WAV Trigger external inputs 1
+and 2. They are configured as `sound_trigger_1` and `sound_trigger_2`, but
+VStim does not claim or pulse them yet. The sound associated with each input
+depends on the WAV Trigger SD-card/configuration; neither is assigned a
+protocol cue here. There is no GPIO23 operator bait button on this rig.
 
 NeuroKairos is an [external service](https://github.com/SjulsonLab/neurokairos),
 optional to VStim. It and chrony may continuously send IRIG-H through BCM

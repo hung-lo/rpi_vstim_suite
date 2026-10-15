@@ -176,7 +176,7 @@ def send_manual_bait(path: Path, *, timeout_s: float = 1.0) -> dict[str, object]
 
 
 class OperatorControlService:
-    """One owner for GPIO19, GPIO23, bait accounting, keyboard, and IPC."""
+    """Legacy optional button, reward ownership, bait accounting, keyboard, and IPC."""
 
     def __init__(
         self,

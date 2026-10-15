@@ -17,6 +17,8 @@ suction_pin_bcm = -1
 lick_pin_bcm = -1
 lick_right_pin_bcm = -1
 lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
 
 [operator_controls]
 bait_button_gpio = -1

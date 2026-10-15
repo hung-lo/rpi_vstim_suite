@@ -1,4 +1,4 @@
-# Box151 validated deployment profile for the real Pi 5 integrated runner.
+# Current Pi 5 rig deployment profile for the integrated runner.
 # This profile writes production sessions directly to the NVMe-backed root.
 # BCM GPIO9 is reserved exclusively for NeuroKairos IRIG; do not assign it.
 
@@ -32,12 +32,20 @@ reward_center_pin_bcm = 21
 reward_4_pin_bcm = 7
 airpuff_pin_bcm = 8
 suction_pin_bcm = 25
-# GPIO23 operator button; GPIO24 trigger_out is currently unused.
+# Robertsonics WAV Trigger inputs; this suite does not drive them yet.
+sound_trigger_1_pin_bcm = 23
+sound_trigger_2_pin_bcm = 24
 # GPIO4/10 are user pins; GPIO11 is header-only.
 lick_idle_level = 0
 lick_active_level = 1
 release_stable_ms = 25
 min_classified_lick_interval_ms = 70
+
+[operator_controls]
+# GPIO23 is sound_trigger_1 here, never an operator bait button.
+manual_bait_enabled = false
+bait_button_enabled = false
+bait_button_gpio = -1
 
 [cameras]
 enabled_by_default = false

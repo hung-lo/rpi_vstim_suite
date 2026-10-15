@@ -1,5 +1,8 @@
 # Pi 5 GPIO/reward preflight — 2026-09-26
 
+Historical source audit. Current Pi 5 GPIO23/24 roles are WAV Trigger inputs
+1 and 2; see [current GPIO mapping](../gpio.md).
+
 This is a read-only source audit for Monday’s hardware bring-up. No GPIO was
 exported, claimed, toggled, or electrically probed during the audit. The
 following is source evidence, not confirmation that the harness is wired this

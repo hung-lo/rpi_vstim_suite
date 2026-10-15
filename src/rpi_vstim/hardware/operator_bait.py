@@ -1,4 +1,4 @@
-"""GPIO23 operator bait input with explicit polarity and re-arm state."""
+"""Legacy opt-in GPIO23 operator bait input with explicit polarity and re-arm state."""
 
 from __future__ import annotations
 

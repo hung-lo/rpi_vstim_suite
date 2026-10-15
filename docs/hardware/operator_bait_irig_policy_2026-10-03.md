@@ -1,5 +1,10 @@
 # Operator bait button and GPIO9 IRIG reservation
 
+Historical software design record. On the current Pi 5 rig, GPIO23 and
+GPIO24 are Robertsonics WAV Trigger inputs 1 and 2. The operator-button
+assignment below is not a current-rig wiring instruction; see
+[current GPIO mapping](../gpio.md).
+
 ## Canonical policy
 
 The lab-wide BehavBox map is:

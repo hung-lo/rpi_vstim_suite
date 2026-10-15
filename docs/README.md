@@ -4,7 +4,7 @@ Start with [getting started](getting_started.md), then
 [configuration](configuration.md) and [writing protocols](writing_protocols.md).
 
 Reference: [timing](timing.md), [cameras](cameras.md), [GPIO](gpio.md),
-[storage](storage.md), [Box151](box151.md), [display](display_backend.md), and
+[storage](storage.md), [current Pi 5 deployment](pi5_rig.md), [display](display_backend.md), and
 [natural-image assets](natural_image_assets.md).
 
 The [architecture audit](productization_architecture_audit.md) records v0.1

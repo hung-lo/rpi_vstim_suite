@@ -32,4 +32,4 @@ The venv needs `setuptools`. For development, install `.[dev]` and run
    `rpi-vstim list-protocols` and `rpi-vstim preflight`.
 
 The fake `minimal_display.py` and `image_sequence.py` run without hardware.
-The real natural-image command is documented under [Box151](box151.md).
+The real natural-image command is documented under [current Pi 5 deployment](pi5_rig.md).

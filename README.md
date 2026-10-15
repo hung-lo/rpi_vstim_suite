@@ -43,13 +43,13 @@ progression from environment check to display, camera, GPIO, and protocol.
 
 TOML profiles select display, camera identities, GPIO wiring, and output root.
 `pi5_default.toml` and `simulation.toml` are neutral starting points;
-`pi5_natural_image_demo.example.toml` is the validated Box151 deployment
+`pi5_natural_image_demo.example.toml` is the current Pi 5 deployment
 profile. See [configuration](docs/configuration.md).
 
 Each session has a unique directory under its configured output root with
 resolved config, provenance, status, and event/display results. Camera files,
 KMS trace, stimulus plan, and image provenance are conditional. See
-[storage](docs/storage.md) for artifacts and the Box151 NVMe guard.
+[storage](docs/storage.md) for artifacts and the current rig's NVMe guard.
 
 ## Timing, cameras, and GPIO
 
@@ -64,7 +64,8 @@ bounded fast MP4 QC. `rpi-vstim inspect-session PATH --deep-camera-qc` performs
 slower offline counting. See [cameras](docs/cameras.md).
 
 GPIO is configured per rig. Doctor never claims pins; input examples require
-an explicit pin. Box151 reserves BCM GPIO9 for external NeuroKairos IRIG. See
+an explicit pin. The current rig reserves BCM GPIO9 for external NeuroKairos
+IRIG and assigns GPIO23/24 to WAV Trigger inputs. See
 [GPIO](docs/gpio.md).
 
 ## Protocols and validation
@@ -74,7 +75,7 @@ and explains planning, services, events, Ctrl-C, and finalization. The
 natural-image runner is an integrated protocol; users supply their own corpus
 as described in [natural-image assets](docs/natural_image_assets.md).
 
-[Box151 deployment](docs/box151.md) and [hardware records](docs/hardware/)
+[current Pi 5 deployment](docs/pi5_rig.md) and [hardware records](docs/hardware/)
 describe validation. Fluidics, final spout construction, and animal reward
 calibration remain rig-specific. NeuroKairos is an optional external service;
 VStim never starts it or acquires GPIO9.

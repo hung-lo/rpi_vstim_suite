@@ -32,6 +32,7 @@ timestamp, and command/session/trial identity; off/complete events also carry
 the measured software ON interval. Raw GPIO transitions are not represented as
 a six-pulse behavioral reward.
 
-An operator bait press is logged as `manual_bait_request` before the same reward
-event sequence. Its GPIO23 input identity and request timestamp remain separate
-from the GPIO19 delivery events.
+In legacy operator-button configurations, an operator bait press is logged as
+`manual_bait_request` before the same reward event sequence. Its input
+identity and request timestamp remain separate from GPIO19 delivery events.
+The current Pi 5 rig assigns GPIO23/24 to sound trigger inputs instead.

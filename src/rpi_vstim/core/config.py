@@ -15,7 +15,8 @@ from rpi_vstim.hardware.policy import (
     LICK_CENTER_GPIO_BCM,
     OPERATOR_BAIT_GPIO_BCM,
     RESERVED_GPIO_BCM,
-    TRIGGER_OUT_GPIO_BCM,
+    SOUND_TRIGGER_1_GPIO_BCM,
+    SOUND_TRIGGER_2_GPIO_BCM,
     reserved_gpio_message,
 )
 
@@ -109,6 +110,8 @@ class HardwareConfig:
     lick_idle_level: int = 0
     lick_active_level: int = 1
     ttl_pin_bcm: int | None = None
+    sound_trigger_1_pin_bcm: int = -1
+    sound_trigger_2_pin_bcm: int = -1
     release_stable_ms: int = RELEASE_STABLE_MS
     min_classified_lick_interval_ms: int = MIN_CLASSIFIED_LICK_INTERVAL_MS
 
@@ -145,7 +148,7 @@ class HardwareConfig:
 class OperatorControlsConfig:
     manual_bait_enabled: bool = False
     bait_button_enabled: bool = False
-    bait_button_gpio: int = OPERATOR_BAIT_GPIO_BCM
+    bait_button_gpio: int = -1
     bait_button_idle_level: int | None = None
     bait_button_active_level: int | None = None
     bait_reward_ul: float | None = None
@@ -250,8 +253,6 @@ class Config:
             raise ConfigError("invalid photodiode settings")
         if self.operator_controls.bait_button_gpio not in {-1, OPERATOR_BAIT_GPIO_BCM}:
             raise ConfigError("operator bait button must use canonical BCM GPIO23")
-        if self.operator_controls.bait_button_enabled and self.operator_controls.bait_button_gpio == -1:
-            raise ConfigError("enabled operator bait button requires BCM GPIO23")
         pins = {
             "reward": self.hardware.reward_pin_bcm,
             "reward_right": self.hardware.reward_right_pin_bcm,
@@ -265,17 +266,20 @@ class Config:
         }
         if self.hardware.ttl_pin_bcm is not None:
             pins["ttl"] = self.hardware.ttl_pin_bcm
+        pins["sound_trigger_1"] = self.hardware.sound_trigger_1_pin_bcm
+        pins["sound_trigger_2"] = self.hardware.sound_trigger_2_pin_bcm
         pins["operator_bait_button"] = self.operator_controls.bait_button_gpio
         if any(not isinstance(pin, int) or pin < -1 or pin > 27 for pin in pins.values()):
             raise ConfigError("BCM pins must be -1 (unassigned) or between 0 and 27")
         reserved = RESERVED_GPIO_BCM.intersection(pins.values())
         if reserved:
             raise ConfigError(reserved_gpio_message(min(reserved)))
-        if any(
-            name != "ttl" and pin == TRIGGER_OUT_GPIO_BCM
-            for name, pin in pins.items()
+        for pin, roles in (
+            (SOUND_TRIGGER_1_GPIO_BCM, {"sound_trigger_1", "operator_bait_button"}),
+            (SOUND_TRIGGER_2_GPIO_BCM, {"sound_trigger_2", "ttl"}),
         ):
-            raise ConfigError(reserved_gpio_message(TRIGGER_OUT_GPIO_BCM))
+            if any(name not in roles and assigned == pin for name, assigned in pins.items()):
+                raise ConfigError(reserved_gpio_message(pin))
         for name, level in {
             "reward_initial_level": self.hardware.reward_initial_level,
             "suction_initial_level": self.hardware.suction_initial_level,
@@ -334,6 +338,8 @@ class Config:
                 raise ConfigError(
                     "enabled operator bait button requires explicit idle and active levels"
                 )
+            if controls.bait_button_gpio == -1:
+                raise ConfigError("enabled operator bait button requires BCM GPIO23")
             if controls.bait_button_idle_level == controls.bait_button_active_level:
                 raise ConfigError("operator bait button idle and active levels must differ")
             if not controls.manual_bait_enabled:

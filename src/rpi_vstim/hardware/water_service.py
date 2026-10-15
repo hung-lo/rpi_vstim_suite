@@ -190,7 +190,7 @@ class WaterServiceController:
 
 
 class WaterHoldStateMachine:
-    """Debounce GPIO23 for physical hold-to-open service mode."""
+    """Debounce the legacy GPIO23 physical hold-to-open service button."""
 
     def __init__(
         self,
