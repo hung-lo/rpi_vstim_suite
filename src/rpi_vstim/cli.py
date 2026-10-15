@@ -18,6 +18,7 @@ from .core.natural_image_demo import run_natural_image_demo
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
+from .doctor import inspect_machine
 from .display.diagnostics import DisplayProbeError, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
@@ -68,7 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_session.add_argument("path", type=Path)
     validate_session.add_argument("--json", action="store_true", dest="as_json")
-    doctor = commands.add_parser("doctor", help="show Phase 00 diagnostic status")
+    doctor = commands.add_parser("doctor", help="inspect machine capabilities without changing them")
+    doctor.add_argument("--config", type=Path, help="TOML profile for the output root")
     doctor.add_argument("--json", action="store_true", dest="as_json")
 
     telemetry = commands.add_parser("telemetry", help="local telemetry transport checks")
@@ -197,18 +199,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _doctor(as_json: bool) -> int:
-    result = {
-        "phase": "00",
-        "status": "skeleton",
-        "hardware_access": False,
-        "message": "No hardware, display, camera, GPIO, or network telemetry access is performed.",
-    }
+def _doctor(config_path: Path | None, as_json: bool) -> int:
+    try:
+        result = inspect_machine(load_config(config_path))
+    except (ConfigError, OSError, ValueError) as exc:
+        print(f"doctor invalid: {exc}", file=sys.stderr)
+        return 2
     if as_json:
-        print(json.dumps(result, sort_keys=True))
+        print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print("rpi-vstim Phase 00 skeleton")
-        print(result["message"])
+        for key, value in result.items():
+            print(f"{key}: {json.dumps(value, sort_keys=True)}")
     return 0
 
 
@@ -418,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True) if args.as_json else _format_inspection(report))
         return 1 if report["corrupt_artifacts"] else 0
     if args.command == "doctor":
-        return _doctor(args.as_json)
+        return _doctor(args.config, args.as_json)
     if args.command == "telemetry" and args.telemetry_command == "demo":
         try:
             payload = _telemetry_demo(args.messages)
