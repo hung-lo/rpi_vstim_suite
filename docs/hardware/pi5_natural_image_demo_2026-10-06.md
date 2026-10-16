@@ -1,9 +1,9 @@
 # Pi 5 natural-image demo validation — 2026-10-06
 
-Branch: `codex/pre-hardware-rc-hardening`  
-Demo commit deployed: `79af73f`  
-Pi: `pi@10.42.84.10`  
-Stimulus: HDMI-A-2 / DRM connector 42  
+Branch: `codex/pre-hardware-rc-hardening`
+Demo commit deployed: `79af73f`
+Pi: `pi@10.42.84.10`
+Stimulus: HDMI-A-2 / DRM connector 42
 Camera monitor: HDMI-A-1 / DRM connector 33
 
 ## Pre-SSD cleanup update — 2026-10-07
