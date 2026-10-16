@@ -6,6 +6,7 @@ import threading
 import time
 from collections import Counter
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,12 @@ from rpi_vstim.audio import (
     select_output_device,
 )
 from rpi_vstim.core.config import load_config
+from rpi_vstim.core.natural_image_demo import (
+    AudioCoexistenceSettings,
+    _play_coexistence_audio,
+    build_audio_coexistence_plan,
+)
+from rpi_vstim.core.unified_events import SessionClock, UnifiedEventStream
 from rpi_vstim.protocols.audio_pilot import AudioPilotSettings, build_plan, run_audio_pilot
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +44,54 @@ def test_plan_is_balanced_deterministic_and_bounded():
     assert all(1.0 <= trial.iti_after_s <= 2.0 for trial in first[:-1])
     assert first[-1].iti_after_s == 0
     assert len(build_plan(replace(settings, repeats_per_stimulus=2))) == 6
+
+
+def test_coexistence_schedule_is_fixed_and_fits_two_minute_plan():
+    clips = load_pilot_clips(ASSETS)
+    settings = AudioCoexistenceSettings("USB Audio Device")
+    schedule = build_audio_coexistence_plan(120.645, clips, settings)
+    assert [trial.stimulus_id for trial in schedule] == [
+        "beep", "buzz", "white_noise", "beep", "buzz", "white_noise", "beep", "buzz",
+    ]
+    assert [trial.planned_offset_s for trial in schedule] == list(range(10, 116, 15))
+    assert all(clips[trial.stimulus_id].duration_s == 3.0 for trial in schedule)
+    assert all(
+        later.planned_offset_s >= earlier.planned_offset_s + 3.0
+        for earlier, later in pairwise(schedule)
+    )
+    assert build_audio_coexistence_plan(12.9, clips, settings) == ()
+
+
+def test_coexistence_fake_playback_logs_request_callback_and_end(tmp_path):
+    clips = load_pilot_clips(ASSETS)
+    settings = AudioCoexistenceSettings("USB Audio Device", start_delay_s=0, interval_s=3)
+    schedule = build_audio_coexistence_plan(9, clips, settings)
+    audio = FakeAudio()
+    audio.prepare(clips, settings.gains_db)
+    session_id = "audio-coexistence-test"
+    events = UnifiedEventStream(
+        tmp_path / "events.jsonl", session_id=session_id, clock=SessionClock.start(session_id)
+    )
+    latencies = []
+    requests = []
+    errors = []
+    _play_coexistence_audio(
+        audio, schedule, events, events.clock,
+        time.monotonic_ns() - 10_000_000_000, threading.Event(), latencies, requests, errors,
+    )
+    diagnostics = events.close()
+    records = [
+        json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()
+    ]
+    assert diagnostics["dropped_count"] == diagnostics["error_count"] == 0
+    assert audio.played == [trial.stimulus_id for trial in schedule]
+    assert requests == [1, 2, 3] and len(latencies) == 3 and not errors
+    assert [record["event"] for record in records] == [
+        "AUDIO_TRIAL_START", "AUDIO_REQUEST", "AUDIO_CALLBACK_START", "AUDIO_TRIAL_END",
+    ] * 3
+    callback = next(record for record in records if record["event"] == "AUDIO_CALLBACK_START")
+    assert callback["callback_semantics"] == "PCM callback start; not physical acoustic onset"
+    assert callback["monotonic_ns"] > 0 and callback["utc_ns"] > 0
 
 
 def test_assets_preload_and_fake_session(tmp_path):
