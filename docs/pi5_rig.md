@@ -1,22 +1,29 @@
 # Current Pi 5 deployment
 
+This is the current Pi 5 rig, not the older Box151 2-photon rig.
+
 The validated real runner uses
 `config/rigs/pi5_natural_image_demo.example.toml`: leased KMS on HDMI-A-2,
 optional preview on HDMI-A-1, two topology-identified CSI cameras, BCM26/27
-licks, and direct NVMe output. The real command is:
+lick inputs, and direct NVMe output. The checkout contains the 2,800-image
+corpus at `assets/natural_images/stringer_natimg2800_center_crop/`. The real
+command is:
 
 ```bash
 rpi-vstim natural-images run --mouse-id <id> --config config/rigs/pi5_natural_image_demo.example.toml --licks --cameras --camera-preview
 ```
 
-It requires a user-supplied natural-image corpus. The 2,800-image dataset
-used in validation is not redistributed or assigned a license here. The
-production storage guard checks this rig's NVMe and aborts on mismatch.
+The corpus is present in this checkout at the path above; the repository does
+not establish its licensing terms. Verify those terms before redistribution
+outside the lab. The production storage guard checks this rig's NVMe and
+aborts on mismatch.
 Reward, vacuum, and airpuff stay disabled in this demo.
 
 BCM GPIO23 and GPIO24 are unassigned on this rig. There is no GPIO23 operator
-bait button. Audio currently uses a Pi 5 USB audio adapter, its 3.5 mm analog
-output, and a speaker. No VStim audio backend is installed or enabled.
+bait button. Audio uses a C-Media Electronics / Unitek Y-247A USB adapter,
+3.5 mm analog output, and a speaker. The repository now includes an optional
+persistent `sounddevice`/PortAudio playback backend and an audio-only pilot;
+audio uses no GPIO pins.
 
 ## Provisional USB audio characterization
 
@@ -33,21 +40,27 @@ zero requests.
 
 A phone recording of the speaker showed stable acoustic onset at the few-ms
 level with no missing beeps. This standalone variability was below one
-approximately 16.7 ms display frame at 60 Hz. Absolute command-to-acoustic
-latency has not been measured. This is provisional hardware characterization,
-not full-stack validation; VStim with KMS, cameras, logging, and NeuroKairos
-coexistence remains to be tested. ALSA card numbering may change between
-boots. Audio implementation is a separate follow-up.
+approximately 16.7 ms display frame at 60 Hz. The separate six-trial
+audio-only pilot smoke completed as session
+`audio-pilot-20261016T141736972643Z` with status `COMPLETE`: six requests, six
+callback starts, zero missed requests, and zero callback status errors. These
+software counters do not establish that every sound was acoustically heard.
+Absolute command-to-acoustic latency has not been measured. This is provisional
+standalone characterization, not full-stack validation; VStim with KMS,
+cameras, event logging, NVMe, and NeuroKairos coexistence remains pending.
+ALSA card numbering may change between boots. The configured device-name match
+fails if zero or multiple playback devices match.
 
 The [three-second pilot stimulus set](../assets/audio/pilot/README.md) provides
-reproducible engineering WAVs for that upcoming integration work. Its duration
-matches the current Go/NoGo sound presentation duration; animal-facing SPL
-and loudness calibration remains required.
+reproducible engineering WAVs. Its duration matches the current Go/NoGo sound
+presentation duration; equal digital RMS does not imply equal perceived
+loudness, and animal-facing SPL calibration remains required.
 
 NeuroKairos is an [external service](https://github.com/SjulsonLab/neurokairos),
-optional to VStim. It and chrony may continuously send IRIG-H through BCM
-GPIO9. VStim neither starts/stops that sender nor acquires GPIO9. Offline
-UTC/IRIG alignment is possible when the signal is physically recorded.
+optional to VStim. Its sender can provide IRIG-H through BCM GPIO9; chrony is
+a separate optional system-clock synchronization service. VStim neither
+starts/stops the sender nor acquires GPIO9. Offline UTC/IRIG alignment is
+possible when the signal is physically recorded.
 
 The [hardware records](hardware/) document display, camera, NVMe, lick,
 events, timing, thermal/power, and restoration validation. Final spout,

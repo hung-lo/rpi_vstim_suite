@@ -5,6 +5,11 @@ the existing natural-image planner, continuous leased KMS renderer, dual lick
 monitor, camera supervisor, session output, and bounded event handoff. It is a
 demo/validation runner, not the final production animal-data session runner.
 
+The checkout contains the 2,800-image corpus at
+`assets/natural_images/stringer_natimg2800_center_crop/`, which is the path
+used by the Pi 5 profile. This repository does not establish the corpus's
+licensing terms; verify them before redistribution outside the lab.
+
 On the production Pi, the bundled profile writes directly to the mounted NVMe
 filesystem at `/mnt/behavbox_ssd/sessions` (not to the checkout or SD card):
 

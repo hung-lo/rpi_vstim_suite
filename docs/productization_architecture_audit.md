@@ -52,4 +52,15 @@ profiles explicitly leave GPIO roles unassigned; the inherited dataclass map
 remains for legacy config compatibility and is never acquired implicitly.
 Current-rig profiles leave GPIO23/24 and the legacy GPIO23 operator button
 unassigned. The current audio path uses a USB adapter; no audio backend is
-part of this productization pass.
+part of the original productization audit.
+
+## Audio pilot follow-up — 2026-10-16
+
+Later commits added a small `rpi_vstim.audio` interface backed optionally by
+`sounddevice`/PortAudio and an audio-only pilot protocol. It preloads the
+three committed WAVs into memory and keeps one output stream open. The current
+Pi 5 rig uses a USB audio adapter; GPIO23 and GPIO24 remain unassigned and
+have no audio role. Standalone USB playback has been characterized, but
+coexistence with KMS, dual cameras, event logging, NVMe, and NeuroKairos has
+not yet been validated. This remains a follow-up gate, not an implication of
+the original productization audit.
