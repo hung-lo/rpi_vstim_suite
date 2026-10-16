@@ -9,9 +9,11 @@ import socket
 import sys
 import time
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__
+from .audio import AudioError, FakeAudio, SoundDeviceAudio
 from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
 from .core.natural_image_demo import run_natural_image_demo
@@ -38,6 +40,7 @@ from .hardware.water_service import (
     validate_service_seconds,
 )
 from .protocols import available_protocols, get_protocol
+from .protocols.audio_pilot import AudioPilotSettings, run_audio_pilot
 from .telemetry.benchmark import run_benchmark
 from .telemetry.payloads import TelemetryMessage
 from .telemetry.publisher import UdpTelemetryPublisher
@@ -180,6 +183,16 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument("--camera-preview", action="store_true")
     natural_image_run.add_argument("--native-binary", type=Path)
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
+
+    audio_pilot = commands.add_parser("audio-pilot", help="run the engineering USB-audio pilot")
+    audio_pilot.add_argument("--config", type=Path, default=Path(__file__).resolve().parents[2]
+                             / "config/rigs/pi5_audio_pilot.example.toml")
+    audio_pilot.add_argument("--output-root", type=Path)
+    audio_pilot.add_argument("--session-id")
+    audio_pilot.add_argument("--seed", type=int)
+    audio_pilot.add_argument("--smoke", action="store_true", help="2 repeats per sound (6 trials)")
+    audio_pilot.add_argument("--simulate", action="store_true", help="use fake audio without waiting")
+    audio_pilot.add_argument("--json", action="store_true", dest="as_json")
 
     virtual = commands.add_parser("virtual-run", help="run a production-shaped virtual rig")
     virtual.add_argument("protocol", choices=[p.name for p in available_protocols()])
@@ -396,6 +409,29 @@ def _run_water_service(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "audio-pilot":
+        try:
+            config = load_config(args.config)
+            if config.protocol.name != "audio-pilot":
+                raise ConfigError("audio-pilot config must set protocol.name = 'audio-pilot'")
+            settings = AudioPilotSettings.from_config(config)
+            if args.seed is not None:
+                settings = replace(settings, seed=args.seed)
+            if args.smoke:
+                settings = replace(settings, repeats_per_stimulus=2)
+            if args.output_root is not None:
+                config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+            config = replace(config, session=replace(config.session, simulation=args.simulate))
+            session_id = args.session_id or datetime.now(UTC).strftime("audio-pilot-%Y%m%dT%H%M%S%fZ")
+            audio = FakeAudio() if args.simulate else SoundDeviceAudio(settings.device_name_match)
+            result = run_audio_pilot(config, settings, audio, session_id=session_id,
+                                     sleep=(lambda _seconds: None) if args.simulate else time.sleep)
+        except (AudioError, ConfigError, OSError, TypeError, ValueError, RuntimeError,
+                KeyboardInterrupt) as exc:
+            print(f"audio pilot failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(result, indent=2, sort_keys=True) if args.as_json else result)
+        return 0
     if args.command == "list-protocols":
         for protocol in available_protocols():
             print(f"{protocol.name}\t{protocol.status}")

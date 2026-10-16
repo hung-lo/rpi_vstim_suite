@@ -69,8 +69,9 @@ IRIG; GPIO23/24 are unassigned. Audio currently uses a USB adapter. See
 [GPIO](docs/gpio.md).
 
 Three reproducible [pilot audio stimuli](assets/audio/pilot/README.md) are
-available for future USB-audio integration tests; this release has no audio
-playback backend.
+available for USB-audio integration tests. The optional
+[audio-only pilot](docs/audio_pilot.md) uses a persistent stream and leaves
+display, camera, and GPIO services idle.
 
 ## Protocols and validation
 

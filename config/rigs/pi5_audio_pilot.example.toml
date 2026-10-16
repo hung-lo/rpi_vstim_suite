@@ -1,0 +1,38 @@
+# Engineering USB-audio pilot. No display, camera, or GPIO hardware is opened.
+[paths]
+output_root = "/tmp/rpi-vstim-audio-sessions"
+
+[hardware]
+backend = "simulated"
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+
+[session]
+simulation = false
+
+[protocol]
+name = "audio-pilot"
+version = "0.1"
+
+[protocol.parameters]
+device_name_match = "USB Audio Device"
+repeats_per_stimulus = 10
+seed = 20261015
+iti_min_s = 1.0
+iti_max_s = 2.0
+initial_silence_s = 3.0
+final_silence_s = 3.0
+
+[protocol.parameters.gains_db]
+beep = 0.0
+buzz = 0.0
+white_noise = 0.0
