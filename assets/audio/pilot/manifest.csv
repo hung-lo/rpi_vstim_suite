@@ -1,0 +1,4 @@
+stimulus_id,filename,description,sample_rate_hz,duration_s,channels,pcm_bits,target_rms,measured_rms,peak,fade_ms,sha256
+beep,beep_1khz_3s.wav,1 kHz sine tone,48000,3.000,1,16,0.180000,0.18000124,0.25509644,10,3a8a93066cbfe9322d56fe8964a901294a04532b3243017c38b09919371ccccc
+buzz,buzz_200hz_harmonic_3s.wav,200 Hz harmonic-complex buzz,48000,3.000,1,16,0.180000,0.17999936,0.33303833,10,bea37fa113ceb42b5b0b7948749a928105636d388f994121e855c386c4a8c655
+white_noise,white_noise_3s.wav,Broadband white noise,48000,3.000,1,16,0.180000,0.17999998,0.31253052,10,c1ad45eebfb351e2764277125e1181b35e344ef6dc824cee551bbe9f76675d33

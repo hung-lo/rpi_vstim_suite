@@ -39,6 +39,11 @@ not full-stack validation; VStim with KMS, cameras, logging, and NeuroKairos
 coexistence remains to be tested. ALSA card numbering may change between
 boots. Audio implementation is a separate follow-up.
 
+The [three-second pilot stimulus set](../assets/audio/pilot/README.md) provides
+reproducible engineering WAVs for that upcoming integration work. Its duration
+matches the current Go/NoGo sound presentation duration; animal-facing SPL
+and loudness calibration remains required.
+
 NeuroKairos is an [external service](https://github.com/SjulsonLab/neurokairos),
 optional to VStim. It and chrony may continuously send IRIG-H through BCM
 GPIO9. VStim neither starts/stops that sender nor acquires GPIO9. Offline
