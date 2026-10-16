@@ -1,0 +1,56 @@
+# Physically verified roles on the 2026-09-25 Pi.
+# Replace connector names without changing protocol code if cables are swapped.
+[display]
+backend = "kms"
+ownership = "lease"
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
+width_px = 1024
+height_px = 600
+refresh_hz = 59.82
+require_exact_refresh = true
+refresh_tolerance_hz = 0.05
+pixel_format = "RGB565"
+calibration_id = ""
+physical_width_cm = 15.40
+physical_height_cm = 8.60
+eye_distance_cm = 16.0
+
+[paths]
+# Resolved relative to this config file; keeps the production corpus in the checkout.
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
+[hardware]
+# Prototype output-line validation only. The real reward/vacuum circuits are not attached.
+backend = "lgpio"
+chip = 0
+# Current Pi 5 rig reward_left/pump1 and vacuum/pump_en assignments.
+reward_pin_bcm = 19
+suction_pin_bcm = 25
+# GPIO23/24 are unassigned; audio uses a USB adapter.
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+reward_initial_level = 0
+suction_initial_level = 0
+# Active polarity is intentionally unset until the final circuits are validated.
+# After physical polarity and water calibration are complete, choose one:
+# reward_open_duration_ms = 100.0
+# reward_target_ul = 3.0
+# reward_calibration_profile = "../../calibrations/reward/rig-specific.json"
+lick_pin_bcm = 26
+lick_right_pin_bcm = 27
+lick_idle_level = 0
+lick_active_level = 1
+release_stable_ms = 25
+min_classified_lick_interval_ms = 70
+
+[operator_controls]
+# No operator bait button is assigned on this rig.
+manual_bait_enabled = false
+bait_button_enabled = false
+bait_button_gpio = -1
+minimum_interval_ms = 1000
+bait_button_release_stable_ms = 25
+# Optional cumulative operator-bait water budget; unset means no configured cap.
+# max_manual_bait_water_ul = 300.0
+bait_auto_suction = false

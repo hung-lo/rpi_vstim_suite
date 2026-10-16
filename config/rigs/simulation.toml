@@ -1,0 +1,26 @@
+# Hardware-free development profile.
+[paths]
+output_root = "/tmp/rpi-vstim-sessions"
+
+[display]
+backend = "fake"
+
+[hardware]
+backend = "simulated"
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+
+[operator_controls]
+bait_button_gpio = -1
+
+[session]
+simulation = true

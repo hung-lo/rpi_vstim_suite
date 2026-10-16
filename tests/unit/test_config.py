@@ -10,10 +10,55 @@ from rpi_vstim.core.config import Config, ConfigError, config_from_mapping, load
 
 def test_example_toml_loads_and_preserves_sections():
     config = load_config(Path("config/system.example.toml"))
-    assert config.display.backend == "kms"
-    assert config.hardware.reward_pin_bcm == 19
+    assert config.display.backend == "fake"
+    assert config.display.ownership == ""
+    assert config.display.stimulus_connector == ""
+    assert config.display.preview_connector is None
+    assert config.hardware.reward_pin_bcm == -1
+    assert config.hardware.sound_trigger_1_pin_bcm == -1
     assert config.telemetry.port == 5055
     assert config.protocol.name == "natural-images"
+
+
+def test_pi5_provisional_gpio_roles_are_configured_without_polarity_claims():
+    config = load_config(Path("config/rigs/pi5_dual_display_provisional.example.toml"))
+    assert config.hardware.backend == "lgpio"
+    assert config.hardware.output_line("reward").bcm_pin == 19
+    assert config.hardware.output_line("vacuum").bcm_pin == 25
+    assert config.hardware.output_line("reward").active_level is None
+    assert config.hardware.output_line("vacuum").active_level is None
+
+
+def test_load_config_resolves_relative_paths_from_config_file(tmp_path):
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    config_path = tmp_path / "config" / "natural.toml"
+    config_path.parent.mkdir()
+    config_path.write_text('[paths]\nasset_root = "../assets"\n')
+
+    assert load_config(config_path).paths.asset_root == asset_root.resolve()
+
+
+def test_default_display_is_neutral_for_simulation():
+    assert Config().display.backend == "fake"
+    assert Config().display.ownership == ""
+    assert Config().display.stimulus_connector == ""
+    assert Config().display.preview_connector is None
+
+
+def test_hardware_display_requires_an_explicit_connector():
+    with pytest.raises(ConfigError, match="required for the KMS backend"):
+        config_from_mapping({"display": {"backend": "kms", "ownership": "direct"}})
+
+
+def test_hardware_display_requires_explicit_ownership():
+    with pytest.raises(ConfigError, match="ownership is required"):
+        config_from_mapping({"display": {"backend": "kms", "stimulus_connector": "HDMI-A-2"}})
+
+
+def test_display_ownership_is_validated():
+    with pytest.raises(ConfigError, match="ownership"):
+        config_from_mapping({"display": {"ownership": "compositor"}})
 
 
 def test_duplicate_gpio_pins_are_rejected():
@@ -63,7 +108,13 @@ def test_experimental_config_parsing_does_not_require_pi_paths():
                 "asset_root": "/missing/assets",
                 "reward_state_root": "/missing/state",
             },
-            "display": {"backend": "kms", "calibration_id": "ol7"},
+            "display": {
+                "backend": "kms",
+                "ownership": "direct",
+                "stimulus_connector": "HDMI-A-2",
+                "preview_connector": "HDMI-A-1",
+                "calibration_id": "ol7",
+            },
             "hardware": {"backend": "lgpio"},
             "session": {"experimental": True, "simulation": False},
         }
@@ -74,7 +125,13 @@ def test_experimental_config_parsing_does_not_require_pi_paths():
 def test_explicit_experimental_validation_checks_paths():
     config = config_from_mapping(
         {
-            "display": {"backend": "kms", "calibration_id": "ol7"},
+            "display": {
+                "backend": "kms",
+                "ownership": "direct",
+                "stimulus_connector": "HDMI-A-2",
+                "preview_connector": "HDMI-A-1",
+                "calibration_id": "ol7",
+            },
             "hardware": {"backend": "lgpio"},
             "session": {"experimental": True, "simulation": False},
         }
@@ -95,7 +152,13 @@ def test_path_validation_uses_readability_for_assets(tmp_path, monkeypatch):
     config = config_from_mapping(
         {
             "paths": paths,
-            "display": {"backend": "kms", "calibration_id": "ol7"},
+            "display": {
+                "backend": "kms",
+                "ownership": "direct",
+                "stimulus_connector": "HDMI-A-2",
+                "preview_connector": "HDMI-A-1",
+                "calibration_id": "ol7",
+            },
             "hardware": {"backend": "lgpio"},
             "session": {"experimental": True, "simulation": False},
         }
@@ -139,6 +202,7 @@ def test_dual_local_camera_config_parses_stable_identities():
     assert [camera.id for camera in config.cameras.devices] == ["face", "behavior"]
     assert [camera.role for camera in config.cameras.devices] == ["face", "behavior"]
     assert config.cameras.devices[0].stable_device_identifier == "usb-face-serial"
+    assert config.cameras.devices[0].output_naming_policy == "capture"
 
 
 @pytest.mark.parametrize(
@@ -163,7 +227,13 @@ def test_required_camera_needs_stable_identity_in_experimental_mode():
         config_from_mapping(
             {
                 "cameras": {"devices": [{"id": "face", "role": "face", "required": True}]},
-                "display": {"backend": "kms", "calibration_id": "ol7"},
+                "display": {
+                    "backend": "kms",
+                    "ownership": "direct",
+                    "stimulus_connector": "HDMI-A-2",
+                    "preview_connector": "HDMI-A-1",
+                    "calibration_id": "ol7",
+                },
                 "hardware": {"backend": "lgpio"},
                 "session": {"experimental": True, "simulation": False},
             }

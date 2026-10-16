@@ -1,0 +1,23 @@
+name: native-linux
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install native headers
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libdrm-dev libwayland-dev wayland-protocols
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest -q
+      - run: python -m compileall -q src tests scripts
+      - run: bash -n scripts/*.sh ci/*.sh
+      - run: python -c 'import pathlib, tomllib; [tomllib.loads(p.read_text()) for p in pathlib.Path("config").glob("*.toml")]'
+      - run: bash ci/native-linux-build.sh

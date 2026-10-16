@@ -1,34 +1,52 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any, Iterable
+from typing import Any
 
+from rpi_vstim.core.assets import AssetResolver, build_selected_asset_manifest
 from rpi_vstim.core.camera import CameraStartupError, FakeLocalCameraService
 from rpi_vstim.core.config import Config
 from rpi_vstim.core.lifecycle import LifecycleState, RuntimeServices
+from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.core.session import SessionOutput, new_session
 from rpi_vstim.display.fake import FakeDisplayBackend
+from rpi_vstim.hardware.operator_control import OperatorControlService
+from rpi_vstim.hardware.reward import RewardArbiter, SimulatedRewardBackend
 from rpi_vstim.hardware.worker import SimulatedHardwareWorker
-from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan as build_natural_plan
 from rpi_vstim.protocols.drifting_gratings import (
     DEFAULT_ORIENTATIONS_DEG,
     DriftingGratingSettings,
+)
+from rpi_vstim.protocols.drifting_gratings import (
     build_plan as build_grating_plan,
 )
-from rpi_vstim.protocols.retinotopy import RetinotopySettings, build_plan as build_retinotopy_plan
+from rpi_vstim.protocols.natural_images import (
+    NaturalImageSettings,
+    discover_images,
+)
+from rpi_vstim.protocols.natural_images import (
+    build_plan as build_natural_plan,
+)
+from rpi_vstim.protocols.retinotopy import RetinotopySettings
+from rpi_vstim.protocols.retinotopy import build_plan as build_retinotopy_plan
 from rpi_vstim.protocols.reward_conditioning import (
     AssignmentStore,
     PhaseStateStore,
     RewardConditioningSettings,
     RewardPhase,
+)
+from rpi_vstim.protocols.reward_conditioning import (
     build_plan as build_reward_plan,
+)
+from rpi_vstim.protocols.spout_training import (
+    SpoutTrainingSettings,
+)
+from rpi_vstim.protocols.spout_training import (
+    build_plan as build_spout_plan,
 )
 from rpi_vstim.telemetry.payloads import TelemetryMessage
 from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher
-from rpi_vstim.protocols.spout_training import (
-    SpoutTrainingSettings,
-    build_plan as build_spout_plan,
-)
 
 
 class SimulationInterrupted(RuntimeError):
@@ -37,6 +55,29 @@ class SimulationInterrupted(RuntimeError):
 
 class TelemetryRequiredError(RuntimeError):
     pass
+
+
+class FaultInjectingDisplay:
+    def __init__(self, fault: str | None) -> None:
+        self.backend = FakeDisplayBackend()
+        self.fault = fault
+        self.present_count = 0
+
+    def open(self, config):
+        if self.fault == "display_consumer_start":
+            raise RuntimeError("injected display consumer startup failure")
+        return self.backend.open(config)
+
+    def present_color(self, rgb, *, frames):
+        if self.fault == "display_consumer_mid" and self.present_count >= 1:
+            raise RuntimeError("injected display consumer mid-session failure")
+        self.present_count += 1
+        return self.backend.present_color(rgb, frames=frames)
+
+    def close(self):
+        self.backend.close()
+        if self.fault == "cleanup":
+            raise RuntimeError("injected display cleanup failure")
 
 
 @dataclass
@@ -58,9 +99,10 @@ def build_simulated_services(
     camera_failures: Iterable[str] = (),
     telemetry_failure: bool = False,
     telemetry_fail_after: int | None = None,
+    fault: str | None = None,
 ) -> RuntimeServices:
     return RuntimeServices(
-        display=FakeDisplayBackend(),
+        display=FaultInjectingDisplay(fault) if fault else FakeDisplayBackend(),
         hardware=SimulatedHardwareWorker(),
         cameras=FakeLocalCameraService(config.cameras, fail_ids=set(camera_failures)),
         telemetry=InMemoryTelemetryPublisher(
@@ -69,12 +111,84 @@ def build_simulated_services(
     )
 
 
+def build_session_operator_controls(
+    config: Config,
+    session: SessionOutput,
+    arbiter: RewardArbiter,
+    *,
+    stdin: Any = None,
+    enable_keyboard: bool = True,
+    enable_physical_operator_button: bool = True,
+) -> OperatorControlService:
+    """Build controls against the session's existing reward owner."""
+    if arbiter.event_handoff is None:
+        raise RuntimeError("session reward arbiter must have a session event handoff")
+    kwargs: dict[str, Any] = {
+        "session_id": session.context.session_id,
+        "arbiter": arbiter,
+        "event_sink": arbiter.event_handoff,
+        "enable_keyboard": enable_keyboard,
+        "enable_physical_operator_button": enable_physical_operator_button,
+    }
+    if stdin is not None:
+        kwargs["stdin"] = stdin
+    return OperatorControlService(config, **kwargs)
+
+
+def compose_session_reward_controls(
+    config: Config,
+    session: SessionOutput,
+    services: RuntimeServices,
+    backend: Any | None,
+    *,
+    enable_keyboard: bool = True,
+    enable_physical_operator_button: bool = True,
+) -> RewardArbiter | None:
+    """Compose one reward owner and optional operator controls for a session."""
+    arbiter = services.reward_arbiter
+    if arbiter is None and (
+        config.hardware.reward_open_duration_ms is not None
+        or config.hardware.reward_target_ul is not None
+        or config.operator_controls.manual_bait_enabled
+    ):
+        if backend is None:
+            raise RuntimeError("session reward configuration requires one output backend")
+        arbiter = RewardArbiter.from_config(
+            backend,
+            config,
+            session_id=session.context.session_id,
+            event_sink=session.record_reward_event,
+        )
+        services.reward_arbiter = arbiter
+    if arbiter is not None:
+        session.attach_reward_arbiter(arbiter)
+    if services.operator_controls is not None:
+        if arbiter is None or getattr(services.operator_controls, "_arbiter", None) is not arbiter:
+            raise RuntimeError("active session operator controls must use the session reward arbiter")
+    elif config.operator_controls.manual_bait_enabled:
+        if arbiter is None:
+            raise RuntimeError("manual bait requires the session reward arbiter")
+        services.operator_controls = build_session_operator_controls(
+            config,
+            session,
+            arbiter,
+            enable_keyboard=enable_keyboard,
+            enable_physical_operator_button=enable_physical_operator_button,
+        )
+    return arbiter
+
+
 def build_simulation_plan(config: Config, *, protocol_name: str | None, seed: int):
     """Build a bounded virtual plan without requiring assets or hardware."""
     name = protocol_name or config.protocol.name
     parameters = config.protocol.parameters
     if name == "natural-images":
-        images = tuple(parameters.get("images", (f"natural_image_{index:04d}.png" for index in range(14))))
+        if "images" in parameters:
+            images = tuple(parameters["images"])
+        elif config.paths.asset_root.is_dir():
+            images = discover_images(config.paths.asset_root)
+        else:
+            images = tuple(f"natural_image_{index:04d}.png" for index in range(14))
         settings = NaturalImageSettings(
             images=images,
             seed=seed,
@@ -179,6 +293,7 @@ def run_simulated_session(
     protocol_failure: bool = False,
     telemetry_fail_after: int | None = None,
     services: RuntimeServices | None = None,
+    fault: str | None = None,
 ) -> SimulationResult:
     selected_protocol = protocol_name or config.protocol.name
     if selected_protocol != config.protocol.name:
@@ -199,6 +314,7 @@ def run_simulated_session(
         camera_failures=camera_failures,
         telemetry_failure=telemetry_failure,
         telemetry_fail_after=telemetry_fail_after,
+        fault=fault,
     )
     session = new_session(config, protocol_name=selected_protocol, session_id=session_id, seed=seed)
     session.write_initial_outputs()
@@ -207,6 +323,7 @@ def run_simulated_session(
     error: str | None = None
     cleanup_errors: list[str] = []
     sequence_number = 0
+    reward_arbiter: RewardArbiter | None = None
 
     def publish(message: TelemetryMessage) -> None:
         nonlocal degraded
@@ -233,31 +350,108 @@ def run_simulated_session(
             degraded=list(degraded),
         ))
 
+    def check_operator_health() -> None:
+        controls = services.operator_controls
+        checker = getattr(controls, "check_health", None)
+        if checker is not None:
+            checker()
+
     try:
+        reward_arbiter = compose_session_reward_controls(
+            config,
+            session,
+            services,
+            None if services.reward_arbiter is not None else SimulatedRewardBackend(),
+            enable_keyboard=True,
+            enable_physical_operator_button=False,
+        )
+        session.write_preflight_report(
+            PreflightReport(
+                checks=[
+                    {
+                        "name": "simulation_mode",
+                        "passed": True,
+                        "detail": "hardware access disabled",
+                    }
+                ]
+            )
+        )
+        session.write_cache_manifest({"bounded": True, "mode": "simulation", "entries": []})
+        session.write_resource_summary(
+            {
+                "mode": "simulation",
+                "camera_count": len(config.cameras.devices),
+                "bounded_queues": True,
+            }
+        )
+        if services.operator_controls is not None:
+            services.operator_controls.start_background()
+            check_operator_health()
         session.write_plan(plan)
+        if fault == "asset_manifest_creation":
+            raise RuntimeError("injected asset_manifest_creation failure")
+        if config.paths.asset_root.is_dir():
+            selected_manifest = build_selected_asset_manifest(
+                plan,
+                AssetResolver(config.paths.asset_root),
+                target_width_px=config.display.width_px,
+                target_height_px=config.display.height_px,
+                transform=plan.metadata.get("asset_transform", "fit_pad"),
+                background_value=int(plan.metadata.get("background_gray", 127)),
+            )
+            session.write_asset_manifest(selected_manifest)
+        if fault == "session_metadata_write":
+            raise RuntimeError("injected session metadata failure")
         transition(LifecycleState.CONFIGURED)
         transition(LifecycleState.PREFLIGHT)
+        if fault == "storage_low_space":
+            raise RuntimeError("injected storage low-space signal")
         services.display.open(config.display)
         services.hardware.start()
-        try:
-            services.cameras.start(session.context.session_root)
-        except CameraStartupError:
-            raise
+        services.cameras.start(session.context.session_root)
         if services.cameras.degraded:
             degraded.append("camera")
         transition(LifecycleState.PREPARING)
+        if fault == "producer_start":
+            raise RuntimeError(f"injected {fault} failure")
         transition(LifecycleState.PRE)
         if interrupt:
             raise SimulationInterrupted("simulated interruption")
         if protocol_failure:
             raise RuntimeError("simulated protocol failure")
         for event in plan.events:
+            check_operator_health()
+            camera_poll = getattr(services.cameras, "poll", None)
+            if camera_poll is not None:
+                camera_statuses = camera_poll()
+                if any(
+                    status.required and status.state.value == "FAILED"
+                    for status in camera_statuses
+                ):
+                    raise CameraStartupError("required camera failed during recording")
+                if any(status.state.value == "DEGRADED" for status in camera_statuses) and "camera" not in degraded:
+                    degraded.append("camera")
+            if fault == "producer_mid" and sequence_number > 2:
+                raise RuntimeError("injected producer mid-session failure")
             target_lifecycle = LifecycleState(event.phase)
             if lifecycle.state != target_lifecycle:
                 transition(target_lifecycle)
             color = (255, 255, 255) if event.photodiode == "on" else (127, 127, 127)
             if event.frame_count:
-                services.display.present_color(color, frames=event.frame_count)
+                session.write_display_result(
+                    services.display.present_color(color, frames=event.frame_count)
+                )
+            check_operator_health()
+            if (
+                reward_arbiter is not None
+                and reward_arbiter.task_resolution is not None
+                and event.metadata.get("reward_scheduled") is True
+            ):
+                reward_arbiter.deliver_task(
+                    command_id=event.sequence_id or event.event_id,
+                    session_id=session.context.session_id,
+                    trial_id=event.trial_id,
+                )
             session.record_event(
                 "PLAN_EVENT",
                 lifecycle=target_lifecycle.value,
@@ -277,16 +471,19 @@ def run_simulated_session(
                 cameras=services.cameras.manifest(),
                 degraded=list(degraded),
             ))
+        if fault == "finalization":
+            raise RuntimeError("injected finalization failure")
         transition(LifecycleState.FINALIZING)
         transition(LifecycleState.COMPLETE)
     except SimulationInterrupted as exc:
         error = str(exc)
         lifecycle.state = LifecycleState.INTERRUPTED
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — session failures become recorded terminal state
         error = str(exc)
         lifecycle.state = LifecycleState.FAILED
     finally:
         for label, action in (
+            ("operator.stop", getattr(services.operator_controls, "stop", lambda: None)),
             ("hardware.safe", services.hardware.backend.safe),
             ("hardware.stop", services.hardware.backend.stop),
             ("cameras.stop", services.cameras.stop),
@@ -295,7 +492,7 @@ def run_simulated_session(
         ):
             try:
                 action()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 — continue all cleanup actions
                 cleanup_errors.append(f"{label}: {cleanup_error}")
         if cleanup_errors:
             lifecycle.state = LifecycleState.CLEANUP_FAILED
@@ -309,7 +506,7 @@ def run_simulated_session(
                 degraded=degraded,
                 cleanup_errors=cleanup_errors,
             )
-        except Exception as status_error:
+        except Exception as status_error:  # noqa: BLE001 — preserve cleanup diagnostics
             cleanup_errors.append(f"manifest.finalize: {status_error}")
             lifecycle.state = LifecycleState.CLEANUP_FAILED
             if error is None:
@@ -320,7 +517,7 @@ def run_simulated_session(
                 lifecycle=lifecycle.state.value,
                 detail=error or "",
             )
-        except Exception as event_error:
+        except Exception as event_error:  # noqa: BLE001 — preserve cleanup diagnostics
             cleanup_errors.append(f"events.finalize: {event_error}")
         if cleanup_errors:
             try:
@@ -331,11 +528,11 @@ def run_simulated_session(
                     degraded=degraded,
                     cleanup_errors=cleanup_errors,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — final status is best effort
                 pass
         try:
             session.close()
-        except Exception as close_error:
+        except Exception as close_error:  # noqa: BLE001 — preserve cleanup diagnostics
             cleanup_errors.append(f"session.close: {close_error}")
             lifecycle.state = LifecycleState.CLEANUP_FAILED
             if error is None:
@@ -348,6 +545,6 @@ def run_simulated_session(
                     degraded=degraded,
                     cleanup_errors=cleanup_errors,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — final status is best effort
                 pass
     return SimulationResult(session, services, lifecycle.state, degraded, error)

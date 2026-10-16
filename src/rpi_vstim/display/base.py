@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Protocol
 
 from rpi_vstim.core.config import DisplayConfig
 
 from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
+from .transport import DisplaySequenceFrame
 
 
 class DisplayBackend(Protocol):
@@ -13,5 +15,5 @@ class DisplayBackend(Protocol):
     def validate_program(self, program: FrameProgram) -> None: ...
     def present(self, program: FrameProgram, *, sequence_id: str) -> DisplayResult: ...
     def present_color(self, rgb: tuple[int, int, int], *, frames: int) -> DisplayResult: ...
+    def present_sequence(self, frames: Iterable[DisplaySequenceFrame]) -> dict[str, object]: ...
     def close(self) -> None: ...
-

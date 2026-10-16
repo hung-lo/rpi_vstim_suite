@@ -15,6 +15,14 @@ singular `camera_state` is an aggregate: any required `FAILED` camera yields
 healthy `RECORDING` cameras yield `RECORDING`. It is never selected from a
 fixed camera index.
 
-Phase 00 and overnight simulation use null or bounded in-memory publishers:
-they open no socket and send no packets. Monitor loss remains non-fatal unless
-configuration explicitly marks telemetry as required.
+The optional `UdpTelemetryPublisher` uses a nonblocking local AF_UNIX datagram
+handoff and a daemon worker that owns UDP transmission. The parent converts
+one small payload to compact JSON and performs one nonblocking local datagram
+send; it never opens a network socket or waits for the monitor. Handoff
+overflow, serialization errors, and worker send errors are counted and are
+non-fatal unless the caller marks telemetry as required. `rpi-vstim telemetry
+demo` and `rpi-vstim telemetry benchmark` exercise only a loopback receiver.
+
+The current simulated and virtual runtimes still inject null/in-memory
+publishers. Wiring the UDP publisher into the future real unified session
+runner, and validating it against the separate monitor, remain separate gates.

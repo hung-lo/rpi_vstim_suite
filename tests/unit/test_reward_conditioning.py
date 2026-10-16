@@ -11,8 +11,12 @@ from rpi_vstim.protocols.reward_conditioning import (
     RewardPhase,
     WaterBudget,
     build_exposure_block,
+    build_exact_role_reward_outcomes,
     build_plan,
     build_reward_outcomes,
+    ALL_ROLES,
+    HIGH_ROLES,
+    MEDIUM_ROLES,
 )
 
 
@@ -59,6 +63,22 @@ def test_exposure_block_has_exact_8_3_1_counts():
     assert all(left.image != right.image for left, right in zip(block, block[1:]))
 
 
+def test_reward_roles_match_frozen_trajectory_metadata_and_exact_schedule():
+    assignment = MouseAssignment.create("m", image_pool(), seed=1)
+    block = build_exposure_block(assignment, seed=2)
+    assert {trial.image_role for trial in block} == set(ALL_ROLES)
+    assert {trial.current_reward_state for trial in block if trial.reward_eligible} == {"R"}
+    trials = block * 10
+    outcomes = build_exact_role_reward_outcomes(
+        trials,
+        phase=RewardPhase.ACQUISITION,
+        seed=8,
+    )
+    for role in ("high_R_to_R", "high_R_to_U", "medium_R_to_R", "medium_R_to_U"):
+        role_outcomes = [outcomes[index] for index, trial in enumerate(trials) if trial.image_role == role]
+        assert sum(role_outcomes) == len(role_outcomes) * 9 // 10
+
+
 def test_reward_outcomes_are_reproducible_and_match_90_percent_count():
     outcomes = build_reward_outcomes(seed=8)
     assert outcomes == build_reward_outcomes(seed=8)
@@ -90,3 +110,12 @@ def test_reward_plan_is_deterministic_and_does_not_actuate_hardware():
     assert sum(event.metadata["reward_eligible"] for event in first.events) == 220
     assert all(event.metadata["reward_boundary_frames"] == 60 for event in first.events)
     assert all(event.metadata["reward_scheduled"] is not None for event in first.events)
+
+
+def test_reward_exposure_fallback_handles_seed_133():
+    assignment = MouseAssignment.create("mouse-1", image_pool(), seed=100)
+    plan = build_plan(
+        RewardConditioningSettings("mouse-1", image_pool(), seed=133, blocks=10), assignment
+    )
+    image_names = [event.metadata["image"] for event in plan.events]
+    assert all(left != right for left, right in zip(image_names, image_names[1:]))

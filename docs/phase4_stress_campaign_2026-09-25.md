@@ -1,0 +1,21 @@
+# Phase 4 software stress campaign
+
+All runs were hardware-free on the Mac:
+
+- 5,000 logical natural-image frames: 4,998 consumed, transport peak 8,
+  zero underruns, 7 source reads/hash calculations/decodes, 7 renderer payload
+  allocations.
+- 1,000 randomized state-machine sessions: all reached an explicit terminal
+  result.
+- 100 varied multi-protocol sessions: 20 each for natural images, reward
+  conditioning, spout training, drifting gratings, and retinotopy; 89 reached
+  COMPLETE, 9 reached expected INTERRUPTED, and 2 reached expected required-
+  camera FAILED. No threads or subprocesses leaked.
+- 10,000 telemetry messages into a 256-entry sink: 256 retained and 9,744
+  dropped, with no unbounded growth.
+- same-seed reproducibility: 100 natural-image plans were each built twice;
+  all matched. The last checked digest was
+  `17ebbe4c4cf2216542743c25d6a42decb98436e17b20ea810e45e5eb10ca8e24`.
+
+These runs validate software bounds and deterministic behavior only. They do
+not validate the Pi display, cameras, SSD, GPIO/reward, or photodiode.

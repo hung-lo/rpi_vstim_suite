@@ -120,6 +120,16 @@ def test_spout_schedule_criterion_and_water_safety_are_pure():
         state.record_observed_reward(retrieval_success=True)
 
 
+def test_spout_plan_has_a_golden_boundary_shape():
+    expected = GOLDEN["spout_training"]
+    plan = build_spout_plan(SpoutTrainingSettings(max_rewards=4, seed=expected["seed"]))
+    assert len(plan.events) == expected["event_count"]
+    assert plan.total_frames == expected["total_frames"]
+    assert plan.events[0].kind == expected["first_kind"]
+    assert plan.events[-1].kind == expected["last_kind"]
+    assert sum(event.kind == "training-reward" for event in plan.events) == expected["reward_count"]
+
+
 def test_reward_golden_schedule_keeps_observation_unknown():
     images = tuple(f"image-{index:02d}.png" for index in range(14))
     expected = GOLDEN["reward_conditioning"]

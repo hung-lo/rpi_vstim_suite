@@ -1,9 +1,15 @@
 import json
+import socket
 
 import pytest
 
+from rpi_vstim.telemetry.benchmark import run_benchmark
 from rpi_vstim.telemetry.payloads import TelemetryMessage
-from rpi_vstim.telemetry.publisher import InMemoryTelemetryPublisher, TelemetryPublisher
+from rpi_vstim.telemetry.publisher import (
+    InMemoryTelemetryPublisher,
+    TelemetryPublisher,
+    UdpTelemetryPublisher,
+)
 
 
 def test_telemetry_message_round_trips_with_optional_fields():
@@ -42,3 +48,38 @@ def test_in_memory_publisher_is_bounded_and_null_publisher_has_no_socket():
     assert len(publisher.messages) == 2
     assert publisher.dropped_count == 1
     assert not TelemetryPublisher().publish({"ignored": True})
+
+
+def test_udp_publisher_delivers_json_via_local_loopback():
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.bind(("127.0.0.1", 0))
+    receiver.settimeout(1.0)
+    publisher = UdpTelemetryPublisher("127.0.0.1", receiver.getsockname()[1])
+    try:
+        assert publisher.publish({"type": "state", "sequence_number": 7})
+        publisher.close()
+        payload, _ = receiver.recvfrom(4096)
+        assert json.loads(payload) == {"sequence_number": 7, "type": "state"}
+        assert publisher.queued_count == 1
+        assert publisher.sent_count == 1
+        assert not publisher.worker_alive
+    finally:
+        publisher.close()
+        receiver.close()
+
+
+def test_udp_publisher_rejects_oversized_packets_without_blocking():
+    publisher = UdpTelemetryPublisher("127.0.0.1", 9, max_packet_bytes=8)
+    try:
+        assert not publisher.publish({"payload": "too large"})
+        assert publisher.dropped_count == 1
+    finally:
+        publisher.close()
+
+
+def test_udp_benchmark_uses_local_receiver():
+    result = run_benchmark(messages=20)
+    assert result["messages"] == 20
+    assert result["sampled"] == 20
+    assert result["queued"] == result["sent"] == 20
+    assert result["dropped"] == result["errors"] == 0

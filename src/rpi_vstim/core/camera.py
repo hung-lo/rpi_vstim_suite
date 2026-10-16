@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import CamerasConfig
+from .timestamps import monotonic_ns, utc_ns
 
 
 class CameraState(StrEnum):
@@ -27,11 +28,19 @@ class FakeCameraStatus:
     role: str
     stable_device_identifier: str
     required: bool
+    backend: str = "fake"
     requested_start: bool = False
     requested_stop: bool = False
     state: CameraState = CameraState.CONFIGURED
     output_path: str = ""
     bytes_written: int = 0
+    start_utc_ns: int | None = None
+    start_monotonic_ns: int | None = None
+    stop_utc_ns: int | None = None
+    stop_monotonic_ns: int | None = None
+    exit_status: int | None = None
+    exit_reason: str | None = None
+    verification_state: str = "not_checked"
     error: str | None = None
 
 
@@ -61,6 +70,8 @@ class FakeLocalCameraService:
         for status in self.statuses.values():
             status.requested_start = True
             status.output_path = f"camera/{status.camera_id}/capture.fake.json"
+            status.start_utc_ns = utc_ns()
+            status.start_monotonic_ns = monotonic_ns()
             if status.camera_id in self.fail_ids:
                 status.state = CameraState.FAILED if status.required else CameraState.DEGRADED
                 status.error = "simulated camera startup failure"
@@ -77,6 +88,10 @@ class FakeLocalCameraService:
             status.requested_stop = True
             if status.state == CameraState.RECORDING:
                 status.state = CameraState.COMPLETED
+                status.exit_status = 0
+                status.verification_state = "recorded_unverified"
+            status.stop_utc_ns = utc_ns()
+            status.stop_monotonic_ns = monotonic_ns()
         self._write_manifest()
 
     def manifest(self) -> list[dict[str, Any]]:
@@ -87,7 +102,10 @@ class FakeLocalCameraService:
             return
         from .session import atomic_write_json
 
-        atomic_write_json(self.session_root / "camera_manifest.json", {"cameras": self.manifest()})
+        atomic_write_json(
+            self.session_root / "camera_manifest.json",
+            {"cameras": self.manifest(), "schema_version": 1},
+        )
 
 class CameraBackend:
     """Import-safe camera boundary; acquisition is intentionally not implemented."""

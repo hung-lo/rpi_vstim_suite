@@ -10,7 +10,7 @@ overnight branch. It does not claim hardware compatibility.
 | Spout training | 8–12 s seeded intervals, schedule anchoring, recent-20 criterion, fake observed reward and water cap | real bait/reward/lick workers and operator modes are deferred |
 | Drifting gratings | source defaults, seeded order/jitter, frame timing, drift direction, photodiode intent | pixel generation/cache and display calibration are deferred |
 | Retinotopy | source directions, fixed/shuffled seeded cycles, movement/refresh frame conversion, sweep metadata | geometry rendering, display calibration, TTL, and 2P integration are deferred |
-| Telemetry | flat outer schema 1, `state`/`trial_complete`, payload schema 3, sequence/session/protocol fields, camera/error/degraded fields | no UDP socket or monitor-Pi dependency is introduced |
+| Telemetry | flat outer schema 1, `state`/`trial_complete`, payload schema 3, sequence/session/protocol fields, camera/error/degraded fields, bounded local AF_UNIX-to-UDP publisher | production session wiring and monitor-Pi validation remain deferred; no monitor-Pi dependency is introduced |
 | Cameras | two independent local logical devices, required/optional state, metadata-only manifests | no `/dev/video*` resolution, capture, SSH, remote camera, or cross-Pi transfer |
 
 The four source repositories are read-only references. Source commits and

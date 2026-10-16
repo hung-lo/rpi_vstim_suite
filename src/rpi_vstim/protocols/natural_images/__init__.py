@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from collections import Counter
 from pathlib import Path
 import random
 from typing import Iterable
 
 from rpi_vstim.core.duration import seconds_to_frames
+from rpi_vstim.core.assets import IMAGE_SUFFIXES
 from rpi_vstim.core.plan import (
     PlannedEvent,
     SessionPlan,
@@ -15,10 +15,13 @@ from rpi_vstim.core.plan import (
     with_frame_offsets,
 )
 
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"})
 FINAL_ITI_BY_PROFILE = {
     "natural_legacy_plain": True,
     "natural_legacy_camera": False,
+}
+ASSET_TRANSFORM_BY_PROFILE = {
+    "natural_legacy_plain": "crop",
+    "natural_legacy_camera": "crop",
 }
 
 
@@ -63,10 +66,13 @@ def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> t
     values = tuple(images)
     if repeats < 1:
         raise ValueError("repeat_count must be at least 1")
-    counts = Counter(value for value in values for _ in range(repeats))
+    buckets = {value: [value] * repeats for value in values}
+    rng = random.Random(seed)
+    for bucket in buckets.values():
+        rng.shuffle(bucket)
+    counts = {value: len(bucket) for value, bucket in buckets.items()}
     if not counts:
         return ()
-    rng = random.Random(seed)
     result: list[str] = []
     previous = None
     while counts:
@@ -83,13 +89,20 @@ def _shuffle_repetitions(images: Iterable[str], repeats: int, *, seed: int) -> t
             if value in remaining:
                 feasible = feasible and remaining[value] <= total - remaining[value]
             if feasible:
-                candidates.extend([value] * counts[value])
+                candidates.append(value)
         if not candidates:
             raise ValueError("cannot avoid adjacent repeated images")
-        value = rng.choice(candidates)
+        selected_index = rng.randrange(sum(counts[value] for value in candidates))
+        value = candidates[-1]
+        for candidate in candidates:
+            selected_index -= counts[candidate]
+            if selected_index < 0:
+                value = candidate
+                break
         counts[value] -= 1
         if counts[value] == 0:
             del counts[value]
+        buckets[value].pop()
         result.append(value)
         previous = value
     return tuple(result)
@@ -114,7 +127,7 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
             seed=settings.seed,
         )
     image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
-    itis = seeded_choices(settings.iti_frames, len(selected), seed=settings.seed + 1)
+    itis = _seeded_iti_frames(settings.iti_frames, len(selected), seed=settings.seed + 1)
     events: list[PlannedEvent] = [
         PlannedEvent(
             "initial-gray",
@@ -156,9 +169,22 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
         metadata={
             "selected_images": list(selected),
             "compatibility_profile": settings.compatibility_profile,
+            "asset_transform": ASSET_TRANSFORM_BY_PROFILE[settings.compatibility_profile],
+            "background_gray": 127,
+            "photodiode_patch_policy": "legacy_top_right_120px",
             "camera_ids": list(settings.camera_ids),
         },
     )
+
+
+def _seeded_iti_frames(values: tuple[int, ...], count: int, *, seed: int) -> tuple[int, ...]:
+    if len(values) == 2:
+        low, high = values
+        if low > high:
+            raise ValueError("iti_frames bounds must be ordered")
+        rng = random.Random(seed)
+        return tuple(rng.randint(low, high) for _ in range(count))
+    return seeded_choices(values, count, seed=seed)
 
 
 class NaturalImagesProtocol:

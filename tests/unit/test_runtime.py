@@ -1,8 +1,23 @@
+import csv
 import json
+import threading
+import time
+from dataclasses import replace
 
-from rpi_vstim.core.config import config_from_mapping
+import pytest
+
+import rpi_vstim.hardware.operator_control as operator_control_module
+from rpi_vstim.core.config import Config, config_from_mapping
 from rpi_vstim.core.lifecycle import LifecycleState
-from rpi_vstim.core.runtime import run_simulated_session
+from rpi_vstim.core.plan import PlannedEvent, SessionPlan
+from rpi_vstim.core.runtime import build_simulated_services, run_simulated_session
+from rpi_vstim.display.fake import FakeDisplayBackend
+from rpi_vstim.hardware.calibration import (
+    CalibrationCondition,
+    CalibrationProfile,
+    write_profile,
+)
+from rpi_vstim.hardware.operator_control import send_manual_bait
 
 
 def simulation_config(tmp_path, *, cameras=True):
@@ -17,6 +32,46 @@ def simulation_config(tmp_path, *, cameras=True):
     return config_from_mapping(values)
 
 
+def manual_session_config(tmp_path, *, button_enabled=False):
+    profile_path = tmp_path / "calibration.json"
+    write_profile(
+        CalibrationProfile.create(
+            calibration_id="integration-calibration",
+            rig_id="simulated-rig",
+            conditions=(
+                CalibrationCondition.measured(10, 10, 0, 0.02),
+                CalibrationCondition.measured(20, 10, 0, 0.04),
+            ),
+        ),
+        profile_path,
+    )
+    base = Config()
+    return replace(
+        base,
+        hardware=replace(
+            base.hardware,
+            backend="lgpio",
+            reward_active_level=1,
+            reward_open_duration_ms=1.0,
+            reward_calibration_profile=profile_path,
+        ),
+        operator_controls=replace(
+            base.operator_controls,
+            manual_bait_enabled=True,
+            bait_button_enabled=button_enabled,
+            bait_button_idle_level=0 if button_enabled else None,
+            bait_button_active_level=1 if button_enabled else None,
+            bait_reward_ul=2.0,
+            minimum_interval_ms=1,
+        ),
+        paths=replace(
+            base.paths,
+            output_root=tmp_path / "sessions",
+            operator_control_socket=tmp_path / "operator.sock",
+        ),
+    )
+
+
 def test_simulated_session_completes_and_writes_events(tmp_path):
     result = run_simulated_session(simulation_config(tmp_path), session_id="complete", seed=7)
 
@@ -26,6 +81,13 @@ def test_simulated_session_completes_and_writes_events(tmp_path):
     assert manifest["status"] == "COMPLETE"
     assert manifest["random_seeds"] == {"protocol": 7}
     assert (root / "events.csv").read_text().count("SESSION_FINISHED") == 1
+    assert (root / "preflight_report.json").is_file()
+    assert (root / "cache_manifest.json").is_file()
+    assert (root / "resource_summary.json").is_file()
+    display_summary = json.loads((root / "display_results.json").read_text())
+    assert display_summary["record_count"] > 0
+    assert json.loads((root / "display_results.jsonl").read_text().splitlines()[0])
+    assert json.loads((root / "final_status.json").read_text())["status"] == "COMPLETE"
     cameras = json.loads((root / "camera_manifest.json").read_text())
     assert {camera["state"] for camera in cameras["cameras"]} == {"COMPLETED"}
 
@@ -72,3 +134,145 @@ def test_simulated_session_without_cameras(tmp_path):
         simulation_config(tmp_path, cameras=False), session_id="no-cameras"
     )
     assert result.ok
+
+
+def test_session_composes_one_reward_owner_for_task_and_remote_bait(tmp_path):
+    config = manual_session_config(tmp_path)
+    plan = SessionPlan(
+        "integration",
+        1,
+        (
+            PlannedEvent(
+                "reward-event",
+                "rewarded-image",
+                1,
+                trial_id="trial-1",
+                sequence_id="seq-1",
+                metadata={"reward_scheduled": True, "image": "image.png"},
+            ),
+            PlannedEvent("end", "gray", 1, phase="POST"),
+        ),
+    )
+
+    class SlowDisplay(FakeDisplayBackend):
+        def present_color(self, rgb, *, frames):
+            time.sleep(0.05)
+            return super().present_color(rgb, frames=frames)
+
+    services = build_simulated_services(config)
+    services.display = SlowDisplay()
+    result_holder = {}
+    def run_session():
+        try:
+            result_holder["result"] = run_simulated_session(
+                config, plan=plan, session_id="integrated", services=services
+            )
+        except BaseException as exc:  # noqa: BLE001 — surface sandbox limitations below
+            result_holder["error"] = exc
+
+    thread = threading.Thread(target=run_session, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 3
+    while not config.paths.operator_control_socket.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not config.paths.operator_control_socket.exists():
+        thread.join(timeout=3)
+        if isinstance(result_holder.get("error"), PermissionError):
+            pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+        if result_holder.get("error") is not None:
+            raise result_holder["error"]
+        if "Operation not permitted" in str(getattr(result_holder.get("result"), "error", "")):
+            pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+        pytest.fail("active session did not expose the operator endpoint")
+    live_controls = services.operator_controls
+    assert live_controls is not None
+    assert live_controls._enable_keyboard
+    assert live_controls.submit_terminal_key("B")
+    time.sleep(0.01)
+    response = send_manual_bait(config.paths.operator_control_socket)
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert response["ok"] is True
+    result = result_holder["result"]
+    assert result.ok
+    arbiter = result.services.reward_arbiter
+    controls = result.services.operator_controls
+    assert controls is not None
+    assert controls._arbiter is arbiter
+    assert controls._backend is None
+    assert len(arbiter.controller._backend.transitions) == 6
+    with (tmp_path / "sessions" / "integrated" / "events.csv").open(newline="") as handle:
+        event_rows = list(csv.DictReader(handle))
+    reward_rows = [row for row in event_rows if row["event"] == "reward_command"]
+    assert len(reward_rows) == 3
+    assert any("manual-bait-000001" in row["detail"] for row in reward_rows)
+    assert any("manual-bait-000002" in row["detail"] for row in reward_rows)
+    provenance = json.loads(
+        (tmp_path / "sessions" / "integrated" / "provenance.json").read_text()
+    )
+    assert provenance["reward_event_handoff"]["dropped_count"] == 0
+    assert provenance["reward_event_handoff"]["error_count"] == 0
+    assert not config.paths.operator_control_socket.exists()
+
+
+def test_simulation_with_production_button_config_never_claims_gpio23(monkeypatch, tmp_path):
+    config = manual_session_config(tmp_path, button_enabled=True)
+
+    def fail_monitor(*_args, **_kwargs):
+        raise AssertionError("simulation attempted to construct GPIO23 monitor")
+
+    monkeypatch.setattr(operator_control_module, "LgpioOperatorBaitMonitor", fail_monitor)
+    monkeypatch.setattr(
+        operator_control_module,
+        "LgpioBackend",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("simulation attempted to construct lgpio backend")
+        ),
+    )
+    result = run_simulated_session(
+        config,
+        plan=SessionPlan("hardware-free", 1, (PlannedEvent("one", "gray", 1),)),
+        session_id="hardware-free",
+    )
+
+    if "Operation not permitted" in str(result.error):
+        pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+    assert result.ok
+    assert result.services.operator_controls._enable_physical_operator_button is False
+
+
+def test_operator_worker_failure_is_recorded_by_session(monkeypatch, tmp_path):
+    config = manual_session_config(tmp_path)
+    worker_failed = threading.Event()
+
+    def fail_poll(_endpoint, _timeout_s):
+        worker_failed.set()
+        raise RuntimeError("injected endpoint poll failure")
+
+    monkeypatch.setattr(operator_control_module.LocalOperatorControlEndpoint, "poll", fail_poll)
+
+    class WaitForWorkerFailureDisplay(FakeDisplayBackend):
+        def present_color(self, rgb, *, frames):
+            assert worker_failed.wait(1)
+            return super().present_color(rgb, frames=frames)
+
+    services = build_simulated_services(config)
+    services.display = WaitForWorkerFailureDisplay()
+    result = run_simulated_session(
+        config,
+        plan=SessionPlan("worker-failure", 1, (PlannedEvent("one", "gray", 1),)),
+        session_id="worker-failure",
+        services=services,
+    )
+
+    if "Operation not permitted" in str(result.error):
+        pytest.skip("sandbox disallows AF_UNIX filesystem sockets")
+    assert result.final_state != LifecycleState.COMPLETE
+    assert result.services.operator_controls.worker_error is not None
+    assert "injected endpoint poll failure" in str(result.services.operator_controls.worker_error)
+    assert not result.services.operator_controls.healthy
+    final_status = json.loads(
+        (tmp_path / "sessions" / "worker-failure" / "final_status.json").read_text()
+    )
+    assert "injected endpoint poll failure" in final_status["error"]

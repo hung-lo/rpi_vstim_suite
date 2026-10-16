@@ -1,0 +1,70 @@
+{
+  "calibration_fit": {
+    "interpolation": {
+      "method": "piecewise_linear",
+      "x": "mean_volume_ul",
+      "y": "open_duration_ms"
+    },
+    "linear_fit": {
+      "intercept_ul": 0.0,
+      "max_abs_residual_ul": 0.0,
+      "rmse_ul": 0.0,
+      "slope_ul_per_ms": 0.1
+    }
+  },
+  "calibration_id": "example-only-not-a-measurement",
+  "conditions": [
+    {
+      "collected_mass_g": 0.5,
+      "delivery_count": 100,
+      "final_mass_g": 0.5,
+      "initial_mass_g": 0.0,
+      "mean_volume_ul": 5.0,
+      "open_duration_ms": 50.0
+    },
+    {
+      "collected_mass_g": 0.75,
+      "delivery_count": 100,
+      "final_mass_g": 0.75,
+      "initial_mass_g": 0.0,
+      "mean_volume_ul": 7.5,
+      "open_duration_ms": 75.0
+    },
+    {
+      "collected_mass_g": 1.0,
+      "delivery_count": 100,
+      "final_mass_g": 1.0,
+      "initial_mass_g": 0.0,
+      "mean_volume_ul": 10.0,
+      "open_duration_ms": 100.0
+    },
+    {
+      "collected_mass_g": 1.25,
+      "delivery_count": 100,
+      "final_mass_g": 1.25,
+      "initial_mass_g": 0.0,
+      "mean_volume_ul": 12.5,
+      "open_duration_ms": 125.0
+    }
+  ],
+  "created_at": "example-only",
+  "delivery_mode": "single_continuous_open",
+  "fluid": "water",
+  "gpio_bcm": 19,
+  "hardware_backend": "lgpio",
+  "operator": "",
+  "output_role": "reward_left",
+  "resolved_duration_ms": null,
+  "rig_id": "example-only",
+  "schema_version": 1,
+  "selected_target_volume_ul": null,
+  "software_commit": "example-not-a-measurement",
+  "valid_duration_range_ms": [
+    50.0,
+    125.0
+  ],
+  "valid_volume_range_ul": [
+    5.0,
+    12.5
+  ]
+}

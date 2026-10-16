@@ -1,0 +1,80 @@
+# Current Pi 5 rig deployment profile for the integrated runner.
+# This profile writes production sessions directly to the NVMe-backed root.
+# BCM GPIO9 is reserved exclusively for NeuroKairos IRIG; do not assign it.
+
+[display]
+backend = "kms"
+ownership = "lease"
+stimulus_connector = "HDMI-A-2"
+preview_connector = "HDMI-A-1"
+width_px = 1024
+height_px = 600
+refresh_hz = 59.82
+require_exact_refresh = true
+refresh_tolerance_hz = 0.05
+pixel_format = "RGB565"
+calibration_id = "pi5-hdmi-a2-demo"
+
+[paths]
+# Must remain the mounted NVMe filesystem; the runner rejects a missing/wrong mount.
+output_root = "/mnt/behavbox_ssd/sessions"
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
+[hardware]
+backend = "lgpio"
+chip = 0
+lick_pin_bcm = 26
+lick_right_pin_bcm = 27
+lick_center_pin_bcm = 15
+reward_pin_bcm = 19
+reward_right_pin_bcm = 20
+reward_center_pin_bcm = 21
+reward_4_pin_bcm = 7
+airpuff_pin_bcm = 8
+suction_pin_bcm = 25
+# Audio uses a USB adapter; BCM GPIO23 and GPIO24 are left unassigned.
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+# GPIO4/10 are user pins; GPIO11 is header-only.
+lick_idle_level = 0
+lick_active_level = 1
+release_stable_ms = 25
+min_classified_lick_interval_ms = 70
+
+[operator_controls]
+# No operator bait button is assigned on this rig.
+manual_bait_enabled = false
+bait_button_enabled = false
+bait_button_gpio = -1
+
+[cameras]
+enabled_by_default = false
+record_to_session = true
+verify_output_growth = true
+
+[[cameras.devices]]
+id = "imx708_noir"
+role = "camera_0"
+required = true
+backend = "rpicam"
+device = "/base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a"
+expected_family = "imx708"
+
+[[cameras.devices]]
+id = "imx708_wide_noir"
+role = "camera_1"
+required = true
+backend = "rpicam"
+device = "/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a"
+expected_family = "imx708"
+
+[protocol]
+name = "natural-images"
+version = "demo"
+compatibility_profile = "natural_legacy_plain"
+image_count = 20
+repeat_count = 1
+selection_seed = 777
+image_duration_s = 0.5015045135406219
+initial_gray_frames = 180
+final_gray_frames = 180

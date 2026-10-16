@@ -13,10 +13,49 @@ from rpi_vstim.core.session import atomic_write_json
 
 PROTOCOL_VERSION = "exposure_reward_partial_reversal_v1"
 
+HIGH_ROLES = ("high_R_to_R", "high_R_to_U", "high_U_to_R", "high_U_to_U")
+MEDIUM_ROLES = ("medium_R_to_R", "medium_R_to_U", "medium_U_to_R", "medium_U_to_U")
+LOW_ROLES = tuple(f"low_U_to_U_{index:02d}" for index in range(1, 7))
+ALL_ROLES = HIGH_ROLES + MEDIUM_ROLES + LOW_ROLES
+
 
 class RewardPhase(StrEnum):
     ACQUISITION = "acquisition"
     REVERSAL = "reversal"
+
+
+REWARDED_ROLES_BY_PHASE = {
+    RewardPhase.ACQUISITION: ("high_R_to_R", "high_R_to_U", "medium_R_to_R", "medium_R_to_U"),
+    RewardPhase.REVERSAL: ("high_R_to_R", "high_U_to_R", "medium_R_to_R", "medium_U_to_R"),
+}
+
+
+def role_metadata(role: str) -> dict[str, object]:
+    if role in HIGH_ROLES:
+        exposure_level, probability, presentations = "high", 0.16, 8
+    elif role in MEDIUM_ROLES:
+        exposure_level, probability, presentations = "medium", 0.06, 3
+    elif role in LOW_ROLES:
+        exposure_level, probability, presentations = "low", 0.02, 1
+    else:
+        raise ValueError(f"unknown reward role: {role}")
+    trajectory = "U_to_U" if role in LOW_ROLES else role.split("_", 1)[1]
+    return {
+        "image_role": role,
+        "exposure_level": exposure_level,
+        "reward_trajectory": trajectory,
+        "presentation_probability": probability,
+        "presentations_per_block": presentations,
+    }
+
+
+def reward_state_for_role(role: str, phase: RewardPhase) -> str:
+    if role not in ALL_ROLES:
+        raise ValueError(f"unknown reward role: {role}")
+    if phase not in (RewardPhase.ACQUISITION, RewardPhase.REVERSAL):
+        raise ValueError(f"unsupported reward phase: {phase}")
+    trajectory = str(role_metadata(role)["reward_trajectory"])
+    return trajectory.split("_to_")[0 if phase == RewardPhase.ACQUISITION else 1]
 
 
 @dataclass(frozen=True)
@@ -29,6 +68,15 @@ class MouseAssignment:
     @property
     def all_images(self) -> tuple[str, ...]:
         return self.high_exposure + self.medium_exposure + self.low_exposure
+
+    @property
+    def role_images(self) -> dict[str, str]:
+        return dict(
+            zip(
+                ALL_ROLES,
+                self.high_exposure + self.medium_exposure + self.low_exposure,
+            )
+        )
 
     def reward_images(self, phase: RewardPhase) -> frozenset[str]:
         if phase == RewardPhase.ACQUISITION:
@@ -155,6 +203,9 @@ class RewardTrial:
     suction_scheduled: bool = False
     reward_delivered: bool | None = None
     lick_count: int = 0
+    image_role: str = ""
+    reward_trajectory: str = ""
+    current_reward_state: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -166,6 +217,9 @@ class RewardTrial:
             "suction_scheduled": self.suction_scheduled,
             "reward_delivered": self.reward_delivered,
             "lick_count": self.lick_count,
+            "image_role": self.image_role,
+            "reward_trajectory": self.reward_trajectory,
+            "current_reward_state": self.current_reward_state,
         }
 
 
@@ -183,12 +237,32 @@ def build_exposure_block(
     )
     rng = random.Random(seed)
     reward_images = assignment.reward_images(phase)
+    role_by_image = {image: role for role, image in assignment.role_images.items()}
     for _ in range(1000):
         rng.shuffle(rows)
         if all(left[1] != right[1] for left, right in zip(rows, rows[1:])):
             break
     else:
-        raise RuntimeError("could not construct a non-repeating exposure block")
+        # ponytail: retries cannot guarantee a valid result for every seed.
+        remaining: dict[str, int] = {}
+        exposure_by_image = {image: role for role, image in rows}
+        for role, image in rows:
+            remaining[image] = remaining.get(image, 0) + 1
+        ordered: list[tuple[str, str]] = []
+        previous = ""
+        while remaining:
+            candidates = [(count, image) for image, count in remaining.items() if image != previous]
+            if not candidates:
+                raise RuntimeError("could not construct a non-repeating exposure block")
+            maximum = max(count for count, _ in candidates)
+            choices = [image for count, image in candidates if count == maximum]
+            image = rng.choice(choices)
+            ordered.append((exposure_by_image[image], image))
+            previous = image
+            remaining[image] -= 1
+            if remaining[image] == 0:
+                del remaining[image]
+        rows = ordered
     return tuple(
         RewardTrial(
             str(index + 1),
@@ -197,6 +271,9 @@ def build_exposure_block(
             reward_scheduled=False,
             reward_eligible=image in reward_images,
             suction_scheduled=image in reward_images,
+            image_role=role_by_image[image],
+            reward_trajectory=str(role_metadata(role_by_image[image])["reward_trajectory"]),
+            current_reward_state=reward_state_for_role(role_by_image[image], phase),
         )
         for index, (role, image) in enumerate(rows)
     )
@@ -213,6 +290,29 @@ def build_reward_outcomes(
     rewarded = round(count * reward_probability)
     outcomes = [True] * rewarded + [False] * (count - rewarded)
     random.Random(seed).shuffle(outcomes)
+    return tuple(outcomes)
+
+
+def build_exact_role_reward_outcomes(
+    trials: Iterable[RewardTrial],
+    *,
+    phase: RewardPhase,
+    seed: int,
+) -> tuple[bool, ...]:
+    """Schedule exactly 90% rewards for each eligible frozen-source role."""
+    rows = tuple(trials)
+    rewarded_roles = set(REWARDED_ROLES_BY_PHASE[phase])
+    outcomes = [False] * len(rows)
+    rng = random.Random(seed)
+    for role in ALL_ROLES:
+        indexes = [index for index, trial in enumerate(rows) if trial.image_role == role]
+        if role not in rewarded_roles:
+            continue
+        if len(indexes) % 10:
+            raise ValueError("eligible role presentation count must be divisible by ten")
+        omitted = set(rng.sample(range(len(indexes)), len(indexes) // 10))
+        for ordinal, index in enumerate(indexes):
+            outcomes[index] = ordinal not in omitted
     return tuple(outcomes)
 
 
@@ -292,17 +392,20 @@ def build_plan(
         build_exposure_block(assignment, seed=settings.seed + block, phase=phase)
         for block in range(settings.blocks)
     ]
-    eligible_count = sum(trial.reward_eligible for block in blocks for trial in block)
-    outcomes = iter(build_reward_outcomes(eligible_count, seed=settings.seed + 1))
+    block_trials = tuple(trial for block in blocks for trial in block)
+    outcomes = iter(
+        build_exact_role_reward_outcomes(
+            block_trials,
+            phase=phase,
+            seed=settings.seed + 1,
+        )
+    )
     events: list[PlannedEvent] = []
     index = 0
     for block, block_trials in enumerate(blocks):
         for trial in block_trials:
             index += 1
-            if trial.reward_eligible:
-                scheduled = next(outcomes)
-            else:
-                scheduled = False
+            scheduled = next(outcomes)
             events.append(
                 PlannedEvent(
                     f"trial-{index}",
@@ -314,6 +417,9 @@ def build_plan(
                     metadata={
                         "image": trial.image,
                         "exposure_role": trial.exposure_role,
+                        "image_role": trial.image_role,
+                        "reward_trajectory": trial.reward_trajectory,
+                        "current_reward_state": trial.current_reward_state,
                         "reward_eligible": trial.reward_eligible,
                         "reward_scheduled": scheduled,
                         "reward_delivered": None,

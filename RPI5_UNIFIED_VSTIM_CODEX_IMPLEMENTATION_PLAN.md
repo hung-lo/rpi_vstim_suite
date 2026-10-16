@@ -248,7 +248,7 @@ Preserve:
 
 - Gray-screen session.
 - Open-loop reward delivery.
-- Existing default reward pulse and volume configuration.
+- Configured single-continuous-open reward duration or calibrated volume profile.
 - Randomized 8-12 s training intervals unless overridden by a validated config.
 - Suction scheduling.
 - Lick capture and retrieval-success calculation.
@@ -614,8 +614,10 @@ asset_root = "/home/pi/stimulus_assets"
 reward_state_root = "/mnt/hd/vstim_reward_assignments"
 
 [display]
-backend = "kms"
-connector = "HDMI-A-1"
+backend = "fake"
+ownership = "direct"
+stimulus_connector = ""
+preview_connector = ""
 width_px = 1280
 height_px = 720
 refresh_hz = 60.0
@@ -809,9 +811,14 @@ pixel_format
 sequence_id
 requested_frame_count
 completed_frame_count
-first_page_flip_monotonic_ns
-last_page_flip_monotonic_ns
-first_page_flip_realtime_ns
+first_page_flip_kernel_event_ns
+last_page_flip_kernel_event_ns
+first_page_flip_callback_monotonic_ns
+last_page_flip_callback_monotonic_ns
+first_page_flip_callback_realtime_ns
+last_page_flip_callback_realtime_ns
+timing_source
+kernel_timestamp_clock
 mean_vblank_interval_us
 std_vblank_interval_us
 maximum_vblank_interval_us
@@ -835,7 +842,7 @@ The probe must:
 7. Allocate two or three dumb buffers.
 8. Fill alternating test patterns with a photodiode square.
 9. Perform vblank-synchronized page flips using page-flip events.
-10. Record page-flip sequence/timestamps.
+10. Record kernel page-flip sequence/timestamps plus callback-dispatch timestamps.
 11. Restore the original mode and console state on normal exit, error, SIGINT, and SIGTERM.
 
 Use synchronous/vblank page flips. Do not use asynchronous page flips.
@@ -848,8 +855,9 @@ Requirements:
 
 - Link to `libdrm`.
 - Release the Python GIL while waiting for and executing frame presentation.
-- Use `CLOCK_MONOTONIC` or `CLOCK_MONOTONIC_RAW` consistently for frame intervals.
-- Use DRM event timestamps/sequence numbers where available.
+- Use DRM event timestamps/sequence numbers for frame intervals where available.
+- Record `CLOCK_MONOTONIC` callback timestamps separately as dispatch-latency diagnostics,
+  together with callback realtime timestamps and the verified kernel timestamp clock.
 - Never allocate large buffers during an active presentation.
 - Never read assets from disk during an active presentation.
 - Never perform JSON, CSV, terminal, network, or camera work in the frame loop.
@@ -907,9 +915,12 @@ Each event includes:
 ```text
 sequence_id
 frame_index
-vblank_sequence
-monotonic_ns
-realtime_ns
+buffer_index
+photodiode_state
+kernel_sequence
+kernel_event_ns
+callback_monotonic_ns
+callback_realtime_ns
 ```
 
 This channel supports accurate reward scheduling and optional frame TTL without placing GPIO code inside the display backend.
@@ -1041,9 +1052,9 @@ Before an experimental run:
 - Confirm all outputs initialize low.
 - Confirm no pin collision.
 - Confirm worker starts and reports ready.
-- Confirm reward/suction durations and pulse counts are finite and within configured safety ranges.
+- Confirm continuous reward-open and suction durations are finite and within configured safety ranges.
 - Confirm maximum session water cap.
-- Confirm suction does not overlap an unsafe reward train.
+- Confirm suction does not overlap an unsafe reward opening.
 - Confirm Ctrl-C and worker failure force outputs low.
 - Confirm simulation mode is visibly labeled and cannot be confused with experimental mode.
 
@@ -1924,7 +1935,7 @@ Do not copy the Box151 compensation into the Pi 5 profile. Derive and version a 
 
 With no mouse and controlled water collection:
 
-- Validate reward pulse train.
+- Validate one continuous reward opening and its rig-specific volume calibration.
 - Validate volume calibration.
 - Validate reward onset relative to physical photodiode onset.
 - Validate suction onset/duration.

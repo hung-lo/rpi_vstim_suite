@@ -1,15 +1,18 @@
 [paths]
-output_root = "/mnt/hd"
-cache_root = "/mnt/hd/vstim_cache"
-asset_root = "/home/pi/stimulus_assets"
-reward_state_root = "/mnt/hd/vstim_reward_assignments"
+output_root = "/tmp/rpi-vstim-sessions"
+cache_root = "/tmp/rpi-vstim-cache"
+asset_root = "/tmp/rpi-vstim-assets"
+reward_state_root = "/tmp/rpi-vstim-reward-state"
 
 [display]
-backend = "kms"
-connector = "HDMI-A-1"
+backend = "fake"
+stimulus_connector = ""
+preview_connector = ""
 width_px = 1280
 height_px = 720
 refresh_hz = 60.0
+require_exact_refresh = true
+refresh_tolerance_hz = 0.05
 pixel_format = "RGB565"
 calibration_id = ""
 physical_width_cm = 15.50
@@ -24,11 +27,34 @@ on_value = 255
 off_value = 0
 
 [gpio]
-backend = "lgpio"
+backend = "simulated"
 chip = 0
-reward_pin_bcm = 19
-suction_pin_bcm = 25
-lick_pin_bcm = 26
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+lick_idle_level = 0
+lick_active_level = 1
+release_stable_ms = 25
+min_classified_lick_interval_ms = 70
+
+[operator_controls]
+manual_bait_enabled = false
+bait_button_enabled = false
+bait_button_gpio = -1
+# No physical button is assigned in this generic example.
+minimum_interval_ms = 1000
+bait_button_release_stable_ms = 25
+# Optional cumulative operator-bait water budget; unset means no configured cap.
+# max_manual_bait_water_ul = 300.0
+bait_auto_suction = false
 
 [cameras]
 enabled_by_default = false

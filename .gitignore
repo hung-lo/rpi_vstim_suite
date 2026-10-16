@@ -8,5 +8,6 @@ build/
 *.egg-info/
 .preview_cache/
 docs/hardware/*_local.*
+*.patch
 
 .DS_Store

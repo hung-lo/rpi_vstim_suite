@@ -5,9 +5,30 @@ that presents stimuli and controls behavior hardware. Each camera is selected
 by a logical ID/role and stable device identity; `/dev/videoN` numbering alone
 is not a production identity.
 
-Phase 00 provides the configuration schema. Overnight groundwork adds a
-metadata-only fake service that exercises independent per-camera start/stop,
-required/optional failure, degraded state, and session manifests. No SSH camera
-control, cross-Pi transfer, recording, conversion, or device access occurs.
-Future capture uses one independently supervised worker per camera, bounded
-buffering, direct-to-session storage, and post-session verification.
+Phase 00 provides the configuration schema. The overnight software boundary
+adds `LocalCameraSupervisor`: one independently supervised local process per
+camera, deterministic `camera/<id>/capture.<extension>` outputs, bounded
+status flow, startup/output-growth/stall deadlines, clean stop with
+terminate/kill fallback, required/optional policy, crash detection, bounded
+stderr diagnostics, and per-camera manifests. Camera configuration records
+the stable identity and optional expected sensor family; runtime selectors are
+accepted only after identity resolution.
+The metadata-only fake service remains available for simulation. No SSH camera
+control, cross-Pi transfer, or physical device access occurs.
+
+Capture command construction is isolated and can target the audited `rpicam-*`
+stack after stable identity resolution. `enumerate_rpicam_cameras()` reads the
+live `rpicam-hello --list-cameras` topology and returns a numeric `--camera`
+selector; the resolver fails closed on missing, duplicate, or family-mismatched
+identities. The supervisor does not guess `/dev/videoN`. Real capture,
+negotiated modes, output growth, and timing acceptance remain hardware
+validation.
+
+## Later hardware gate
+
+The Phase 3 combined run is a short readiness baseline only. Before production
+camera integration, resolve both IMX708 identities from stable topology data,
+define an explicit measured stop deadline, verify per-camera output growth on
+the experiment SSD, and compare camera-off versus dual-camera display timing
+under the eventual capture mode. Camera workers must remain separate from the
+display and GPIO timing paths; cleanup must leave no camera process behind.
