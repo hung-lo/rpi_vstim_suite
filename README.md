@@ -29,12 +29,15 @@ capabilities.
 | Chrony and external NeuroKairos IRIG-H | Validated as optional system services; VStim does not control them |
 | Optical IRIG recovery | Validated separately; downstream acquisition-device timing remains pending |
 | USB audio by itself | Standalone playback characterized; pilot software and a six-trial smoke are available |
-| USB audio with the full VStim stack | **Pending**: KMS + cameras + event logging + NVMe + NeuroKairos coexistence has not been recorded |
+| USB audio pilot protocol | Persistent USB playback with preloaded stimuli and session timing/events |
+| USB audio with the full VStim stack | **Validated** in a ~2-minute Pi 5 coexistence run; [session record](docs/hardware/pi5_av_coexistence_2026-10-16.md) |
 
-Still pending are final animal-facing water and audio SPL calibration, physical
-photodiode visual-onset calibration, downstream acquisition-device IRIG
-validation, and migration/validation of drifting gratings and retinotopy as
-complete Pi protocols. See [the Pi 5 deployment notes](docs/pi5_rig.md) and
+Still pending are final animal-facing water calibration, audio SPL calibration
+at the mouse position, physical acoustic-onset calibration, photodiode
+visual-onset calibration, and downstream acquisition-device IRIG validation.
+Drifting-grating and retinotopy planners and compatibility wrappers exist, but
+they have not been migrated to or validated through the current Pi KMS display
+runner. See [the Pi 5 deployment notes](docs/pi5_rig.md) and
 [hardware records](docs/hardware/).
 
 ## Current Pi 5 rig
@@ -121,6 +124,26 @@ animal-facing gains require SPL measurement at the mouse position. Details:
 [audio pilot](docs/audio_pilot.md) and
 [pilot WAVs](assets/audio/pilot/README.md).
 
+### Visual + audio coexistence run
+
+The opt-in integration mode runs the natural-image KMS sequence, both cameras,
+session logging, and scheduled USB audio together. This exact two-minute
+configuration was validated on the Pi 5; it plans eight sounds beginning at
+10 seconds. It is a short coexistence check, not audio endurance validation or
+an animal-calibrated task:
+
+```bash
+rpi-vstim natural-images run \
+  --mouse-id <identifier> \
+  --config config/rigs/pi5_natural_image_demo.example.toml \
+  --image-count 84 --seed 0 --cameras --audio-coexistence \
+  --audio-config config/rigs/pi5_audio_pilot.example.toml \
+  --output-root /mnt/behavbox_ssd/sessions
+```
+
+See the [coexistence validation record](docs/hardware/pi5_av_coexistence_2026-10-16.md)
+for the actual session results and limits.
+
 ### Simulation
 
 This creates a simulated session without Pi display, camera, GPIO, audio, or
@@ -180,9 +203,9 @@ rig. No reward, vacuum, or airpuff output is activated by the examples. See
 | Protocol | Current state |
 |---|---|
 | Natural images | Real Pi 5 demo runner and integrated validation are available |
-| Audio pilot | Persistent USB playback and audio-only pilot are implemented; full-stack coexistence is pending |
-| Drifting gratings | Seeded planner/software groundwork; not migrated to a validated Pi display protocol |
-| Retinotopy | Seeded sweep planner/software groundwork; geometry/rendering and Pi validation remain pending |
+| Audio pilot | Persistent USB playback, audio-only pilot, and opt-in same-session natural-image/audio coexistence are implemented; the coexistence path passed a ~2-minute Pi 5 run |
+| Drifting gratings | Seeded planner and root-level compatibility wrapper exist; not validated through the current Pi KMS runner |
+| Retinotopy | Seeded sweep planner and root-level compatibility wrapper exist; geometry/rendering and current Pi KMS validation remain pending |
 
 Start with [writing a protocol](docs/writing_protocols.md). The intended split
 is reusable session/hardware services beneath protocol-specific planning and

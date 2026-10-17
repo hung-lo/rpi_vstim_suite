@@ -58,19 +58,32 @@ the planned request time; `AUDIO_REQUEST` records the actual request;
 `AUDIO_CALLBACK_START` is when the PortAudio callback first consumes PCM.
 `AUDIO_TRIAL_END` records handoff completion. These timestamps are software
 observations, not physical acoustic onset. Absolute command-to-speaker
-latency and full-stack coexistence remain unmeasured. A callback status
-error, timeout, or playback exception marks the session failed and closes
-the stream; Ctrl-C marks it aborted.
+latency remains unmeasured. Full-stack coexistence passed a short Pi 5 run;
+see the [validation record](hardware/pi5_av_coexistence_2026-10-16.md). A
+callback status error, timeout, or playback exception marks the session failed
+and closes the stream; Ctrl-C marks it aborted.
 
 ## Same-session visual/audio coexistence
 
-The natural-image runner has an opt-in validation mode that keeps KMS, both
-cameras, events, and USB audio in one session. It reuses the natural-image
-profile's visual timing and the audio profile's unique device-name match and
-gains. With the current visual profile, `--image-count 84 --seed 0` plans about
-120.6 seconds. The fixed audio order starts 10 seconds after KMS sequence
-dispatch and repeats beep, buzz, and white noise every 15 seconds; this plans
-eight non-overlapping sounds.
+The natural-image runner has an opt-in mode that keeps KMS, both cameras,
+events, and USB audio in one session. It reuses the natural-image profile's
+visual timing and the audio profile's unique device-name match and gains. The
+natural-image profile's `[protocol.parameters.audio_coexistence]` table sets
+the ordered `sequence`, `start_delay_s`, and `interval_s`. The provided example
+cycles beep, buzz, and white noise every 15 seconds beginning at 10 seconds.
+For example:
+
+```toml
+[protocol.parameters.audio_coexistence]
+sequence = ["beep", "buzz", "white_noise"]
+start_delay_s = 10.0
+interval_s = 15.0
+```
+
+`--image-count 84 --seed 0` produces a 120.645-second visual plan and eight
+non-overlapping sounds; the audio schedule stops at the end of that plan.
+The audio order is fixed by the sequence; `--seed` controls the visual image
+plan, and the visual plan length determines the session duration.
 
 ```bash
 rpi-vstim natural-images run \
@@ -86,5 +99,11 @@ The session adds `audio/` copies of the stimuli and manifest,
 `audio_plan.json`, `audio_manifest.json`, and `audio_summary.json`. The audio
 events share the session's monotonic/UTC mapping. Callback timestamps indicate
 when the software output callback starts consuming PCM, not acoustic onset.
-This mode is for coexistence validation; it does not establish audiovisual
-synchronization or animal-facing loudness calibration.
+The full stack passed a ~2-minute run with all eight requests receiving
+callbacks and no event drops, writer errors, or KMS missed vblanks. See the
+[recorded results](hardware/pi5_av_coexistence_2026-10-16.md). This is an
+integration/coexistence validation, not a long-duration audio endurance test;
+it does not establish audiovisual synchronization, acoustic onset, or
+animal-facing loudness calibration. The real natural-image path requires Pi
+KMS and is not available as a user-facing `--simulate` run; `audio-pilot
+--simulate` remains available for hardware-free audio protocol testing.
