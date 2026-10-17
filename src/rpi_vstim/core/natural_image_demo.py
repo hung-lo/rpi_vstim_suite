@@ -67,7 +67,7 @@ class AudioCoexistenceSettings:
     ) -> AudioCoexistenceSettings:
         values = config.protocol.parameters.get("audio_coexistence", {})
         if not isinstance(values, dict):
-            raise ValueError("protocol.parameters.audio_coexistence must be a table")
+            raise TypeError("protocol.parameters.audio_coexistence must be a table")
         unknown = set(values) - {"sequence", "start_delay_s", "interval_s"}
         if unknown:
             raise ValueError(
@@ -75,7 +75,7 @@ class AudioCoexistenceSettings:
             )
         sequence = values.get("sequence", AUDIO_COEXISTENCE_ORDER)
         if not isinstance(sequence, (list, tuple)):
-            raise ValueError("audio coexistence sequence must be an array of stimulus IDs")
+            raise TypeError("audio coexistence sequence must be an array of stimulus IDs")
         return cls(
             device_name_match=device_name_match,
             gains_db=gains_db,

@@ -2,8 +2,8 @@ import json
 import time
 from dataclasses import replace
 
-from PIL import Image
 import pytest
+from PIL import Image
 
 from rpi_vstim.audio import AudioError, FakeAudio
 from rpi_vstim.camera.identity import ResolvedCamera
