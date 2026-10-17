@@ -78,3 +78,11 @@ selection_seed = 777
 image_duration_s = 0.5015045135406219
 initial_gray_frames = 180
 final_gray_frames = 180
+
+# Used only with `natural-images run --audio-coexistence`. The order repeats
+# until the configured visual plan ends; the audio-only pilot settings provide
+# the USB device match and per-stimulus gains.
+[protocol.parameters.audio_coexistence]
+sequence = ["beep", "buzz", "white_noise"]
+start_delay_s = 10.0
+interval_s = 15.0

@@ -54,13 +54,17 @@ Current-rig profiles leave GPIO23/24 and the legacy GPIO23 operator button
 unassigned. The current audio path uses a USB adapter; no audio backend is
 part of the original productization audit.
 
-## Audio pilot follow-up — 2026-10-16
+## Audio and AV follow-up — 2026-10-16
 
 Later commits added a small `rpi_vstim.audio` interface backed optionally by
 `sounddevice`/PortAudio and an audio-only pilot protocol. It preloads the
 three committed WAVs into memory and keeps one output stream open. The current
 Pi 5 rig uses a USB audio adapter; GPIO23 and GPIO24 remain unassigned and
-have no audio role. Standalone USB playback has been characterized, but
-coexistence with KMS, dual cameras, event logging, NVMe, and NeuroKairos has
-not yet been validated. This remains a follow-up gate, not an implication of
-the original productization audit.
+have no audio role. Standalone USB playback has been characterized. Commit
+`dc3cdd2855cdde8574f23bdcd73d9df522fd513e` adds the opt-in
+`natural-images run --audio-coexistence` integration path using the existing
+KMS/session/camera runtime and audio backend. That exact source was used for
+the approximately two-minute Pi coexistence run; its session and measurements
+are recorded in [the AV validation report](hardware/pi5_av_coexistence_2026-10-16.md).
+The integration result does not imply audio endurance, acoustic calibration,
+or a general behavioral audiovisual protocol.

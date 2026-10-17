@@ -16,7 +16,7 @@ from . import __version__
 from .audio import AudioError, FakeAudio, SoundDeviceAudio
 from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
-from .core.natural_image_demo import run_natural_image_demo
+from .core.natural_image_demo import AudioCoexistenceSettings, run_natural_image_demo
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
@@ -163,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     natural_images = commands.add_parser("natural-images", help="real natural-image demonstrations")
     natural_image_commands = natural_images.add_subparsers(dest="natural_image_command", required=True)
     natural_image_run = natural_image_commands.add_parser(
-        "run", help="run natural images with optional real licks and CSI cameras"
+        "run", help="run natural images with optional licks, cameras, and pilot audio"
     )
     natural_image_run.add_argument("--mouse-id", required=True)
     natural_image_run.add_argument(
@@ -181,6 +181,16 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument("--licks", action="store_true")
     natural_image_run.add_argument("--cameras", action="store_true")
     natural_image_run.add_argument("--camera-preview", action="store_true")
+    natural_image_run.add_argument(
+        "--audio-coexistence", action="store_true",
+        help="play the configured pilot audio schedule in the same session",
+    )
+    natural_image_run.add_argument(
+        "--audio-config",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "config/rigs/pi5_audio_pilot.example.toml",
+        help="audio pilot profile containing the unique USB device match and gains",
+    )
     natural_image_run.add_argument("--native-binary", type=Path)
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
 
@@ -475,6 +485,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "natural-images" and args.natural_image_command == "run":
         try:
             config = load_config(args.config)
+            audio = None
+            audio_settings = None
+            if args.audio_coexistence:
+                audio_config = load_config(args.audio_config)
+                if audio_config.protocol.name != "audio-pilot":
+                    raise ConfigError("--audio-config must use protocol.name = 'audio-pilot'")
+                pilot_settings = AudioPilotSettings.from_config(audio_config)
+                audio_settings = AudioCoexistenceSettings.from_config(
+                    config,
+                    device_name_match=pilot_settings.device_name_match,
+                    gains_db=pilot_settings.gains_db,
+                )
+                audio = SoundDeviceAudio(audio_settings.device_name_match)
             if args.output_root is not None:
                 config = replace(config, paths=replace(config.paths, output_root=args.output_root))
             session_id = args.session_id or (
@@ -492,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
                         "Cameras: two CSI recordings at 640x480 @ 30 fps"
                         if args.cameras
                         else "Cameras: DISABLED",
+                        (
+                            f"USB audio: persistent 48 kHz stream ({audio_settings.device_name_match})"
+                            if audio_settings else "USB audio: DISABLED"
+                        ),
                         "Preview: requested on HDMI-A-1 side-by-side" if args.camera_preview else "Preview: DISABLED",
                         "Reward: DISABLED",
                         "Vacuum: DISABLED",
@@ -513,8 +540,10 @@ def main(argv: list[str] | None = None) -> int:
                 use_cameras=args.cameras,
                 camera_preview=args.camera_preview,
                 native_binary=args.native_binary,
+                audio=audio,
+                audio_settings=audio_settings,
             )
-        except (ConfigError, OSError, ValueError, RuntimeError) as exc:
+        except (AudioError, ConfigError, OSError, TypeError, ValueError, RuntimeError) as exc:
             print(f"natural-image demo failed: {exc}", file=sys.stderr)
             return 2
         payload = {
@@ -526,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
             "camera_manifest": result.camera_manifest,
             "event_diagnostics": result.event_diagnostics,
             "camera_preview": result.camera_preview,
+            "audio_summary": result.audio_summary,
         }
         if args.camera_preview and not result.camera_preview.get("enabled"):
             print(f"WARNING: camera preview unavailable: {result.camera_preview.get('reason')}", file=sys.stderr)

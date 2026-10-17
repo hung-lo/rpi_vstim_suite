@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import math
+import shutil
+import statistics
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
 
+from rpi_vstim.audio import AudioClip, AudioOutput, load_pilot_clips
 from rpi_vstim.camera import (
     CameraCaptureSpec,
     CameraIdentity,
@@ -29,6 +34,7 @@ from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
 from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 from rpi_vstim.hardware.lgpio_lick import ClassifiedLick, LgpioLickMonitor, RawLickEdge
+from rpi_vstim.protocols.audio_pilot import ASSET_ROOT as PILOT_AUDIO_ASSET_ROOT
 from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan, discover_images
 
 DEMO_CAMERA_WIDTH = 640
@@ -38,6 +44,193 @@ DEMO_CAMERA_CODEC = "h264"
 DEMO_CAMERA_EXTENSION = "mp4"
 DEMO_PREVIEW_GEOMETRIES = ((0, 0, 512, 384), (512, 0, 512, 384))
 DEFAULT_DEMO_IMAGE_COUNT = 20
+AUDIO_COEXISTENCE_ORDER = ("beep", "buzz", "white_noise")
+
+
+@dataclass(frozen=True)
+class AudioCoexistenceSettings:
+    device_name_match: str
+    gains_db: dict[str, float] = field(default_factory=lambda: {
+        stimulus_id: 0.0 for stimulus_id in AUDIO_COEXISTENCE_ORDER
+    })
+    sequence: tuple[str, ...] = AUDIO_COEXISTENCE_ORDER
+    start_delay_s: float = 10.0
+    interval_s: float = 15.0
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        device_name_match: str,
+        gains_db: dict[str, float],
+    ) -> AudioCoexistenceSettings:
+        values = config.protocol.parameters.get("audio_coexistence", {})
+        if not isinstance(values, dict):
+            raise TypeError("protocol.parameters.audio_coexistence must be a table")
+        unknown = set(values) - {"sequence", "start_delay_s", "interval_s"}
+        if unknown:
+            raise ValueError(
+                "unknown audio coexistence setting(s): " + ", ".join(sorted(unknown))
+            )
+        sequence = values.get("sequence", AUDIO_COEXISTENCE_ORDER)
+        if not isinstance(sequence, (list, tuple)):
+            raise TypeError("audio coexistence sequence must be an array of stimulus IDs")
+        return cls(
+            device_name_match=device_name_match,
+            gains_db=gains_db,
+            sequence=tuple(sequence),
+            start_delay_s=values.get("start_delay_s", 10.0),
+            interval_s=values.get("interval_s", 15.0),
+        )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.device_name_match, str) or not self.device_name_match.strip():
+            raise ValueError("audio coexistence requires a configured device name match")
+        if not isinstance(self.gains_db, dict) or set(self.gains_db) != set(AUDIO_COEXISTENCE_ORDER):
+            raise ValueError("audio gains must specify beep, buzz, and white_noise")
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               for value in self.gains_db.values()):
+            raise ValueError("audio gains must be finite")
+        if not isinstance(self.sequence, (tuple, list)) or not self.sequence or any(
+            stimulus_id not in AUDIO_COEXISTENCE_ORDER for stimulus_id in self.sequence
+        ):
+            raise ValueError("audio coexistence sequence must contain known pilot stimulus IDs")
+        object.__setattr__(self, "sequence", tuple(self.sequence))
+        if (type(self.start_delay_s) not in (int, float)
+                or not math.isfinite(self.start_delay_s) or self.start_delay_s < 0
+                or type(self.interval_s) not in (int, float)
+                or not math.isfinite(self.interval_s) or self.interval_s < 3.0):
+            raise ValueError("audio schedule needs a non-negative delay and interval of at least 3 s")
+
+
+@dataclass(frozen=True)
+class ScheduledAudio:
+    audio_index: int
+    stimulus_id: str
+    filename: str
+    planned_offset_s: float
+
+
+def build_audio_coexistence_plan(
+    duration_s: float,
+    clips: dict[str, AudioClip],
+    settings: AudioCoexistenceSettings,
+) -> tuple[ScheduledAudio, ...]:
+    if not math.isfinite(duration_s) or duration_s < 0:
+        raise ValueError("audio schedule duration must be finite and non-negative")
+    scheduled = []
+    offset = settings.start_delay_s
+    while offset + 3.0 <= duration_s:
+        stimulus_id = settings.sequence[len(scheduled) % len(settings.sequence)]
+        scheduled.append(ScheduledAudio(
+            len(scheduled) + 1, stimulus_id, clips[stimulus_id].filename, offset
+        ))
+        offset += settings.interval_s
+    return tuple(scheduled)
+
+
+def _latency_summary(values: list[float]) -> dict[str, float | int]:
+    if not values:
+        return {"count": 0}
+    ordered = sorted(values)
+    return {
+        "count": len(ordered),
+        "median_ms": statistics.median(ordered),
+        "mean_ms": statistics.mean(ordered),
+        "sd_ms": statistics.pstdev(ordered),
+        "min_ms": ordered[0],
+        "p95_ms": ordered[math.ceil(0.95 * len(ordered)) - 1],
+        "max_ms": ordered[-1],
+    }
+
+
+def _audio_summary(
+    diagnostics: dict[str, Any],
+    schedule: tuple[ScheduledAudio, ...],
+    request_indices: list[int],
+    latencies_ms: list[float],
+    errors: list[str],
+    settings: AudioCoexistenceSettings,
+) -> dict[str, Any]:
+    return {
+        **diagnostics,
+        "planned_sounds": len(schedule),
+        "duplicate_requests": len(request_indices) - len(set(request_indices)),
+        "duplicate_callback_starts": max(
+            0, diagnostics.get("callback_starts", 0) - diagnostics.get("requested_sounds", 0)
+        ),
+        "request_to_callback_latency": _latency_summary(latencies_ms),
+        "request_to_callback_latency_ms": latencies_ms,
+        "device_name_match": settings.device_name_match,
+        "gain_db": settings.gains_db,
+        "errors": errors,
+    }
+
+
+def _play_coexistence_audio(
+    audio: AudioOutput,
+    schedule: tuple[ScheduledAudio, ...],
+    events: UnifiedEventStream,
+    clock: SessionClock,
+    start_ns: int,
+    stop: Event,
+    latencies_ms: list[float],
+    request_indices: list[int],
+    errors: list[str],
+) -> None:
+    for trial in schedule:
+        planned_ns = start_ns + round(trial.planned_offset_s * 1_000_000_000)
+        if stop.wait(max(0.0, (planned_ns - time.monotonic_ns()) / 1_000_000_000)):
+            return
+        request_ns = time.monotonic_ns()
+        request_indices.append(trial.audio_index)
+        fields = {
+            "audio_index": trial.audio_index,
+            "stimulus_id": trial.stimulus_id,
+            "filename": trial.filename,
+            "planned_offset_s": trial.planned_offset_s,
+            "planned_request_monotonic_ns": planned_ns,
+            "planned_request_utc_ns": clock.fields(planned_ns)["utc_ns"],
+        }
+        events.emit_reliable("AUDIO_TRIAL_START", source_monotonic_ns=request_ns, **fields)
+        events.emit_reliable("AUDIO_REQUEST", source_monotonic_ns=request_ns, **fields)
+        try:
+            result = audio.play(trial.stimulus_id)
+        except Exception as exc:  # noqa: BLE001 - report the failure and stop later requests.
+            errors.append(f"audio request {trial.audio_index}: {exc}")
+            events.emit_reliable(
+                "AUDIO_TRIAL_END", audio_index=trial.audio_index,
+                stimulus_id=trial.stimulus_id, error=str(exc),
+            )
+            return
+        if result.callback_monotonic_ns:
+            latency_ms = (result.callback_monotonic_ns - request_ns) / 1_000_000
+            latencies_ms.append(latency_ms)
+            events.emit_reliable(
+                "AUDIO_CALLBACK_START",
+                source_monotonic_ns=result.callback_monotonic_ns,
+                **fields,
+                callback_utc_ns=result.callback_utc_ns,
+                request_to_callback_ms=latency_ms,
+                callback_semantics="PCM callback start; not physical acoustic onset",
+            )
+        failure = result.error or (
+            f"audio callback failed for request {trial.audio_index}"
+            if not result.callback_monotonic_ns else ""
+        )
+        if result.status_errors:
+            failure = failure or f"audio callback status errors: {result.status_errors}"
+        events.emit_reliable(
+            "AUDIO_TRIAL_END",
+            audio_index=trial.audio_index,
+            stimulus_id=trial.stimulus_id,
+            callback_status_errors=result.status_errors,
+            error=failure,
+        )
+        if failure:
+            errors.append(failure)
+            return
 
 
 class NaturalImageDemoError(RuntimeError):
@@ -55,6 +248,7 @@ class NaturalImageDemoResult:
     event_diagnostics: dict[str, Any]
     display_payload: dict[str, Any] | None = None
     camera_preview: dict[str, object] = field(default_factory=dict)
+    audio_summary: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -337,6 +531,7 @@ def _write_demo_metadata(
     camera_commands: tuple[str, ...],
     lick_monitor_diagnostics: dict[str, Any] | None,
     camera_preview: dict[str, object],
+    audio_summary: dict[str, Any],
 ) -> None:
     for name in ("provenance.json", "final_status.json"):
         path = session_root / name
@@ -357,6 +552,8 @@ def _write_demo_metadata(
             "camera_preview": camera_preview,
             "event_log": event_diagnostics,
         }
+        if audio_summary:
+            value["audio_coexistence"] = audio_summary
         if name == "final_status.json":
             value["status"] = status
             if error:
@@ -367,6 +564,8 @@ def _write_demo_metadata(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["unified_event_log"] = event_diagnostics
         manifest["natural_image_demo_status"] = status
+        if audio_summary:
+            manifest["audio_coexistence"] = audio_summary
         atomic_write_json(manifest_path, manifest)
 
 
@@ -381,6 +580,8 @@ def run_natural_image_demo(
     use_cameras: bool = False,
     camera_preview: bool = False,
     native_binary: Path | str | None = None,
+    audio: AudioOutput | None = None,
+    audio_settings: AudioCoexistenceSettings | None = None,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
 ) -> NaturalImageDemoResult:
     validate_demo_config(
@@ -390,6 +591,17 @@ def run_natural_image_demo(
         preview=camera_preview,
     )
     plan = build_demo_plan(config, seed=seed, image_count=image_count)
+    if (audio is None) != (audio_settings is None):
+        raise ValueError("audio output and audio settings must be supplied together")
+    audio_clips = load_pilot_clips(PILOT_AUDIO_ASSET_ROOT) if audio is not None else {}
+    audio_schedule = (
+        build_audio_coexistence_plan(
+            plan.total_frames / config.display.refresh_hz, audio_clips, audio_settings
+        )
+        if audio_settings is not None else ()
+    )
+    if audio_settings is not None and not audio_schedule:
+        raise ValueError("natural-image plan is too short for the configured audio schedule")
     session = new_session(config, protocol_name="natural-images", session_id=session_id, seed=seed)
     session.write_initial_outputs()
     clock = SessionClock.start(session_id)
@@ -401,6 +613,12 @@ def run_natural_image_demo(
     camera_watch_stop = Event()
     camera_watch_thread: Thread | None = None
     camera_failures: list[str] = []
+    audio_stop = Event()
+    audio_thread: Thread | None = None
+    audio_errors: list[str] = []
+    audio_latencies_ms: list[float] = []
+    audio_request_indices: list[int] = []
+    audio_summary: dict[str, Any] = {}
     display_payload: dict[str, Any] | None = None
     camera_commands: tuple[str, ...] = ()
     camera_preview_metadata: dict[str, object] = {"requested": camera_preview, "enabled": False}
@@ -458,6 +676,56 @@ def run_natural_image_demo(
     try:
         events.emit("SESSION_START", mouse_id=mouse_id, protocol="natural-images")
         events.emit("CLOCK_SYNC", source_monotonic_ns=clock.reference_monotonic_ns, **clock.sync_fields())
+        if audio is not None and audio_settings is not None:
+            audio_dir = session.context.session_root / "audio"
+            audio_dir.mkdir()
+            for clip in audio_clips.values():
+                shutil.copyfile(PILOT_AUDIO_ASSET_ROOT / clip.filename, audio_dir / clip.filename)
+            shutil.copyfile(PILOT_AUDIO_ASSET_ROOT / "manifest.csv", audio_dir / "manifest.csv")
+            atomic_write_json(session.context.session_root / "audio_manifest.json", {
+                "device_name_match": audio_settings.device_name_match,
+                "sample_rate_hz": 48_000,
+                "schedule_order": list(audio_settings.sequence),
+                "start_delay_s": audio_settings.start_delay_s,
+                "interval_s": audio_settings.interval_s,
+                "gain_db": audio_settings.gains_db,
+                "callback_semantics": "PCM callback start; not physical acoustic onset",
+                "stimuli": [
+                    {
+                        "stimulus_id": clip.stimulus_id,
+                        "filename": clip.filename,
+                        "sha256": clip.sha256,
+                        "sample_rate_hz": clip.sample_rate_hz,
+                        "duration_s": clip.duration_s,
+                        "gain_db": audio_settings.gains_db[clip.stimulus_id],
+                    }
+                    for clip in audio_clips.values()
+                ],
+            })
+            atomic_write_json(session.context.session_root / "audio_plan.json", {
+                "schema_version": 1,
+                "sequence": list(audio_settings.sequence),
+                "visual_plan_duration_s": plan.total_frames / config.display.refresh_hz,
+                "start_reference": "immediately before KMS sequence dispatch",
+                "trials": [
+                    {
+                        "audio_index": trial.audio_index,
+                        "stimulus_id": trial.stimulus_id,
+                        "filename": trial.filename,
+                        "duration_s": audio_clips[trial.stimulus_id].duration_s,
+                        "planned_offset_s": trial.planned_offset_s,
+                    }
+                    for trial in audio_schedule
+                ],
+            })
+            audio.prepare(audio_clips, audio_settings.gains_db)
+            events.emit_reliable(
+                "AUDIO_PREPARED",
+                device_name_match=audio_settings.device_name_match,
+                stimulus_count=len(audio_clips),
+                persistent_stream=True,
+                preloaded_pcm=True,
+            )
         if use_cameras and camera_preview:
             preview_environment = resolve_camera_preview_environment()
             camera_preview_metadata = preview_environment.metadata
@@ -590,6 +858,10 @@ def run_natural_image_demo(
             frame_index = 0
             producer_sequence = 0
             for planned in plan.events:
+                if audio_errors:
+                    raise NaturalImageDemoError(
+                        f"audio coexistence failed: {audio_errors[0]}"
+                    )
                 if planned.kind == "image":
                     prepared = preparer.prepare(str(planned.metadata["image"]))
                     rgb888 = prepared.rgb888
@@ -628,7 +900,43 @@ def run_natural_image_demo(
             pixel_format=config.display.pixel_format,
             total_frames=plan.total_frames,
         )
+        if audio is not None and audio_settings is not None:
+            audio_start_ns = time.monotonic_ns()
+            events.emit_reliable(
+                "AV_ACQUISITION_START",
+                source_monotonic_ns=audio_start_ns,
+                audio_schedule_start_monotonic_ns=audio_start_ns,
+                planned_visual_duration_s=plan.total_frames / config.display.refresh_hz,
+            )
+
+            def run_audio_schedule() -> None:
+                try:
+                    _play_coexistence_audio(
+                        audio,
+                        audio_schedule,
+                        events,
+                        clock,
+                        audio_start_ns,
+                        audio_stop,
+                        audio_latencies_ms,
+                        audio_request_indices,
+                        audio_errors,
+                    )
+                except Exception as exc:  # noqa: BLE001 - let the main thread finalize the session.
+                    audio_errors.append(f"audio scheduler: {exc}")
+
+            audio_thread = Thread(
+                target=run_audio_schedule, name="rpi-vstim-audio-schedule", daemon=True
+            )
+            audio_thread.start()
         display_payload = display.present_sequence(frame_stream())
+        if audio_thread is not None:
+            audio_thread.join(timeout=10.0)
+            if audio_thread.is_alive():
+                audio_stop.set()
+                raise NaturalImageDemoError("audio schedule did not finish after KMS presentation")
+            if audio_errors:
+                raise NaturalImageDemoError(f"audio coexistence failed: {audio_errors[0]}")
         first_callback = display_payload.get("first_page_flip_callback_monotonic_ns")
         events.emit(
             "DISPLAY_ACQUIRED",
@@ -665,6 +973,34 @@ def run_natural_image_demo(
         error = str(exc)
         events.emit("SESSION_FAILURE", error=error)
     finally:
+        if audio is not None and audio_settings is not None:
+            audio_stop.set()
+            if audio_thread is not None:
+                audio_thread.join(timeout=10.0)
+                if audio_thread.is_alive():
+                    audio_errors.append("audio scheduler did not stop before cleanup deadline")
+            if audio_errors and status == "COMPLETE":
+                status = "FAILED"
+                error = "audio coexistence failed: " + "; ".join(audio_errors)
+            try:
+                audio_summary = _audio_summary(
+                    audio.diagnostics(), audio_schedule, audio_request_indices,
+                    audio_latencies_ms, audio_errors, audio_settings,
+                )
+                events.emit_reliable("AUDIO_SUMMARY", **audio_summary)
+                atomic_write_json(session.context.session_root / "audio_summary.json", audio_summary)
+            except Exception as exc:  # noqa: BLE001 - retain remaining session cleanup.
+                degraded.append(f"audio diagnostics: {exc}")
+                if status == "COMPLETE":
+                    status = "FAILED"
+                    error = str(exc)
+            try:
+                audio.close()
+            except Exception as exc:  # noqa: BLE001 - preserve cleanup diagnostics.
+                degraded.append(f"audio cleanup: {exc}")
+                if status == "COMPLETE":
+                    status = "FAILED"
+                    error = str(exc)
         if display is not None:
             try:
                 display.close()
@@ -753,6 +1089,7 @@ def run_natural_image_demo(
             camera_commands=camera_commands,
             lick_monitor_diagnostics=lick_monitor_diagnostics,
             camera_preview=camera_preview_metadata,
+            audio_summary=audio_summary,
         )
 
     return NaturalImageDemoResult(
@@ -765,4 +1102,5 @@ def run_natural_image_demo(
         event_diagnostics,
         display_payload,
         camera_preview_metadata,
+        audio_summary,
     )

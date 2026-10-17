@@ -25,7 +25,7 @@ bait button. Audio uses a C-Media Electronics / Unitek Y-247A USB adapter,
 persistent `sounddevice`/PortAudio playback backend and an audio-only pilot;
 audio uses no GPIO pins.
 
-## Provisional USB audio characterization
+## USB audio characterization and coexistence
 
 The detected adapter is a C-Media Electronics Inc. USB Audio Device, Unitek
 Y-247A, seen as ALSA card 2, device 0 (`hw:2,0`) during this test. Playback
@@ -45,9 +45,18 @@ audio-only pilot smoke completed as session
 `audio-pilot-20261016T141736972643Z` with status `COMPLETE`: six requests, six
 callback starts, zero missed requests, and zero callback status errors. These
 software counters do not establish that every sound was acoustically heard.
-Absolute command-to-acoustic latency has not been measured. This is provisional
-standalone characterization, not full-stack validation; VStim with KMS,
-cameras, event logging, NVMe, and NeuroKairos coexistence remains pending.
+Absolute command-to-acoustic latency has not been measured.
+
+Full-stack coexistence was subsequently validated in the approximately
+two-minute session
+`av-coexistence-replay3-20261016211709Z`: natural-image KMS, both cameras,
+event logging, NVMe, NeuroKairos IRIG-H, and persistent USB audio ran together.
+All eight requests received callbacks, both cameras passed fast QC, KMS retained
+all 7,217 frame records, and event drops/writer errors were zero. The
+[validation record](hardware/pi5_av_coexistence_2026-10-16.md) contains full
+measurements and scope. This is a short integration result, not audio endurance
+or acoustic calibration. The phone-video observation confirmed audible output
+qualitatively but did not measure acoustic onset or synchronization.
 ALSA card numbering may change between boots. The configured device-name match
 fails if zero or multiple playback devices match.
 
