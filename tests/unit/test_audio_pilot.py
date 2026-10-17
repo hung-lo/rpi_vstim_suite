@@ -29,6 +29,7 @@ from rpi_vstim.protocols.audio_pilot import AudioPilotSettings, build_plan, run_
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "config/rigs/pi5_audio_pilot.example.toml"
+VISUAL_PROFILE = ROOT / "config/rigs/pi5_natural_image_demo.example.toml"
 ASSETS = ROOT / "assets/audio/pilot"
 
 
@@ -48,7 +49,13 @@ def test_plan_is_balanced_deterministic_and_bounded():
 
 def test_coexistence_schedule_is_fixed_and_fits_two_minute_plan():
     clips = load_pilot_clips(ASSETS)
-    settings = AudioCoexistenceSettings("USB Audio Device")
+    visual_config = load_config(VISUAL_PROFILE)
+    audio_settings = AudioPilotSettings.from_config(load_config(PROFILE))
+    settings = AudioCoexistenceSettings.from_config(
+        visual_config,
+        device_name_match=audio_settings.device_name_match,
+        gains_db=audio_settings.gains_db,
+    )
     schedule = build_audio_coexistence_plan(120.645, clips, settings)
     assert [trial.stimulus_id for trial in schedule] == [
         "beep", "buzz", "white_noise", "beep", "buzz", "white_noise", "beep", "buzz",
@@ -60,6 +67,27 @@ def test_coexistence_schedule_is_fixed_and_fits_two_minute_plan():
         for earlier, later in pairwise(schedule)
     )
     assert build_audio_coexistence_plan(12.9, clips, settings) == ()
+
+    custom_config = replace(
+        visual_config,
+        protocol=replace(
+            visual_config.protocol,
+            parameters={**visual_config.protocol.parameters, "audio_coexistence": {
+                "sequence": ["white_noise", "beep"],
+                "start_delay_s": 2.0,
+                "interval_s": 5.0,
+            }},
+        ),
+    )
+    custom = AudioCoexistenceSettings.from_config(
+        custom_config,
+        device_name_match=audio_settings.device_name_match,
+        gains_db=audio_settings.gains_db,
+    )
+    custom_plan = build_audio_coexistence_plan(10, clips, custom)
+    assert [(trial.stimulus_id, trial.planned_offset_s) for trial in custom_plan] == [
+        ("white_noise", 2.0), ("beep", 7.0),
+    ]
 
 
 def test_coexistence_fake_playback_logs_request_callback_and_end(tmp_path):

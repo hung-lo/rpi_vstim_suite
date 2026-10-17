@@ -53,17 +53,53 @@ class AudioCoexistenceSettings:
     gains_db: dict[str, float] = field(default_factory=lambda: {
         stimulus_id: 0.0 for stimulus_id in AUDIO_COEXISTENCE_ORDER
     })
+    sequence: tuple[str, ...] = AUDIO_COEXISTENCE_ORDER
     start_delay_s: float = 10.0
     interval_s: float = 15.0
 
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        device_name_match: str,
+        gains_db: dict[str, float],
+    ) -> AudioCoexistenceSettings:
+        values = config.protocol.parameters.get("audio_coexistence", {})
+        if not isinstance(values, dict):
+            raise ValueError("protocol.parameters.audio_coexistence must be a table")
+        unknown = set(values) - {"sequence", "start_delay_s", "interval_s"}
+        if unknown:
+            raise ValueError(
+                "unknown audio coexistence setting(s): " + ", ".join(sorted(unknown))
+            )
+        sequence = values.get("sequence", AUDIO_COEXISTENCE_ORDER)
+        if not isinstance(sequence, (list, tuple)):
+            raise ValueError("audio coexistence sequence must be an array of stimulus IDs")
+        return cls(
+            device_name_match=device_name_match,
+            gains_db=gains_db,
+            sequence=tuple(sequence),
+            start_delay_s=values.get("start_delay_s", 10.0),
+            interval_s=values.get("interval_s", 15.0),
+        )
+
     def __post_init__(self) -> None:
-        if not self.device_name_match.strip():
+        if not isinstance(self.device_name_match, str) or not self.device_name_match.strip():
             raise ValueError("audio coexistence requires a configured device name match")
-        if set(self.gains_db) != set(AUDIO_COEXISTENCE_ORDER):
+        if not isinstance(self.gains_db, dict) or set(self.gains_db) != set(AUDIO_COEXISTENCE_ORDER):
             raise ValueError("audio gains must specify beep, buzz, and white_noise")
-        if any(not math.isfinite(value) for value in self.gains_db.values()):
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               for value in self.gains_db.values()):
             raise ValueError("audio gains must be finite")
-        if (not math.isfinite(self.start_delay_s) or self.start_delay_s < 0
+        if not isinstance(self.sequence, (tuple, list)) or not self.sequence or any(
+            stimulus_id not in AUDIO_COEXISTENCE_ORDER for stimulus_id in self.sequence
+        ):
+            raise ValueError("audio coexistence sequence must contain known pilot stimulus IDs")
+        object.__setattr__(self, "sequence", tuple(self.sequence))
+        if (type(self.start_delay_s) not in (int, float)
+                or not math.isfinite(self.start_delay_s) or self.start_delay_s < 0
+                or type(self.interval_s) not in (int, float)
                 or not math.isfinite(self.interval_s) or self.interval_s < 3.0):
             raise ValueError("audio schedule needs a non-negative delay and interval of at least 3 s")
 
@@ -86,7 +122,7 @@ def build_audio_coexistence_plan(
     scheduled = []
     offset = settings.start_delay_s
     while offset + 3.0 <= duration_s:
-        stimulus_id = AUDIO_COEXISTENCE_ORDER[len(scheduled) % len(AUDIO_COEXISTENCE_ORDER)]
+        stimulus_id = settings.sequence[len(scheduled) % len(settings.sequence)]
         scheduled.append(ScheduledAudio(
             len(scheduled) + 1, stimulus_id, clips[stimulus_id].filename, offset
         ))
@@ -649,7 +685,7 @@ def run_natural_image_demo(
             atomic_write_json(session.context.session_root / "audio_manifest.json", {
                 "device_name_match": audio_settings.device_name_match,
                 "sample_rate_hz": 48_000,
-                "schedule_order": list(AUDIO_COEXISTENCE_ORDER),
+                "schedule_order": list(audio_settings.sequence),
                 "start_delay_s": audio_settings.start_delay_s,
                 "interval_s": audio_settings.interval_s,
                 "gain_db": audio_settings.gains_db,
@@ -668,7 +704,7 @@ def run_natural_image_demo(
             })
             atomic_write_json(session.context.session_root / "audio_plan.json", {
                 "schema_version": 1,
-                "sequence": list(AUDIO_COEXISTENCE_ORDER),
+                "sequence": list(audio_settings.sequence),
                 "visual_plan_duration_s": plan.total_frames / config.display.refresh_hz,
                 "start_reference": "immediately before KMS sequence dispatch",
                 "trials": [

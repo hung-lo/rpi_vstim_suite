@@ -163,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     natural_images = commands.add_parser("natural-images", help="real natural-image demonstrations")
     natural_image_commands = natural_images.add_subparsers(dest="natural_image_command", required=True)
     natural_image_run = natural_image_commands.add_parser(
-        "run", help="run natural images with optional real licks and CSI cameras"
+        "run", help="run natural images with optional licks, cameras, and pilot audio"
     )
     natural_image_run.add_argument("--mouse-id", required=True)
     natural_image_run.add_argument(
@@ -183,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument("--camera-preview", action="store_true")
     natural_image_run.add_argument(
         "--audio-coexistence", action="store_true",
-        help="play the deterministic pilot audio schedule in the same session",
+        help="play the configured pilot audio schedule in the same session",
     )
     natural_image_run.add_argument(
         "--audio-config",
@@ -492,7 +492,8 @@ def main(argv: list[str] | None = None) -> int:
                 if audio_config.protocol.name != "audio-pilot":
                     raise ConfigError("--audio-config must use protocol.name = 'audio-pilot'")
                 pilot_settings = AudioPilotSettings.from_config(audio_config)
-                audio_settings = AudioCoexistenceSettings(
+                audio_settings = AudioCoexistenceSettings.from_config(
+                    config,
                     device_name_match=pilot_settings.device_name_match,
                     gains_db=pilot_settings.gains_db,
                 )
