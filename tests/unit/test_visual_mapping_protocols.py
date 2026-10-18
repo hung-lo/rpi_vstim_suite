@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import math
 import random
@@ -189,6 +190,81 @@ def test_grating_phase_uses_configured_refresh_for_frame_count_and_duration(tmp_
             )
         )
         assert frame[row, column, 0] == np.rint(luminance * 255)
+
+
+def test_full_source_frame_sequences_match_frozen_reference_golden_hashes(tmp_path):
+    """Lock full 60 Hz source-frame sequences to frozen reference 6e1b2776."""
+    config = replace(
+        small_config(tmp_path),
+        display=replace(
+            small_config(tmp_path).display,
+            width_px=320,
+            height_px=180,
+            refresh_hz=60.0,
+            physical_width_cm=15.50,
+            physical_height_cm=8.72,
+        ),
+        photodiode=replace(small_config(tmp_path).photodiode, enabled=False),
+    )
+
+    def sequence_hash(frames):
+        digest = hashlib.sha256()
+        for frame in frames:
+            digest.update(np.ascontiguousarray(frame).tobytes())
+        return digest.hexdigest()
+
+    grating_hashes = {
+        0.0: "a9ddc47b36fb9c9d002d9d4ac4f591a244e26a9c3f978489d2dd5089954aeb3d",
+        22.5: "4076da7c8ebd21fa3d426c56509d79605f465ebb6b019c4fcb383ec8bbe488ea",
+        45.0: "08002589da2e302d3654d9e379d2c8c2b97afc1f984a961820e42281d6cbf5de",
+        67.5: "cb8d0498a33b1a5aa917aa401598d6aaa0119f3f5cf053ee2845e631c51ad6ff",
+        90.0: "f6f46928512bdc81ae209385dbff7513474b06df0dc9e798daf35b5430059720",
+        112.5: "1180cfd7ffa891e0bec5d5f2cbb021f4ed19e8b02c7df7b27783123f33aa78b8",
+        135.0: "f98cda3589a731550a53d8e6c4fbfdc2ab551ce691c544672466d9d64bb27424",
+        157.5: "99f8ca1b452fff89682c9fed3c50d8e10c3811334fb2c2a5ca5e7ad747267b65",
+    }
+    grating_settings = DriftingGratingSettings(
+        trials_per_orientation=1,
+        stim_duration_s=0.5,
+        refresh_hz=60.0,
+    )
+    for orientation, expected_hash in grating_hashes.items():
+        frames = [
+            generate_grating_frame(
+                config,
+                grating_settings,
+                bar_orientation_deg=orientation,
+                frame_index=frame_index,
+            )
+            for frame_index in range(30)
+        ]
+        assert sequence_hash(frames) == expected_hash
+
+    retinotopy_hashes = {
+        "left_to_right": "343c875071c8e683a2100d1c21d3d2d3b73b1a619876c721831fa8e62b7d480b",
+        "right_to_left": "dc75ee4a2892fc0d19c0fab74b6f0e0068f0ac13ea0acd871008a2ba845b56a8",
+        "top_to_bottom": "e5a005831857049b1eaf03b3f5362975c71df5a67a27b885167ee36ff3d6a6bf",
+        "bottom_to_top": "e1e1d913b9110ae16e2d8ae7af5e7e2e0dcdcdb636daa41981aca8a2996ba2a1",
+    }
+    retinotopy_settings = RetinotopySettings(
+        sweep_duration_s=2.0,
+        inter_sweep_gray_s=1.0,
+        initial_gray_s=1.0,
+        final_gray_s=1.0,
+        repeats_per_direction=1,
+        refresh_hz=60.0,
+    )
+    for direction, expected_hash in retinotopy_hashes.items():
+        frames = [
+            generate_retinotopy_frame(
+                config,
+                retinotopy_settings,
+                direction=direction,
+                source_frame_index=frame_index,
+            )
+            for frame_index in range(30)
+        ]
+        assert sequence_hash(frames) == expected_hash
 
 
 def test_grating_cache_contact_sheet_hash_and_corruption_validation(tmp_path):
