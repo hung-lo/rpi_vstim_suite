@@ -11,7 +11,7 @@ import pytest
 np = pytest.importorskip("numpy", reason="visual protocol rendering tests require the [visual] extra")
 Image = pytest.importorskip("PIL.Image", reason="visual protocol preview tests require the [visual] extra")
 
-from rpi_vstim.core.config import Config, PathsConfig
+from rpi_vstim.core.config import Config, ConfigError, PathsConfig
 from rpi_vstim.core.session import inspect_session
 from rpi_vstim.protocols.drifting_gratings import (
     DEFAULT_ORIENTATIONS_DEG,
@@ -594,6 +594,34 @@ def test_visual_mapping_rejects_protocol_refresh_mismatch_before_cache_access(tm
             simulate=True,
         )
     assert not (tmp_path / "sessions" / "refresh-mismatch").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("width_px", 0), ("physical_width_cm", 0.0)],
+)
+def test_visual_mapping_rejects_invalid_screen_geometry_before_session_creation(
+    tmp_path, field, value
+):
+    config = small_config(tmp_path)
+    invalid_display = replace(config.display, **{field: value})
+    config = replace(config, display=invalid_display)
+    settings = DriftingGratingSettings(
+        orientations_deg=(0.0,), trials_per_orientation=1, refresh_hz=59.82
+    )
+
+    with pytest.raises(ConfigError, match="display dimensions|display geometry"):
+        run_visual_mapping(
+            config,
+            protocol_name="drifting-gratings",
+            settings=settings,
+            session_id=f"bad-geometry-{field}",
+            seed=settings.sequence_seed,
+            cache_root=tmp_path / "no-cache-required-to-fail",
+            simulate=True,
+        )
+
+    assert not (tmp_path / "sessions" / f"bad-geometry-{field}").exists()
 
 
 def test_simulated_retinotopy_session_writes_frame_plan(tmp_path):
