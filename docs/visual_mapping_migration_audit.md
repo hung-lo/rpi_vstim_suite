@@ -43,6 +43,18 @@ bar orientation is horizontal and drifts at 270°; a 90° bar orientation is
 vertical and drifts at 0°. The old retinotopy geometry is linear in screen
 pixels, not corrected for visual-angle velocity.
 
+The frozen planners selected a time-derived random seed when none was
+supplied. The unified settings use fixed seed `0` by default and save it with
+the plan; the example protocol TOMLs also specify a seed. This is an
+intentional reproducibility difference. Supplying an explicit seed uses the
+same Python `random.Random` shuffle and ITI draw sequence as the frozen
+implementation.
+
+Unified session `trial_id`/`sweep_index` values are 1-based for consistency
+with the current event/session convention; the frozen planner dictionaries
+used 0-based `trial_index`. This changes labels only, not trial order or
+stimulus content. `source_frame_index` remains 0-based.
+
 ## Unified implementation result
 
 `rpi-vstim drifting-gratings` and `rpi-vstim retinotopy` now provide
@@ -69,20 +81,29 @@ The optional Pi smoke configs and exact commands are documented in
 validation passed, but no physical Pi grating/retinotopy validation is claimed
 by this implementation pass.
 
-## Frozen-reference equivalence spot check
+## Frozen-reference equivalence check
 
 The frozen implementation was imported directly from the specified commit and
-compared with the new planners/renderers using its 1280×720, 60 Hz screen
-geometry, with the photodiode patch disabled for the pixel comparison (the
-unified renderer applies that patch through its normal display wrapper).
+compared with the new planners/renderers at 60 Hz using a compact 320×180
+screen with the same 15.50×8.72 cm physical geometry. The photodiode patch was
+disabled for source-RGB comparison because the unified renderer applies the
+configured patch downstream, through its normal display wrapper.
 
-- Drifting gratings: seed 123 with two repeats produced the same 16-trial
-  condition order, orientation IDs, bar/drift labels, repeat numbers, stimulus
-  frame counts, and frame-quantized ITIs. Frames at source index 7 for 0°,
-  45°, 90°, and 157.5° were pixel-identical.
-- Retinotopy: seed 7 with two shuffled repeats of all four directions produced
-  the same eight-direction order. Start, middle, and final frames were
-  pixel-identical for all four directions, including reversed sweeps.
+- Drifting gratings: seed 123 produced the same balanced trial order and
+  frame-quantized ITIs. All 240 source frames (eight orientations × thirty
+  0.5-second frames) matched pixel-for-pixel; mismatches: 0, max pixel
+  difference: 0.
+- Retinotopy: all 120 frames (four directions × thirty source positions in a
+  two-second sweep) matched pixel-for-pixel, including both reverse sweeps;
+  mismatches: 0, max pixel difference: 0. Fixed and seeded shuffled direction
+  ordering match the frozen planner.
+
+On the configured 1024×600 OL7 geometry at nominal 59.82 Hz, X and Y pixel
+pitches are 0.0151367 and 0.0145333 cm/pixel. The drifting carrier computes
+physical X/Y coordinates independently and therefore remains 0.2 cycles/cm at
+0°, 45°, and 90° (maximum calculated deviation: 0%). The retinotopy screen
+mapping is planar and linear in pixels; pixel Y increases down while screen
+and visual-angle elevation increase up.
 
 The intentional current-profile timing adaptation is limited to the nominal
 59.82 Hz mode: instead of rejecting a 15 Hz movement rate as non-divisible,

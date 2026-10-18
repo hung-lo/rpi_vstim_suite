@@ -20,7 +20,10 @@ plus independent uniform jitter in `[0, 0.5)` s, 2 Hz temporal frequency, 0.2
 cycles/cm spatial frequency, Michelson contrast 1.0, mean luminance 0.5, and
 3 s initial and final gray. Trial order is shuffled with a local seeded
 generator while repeats remain balanced. The resolved seed and every planned
-trial and ITI are written to the session.
+trial and ITI are written to the session. The unified interface defaults to a
+fixed seed (`0`) unless a config or `--seed` supplies another value. The frozen
+runner chose a time-derived seed when none was supplied; using a fixed default
+is an intentional reproducibility difference.
 
 Spatial frequency remains in cycles/cm for compatibility. The active screen
 geometry, pixel pitch, eye distance, and calibration ID are snapshotted so
@@ -28,16 +31,24 @@ offline analysis can derive visual-angle geometry later. No cycles/degree mode
 is currently defined. An optional rectangular patch mode uses explicit
 center/width/height values in screen-plane cm.
 
+The carrier uses separate physical X and Y screen-plane coordinates before
+projection onto the orientation normal; it does not use one X-derived scale or
+assume square pixels. On the configured 1024×600 OL7 geometry (15.50×8.72 cm),
+pixel pitches differ by about 4.15%, but the computed carrier remains 0.2
+cycles/cm at 0°, 45°, and 90°.
+
 Durations are quantized to the nearest configured display refresh. For example,
 0.5 s at 59.82 Hz plans 30 frames (about 0.5015 s). Grating phase advances by
 the configured temporal frequency and nominal refresh; each trial starts at
 the configured starting phase. KMS kernel timestamps remain the software
-display timing reference.
+display timing reference. The 30-refresh interval advances 360° at 60 Hz and
+361.083° at 59.82 Hz; the last sampled phase at 59.82 Hz is 349.047°.
 
 ## Preview and cache
 
-Install the optional rendering dependencies with `python -m pip install -e
-'.[visual]'`. Preview works without a Pi, KMS, cameras, or GPIO:
+Install the optional rendering dependencies with
+`python -m pip install -e '.[visual]'`. Preview works without a Pi, KMS,
+cameras, or GPIO:
 
 ```bash
 rpi-vstim drifting-gratings preview \
@@ -53,6 +64,10 @@ rpi-vstim drifting-gratings build-cache \
   --config config/rigs/visual_mapping_simulation.toml \
   --protocol-config config/protocols/drifting_gratings.smoke.toml
 ```
+
+The preview labels each bar orientation and drift direction. Its magenta arrow
+marks motion direction for inspection only; the arrow is not part of any
+stimulus frame.
 
 Cache identity covers display geometry/format, photodiode settings, and all
 scientific render parameters. The cache has per-frame-set SHA256 checksums and

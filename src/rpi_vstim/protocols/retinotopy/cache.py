@@ -7,6 +7,7 @@ import numpy as np
 
 from rpi_vstim.core.config import Config
 from rpi_vstim.protocols.visual_mapping.cache import FrameSetSpec, build_frame_cache
+from rpi_vstim.protocols.visual_mapping.config import validate_refresh_rate
 from rpi_vstim.protocols.visual_mapping.rendering import (
     display_render_settings,
     make_renderer,
@@ -19,6 +20,7 @@ from .stimulus import generate_retinotopy_frame
 
 
 def render_settings(config: Config, settings: RetinotopySettings) -> dict[str, Any]:
+    validate_refresh_rate(config, settings)
     return {
         "renderer_schema": 1,
         "display": display_render_settings(config),
@@ -89,6 +91,7 @@ def build_cache(config: Config, settings: RetinotopySettings, cache_root: Path):
 
 
 def write_preview(config: Config, settings: RetinotopySettings, output_path: Path) -> Path:
+    validate_refresh_rate(config, settings)
     source_count = round(settings.sweep_duration_s * settings.movement_frame_rate_hz)
     tiles = []
     for direction in settings.enabled_directions:

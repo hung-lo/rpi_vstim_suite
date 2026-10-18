@@ -7,7 +7,7 @@ from typing import Any
 from rpi_vstim.core.config import Config
 from rpi_vstim.core.plan import SessionPlan
 from rpi_vstim.protocols.visual_mapping.geometry import (
-    pixel_to_screen_cm,
+    pixel_edge_to_screen_cm,
     screen_cm_to_visual_angle_deg,
 )
 
@@ -21,17 +21,26 @@ FRAME_PLAN_FIELDS = (
     "axis",
     "screen_width_px",
     "screen_height_px",
+    "nominal_refresh_hz",
+    "movement_frame_rate_hz",
     "active_width_cm",
     "active_height_cm",
     "eye_screen_distance_cm",
+    "pixel_coordinate_convention",
     "screen_center_convention",
+    "screen_plane_coordinate_convention",
+    "visual_angle_sign_convention",
+    "boundary_coordinate_semantics",
+    "bar_edge_coordinate_semantics",
     "render_cache_key",
     "cache_sha256",
     "cache_frame_set",
     "cache_frame_index",
     "source_frame_index",
     "planned_relative_time_s",
+    "sweep_relative_time_s",
     "first_nominal_display_refresh_index",
+    "last_nominal_display_refresh_index",
     "refresh_count",
     "normalized_sweep_position",
     "normalized_boundary_position",
@@ -42,6 +51,10 @@ FRAME_PLAN_FIELDS = (
     "black_end_px",
     "white_start_px",
     "white_end_px",
+    "black_visible_start_px",
+    "black_visible_end_px",
+    "white_visible_start_px",
+    "white_visible_end_px",
     "boundary_screen_x_cm",
     "boundary_screen_y_cm",
     "boundary_visual_angle_x_deg",
@@ -84,12 +97,17 @@ def build_frame_plan_rows(
             if definition.movement_axis == "x":
                 black_start, black_end = rendered_boundary - width, rendered_boundary
                 white_start, white_end = rendered_boundary, rendered_boundary + width
-                x_px, y_px = rendered_boundary, (config.display.height_px - 1) / 2.0
+                x_edge_px, y_edge_px = rendered_boundary, config.display.height_px / 2.0
             else:
                 black_start, black_end = rendered_boundary - width, rendered_boundary
                 white_start, white_end = rendered_boundary, rendered_boundary + width
-                x_px, y_px = (config.display.width_px - 1) / 2.0, rendered_boundary
-            x_cm, y_cm = pixel_to_screen_cm(config, x_px, y_px)
+                x_edge_px, y_edge_px = config.display.width_px / 2.0, rendered_boundary
+            edge_dimension = dimension
+            black_visible_start = max(0, min(edge_dimension, black_start))
+            black_visible_end = max(0, min(edge_dimension, black_end))
+            white_visible_start = max(0, min(edge_dimension, white_start))
+            white_visible_end = max(0, min(edge_dimension, white_end))
+            x_cm, y_cm = pixel_edge_to_screen_cm(config, x_edge_px, y_edge_px)
             angle_x, angle_y = screen_cm_to_visual_angle_deg(config, x_cm, y_cm)
             rows.append({
                 "sweep_index": int(event.trial_id or 0),
@@ -98,10 +116,17 @@ def build_frame_plan_rows(
                 "axis": axis,
                 "screen_width_px": config.display.width_px,
                 "screen_height_px": config.display.height_px,
+                "nominal_refresh_hz": settings.refresh_hz,
+                "movement_frame_rate_hz": settings.movement_frame_rate_hz,
                 "active_width_cm": config.display.physical_width_cm,
                 "active_height_cm": config.display.physical_height_cm,
                 "eye_screen_distance_cm": config.display.eye_distance_cm,
-                "screen_center_convention": "pixel-grid center; +x right; +y up",
+                "pixel_coordinate_convention": "origin at top-left pixel center; +x right; +y down",
+                "screen_center_convention": "pixel center ((width_px-1)/2, (height_px-1)/2) maps to screen-plane (0 cm, 0 cm)",
+                "screen_plane_coordinate_convention": "origin at screen center; +x right; +y up",
+                "visual_angle_sign_convention": "positive x angle is right; positive y angle is up",
+                "boundary_coordinate_semantics": "integer boundary n lies between pixel indices n-1 and n",
+                "bar_edge_coordinate_semantics": "unclipped half-open pixel-edge intervals; visible intervals clipped to [0, dimension)",
                 "render_cache_key": cache.cache_key if cache is not None else "",
                 "cache_sha256": (
                     cache.manifest["frame_sets"][cache_axis]["sha256"]
@@ -111,7 +136,9 @@ def build_frame_plan_rows(
                 "cache_frame_index": cache_index,
                 "source_frame_index": source_index,
                 "planned_relative_time_s": global_refresh / settings.refresh_hz,
+                "sweep_relative_time_s": source_index / settings.movement_frame_rate_hz,
                 "first_nominal_display_refresh_index": global_refresh,
+                "last_nominal_display_refresh_index": global_refresh + refresh_count - 1,
                 "refresh_count": refresh_count,
                 "normalized_sweep_position": source_index / max(source_count - 1, 1),
                 "normalized_boundary_position": (nominal_boundary + width) / (dimension + 2 * width),
@@ -122,6 +149,10 @@ def build_frame_plan_rows(
                 "black_end_px": black_end,
                 "white_start_px": white_start,
                 "white_end_px": white_end,
+                "black_visible_start_px": black_visible_start,
+                "black_visible_end_px": black_visible_end,
+                "white_visible_start_px": white_visible_start,
+                "white_visible_end_px": white_visible_end,
                 "boundary_screen_x_cm": x_cm,
                 "boundary_screen_y_cm": y_cm,
                 "boundary_visual_angle_x_deg": angle_x,

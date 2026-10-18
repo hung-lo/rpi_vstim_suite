@@ -18,7 +18,10 @@ def geometry_snapshot(config: Config) -> dict[str, Any]:
             "x": (display.width_px - 1) / 2.0,
             "y": (display.height_px - 1) / 2.0,
         },
+        "pixel_coordinate_convention": "origin at top-left pixel center; +x right; +y down",
         "screen_coordinate_convention": "origin at pixel-grid center; +x right; +y up",
+        "visual_angle_sign_convention": "positive x angle is right; positive y angle is up",
+        "screen_center_convention": "pixel center ((width_px-1)/2, (height_px-1)/2) maps to screen-plane (0 cm, 0 cm)",
         "visual_angle_model": "atan2(screen_plane_cm, eye_screen_distance_cm), planar unwarped screen",
         "refresh_hz": display.refresh_hz,
         "pixel_format": display.pixel_format,
@@ -30,6 +33,16 @@ def pixel_to_screen_cm(config: Config, x_px: float, y_px: float) -> tuple[float,
     display = config.display
     x_cm = (x_px - (display.width_px - 1) / 2.0) * display.physical_width_cm / display.width_px
     y_cm = ((display.height_px - 1) / 2.0 - y_px) * display.physical_height_cm / display.height_px
+    return x_cm, y_cm
+
+
+def pixel_edge_to_screen_cm(
+    config: Config, x_edge_px: float, y_edge_px: float
+) -> tuple[float, float]:
+    """Map pixel-edge coordinates to the centered physical screen plane."""
+    display = config.display
+    x_cm = (x_edge_px - display.width_px / 2.0) * display.physical_width_cm / display.width_px
+    y_cm = (display.height_px / 2.0 - y_edge_px) * display.physical_height_cm / display.height_px
     return x_cm, y_cm
 
 

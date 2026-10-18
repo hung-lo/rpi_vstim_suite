@@ -3,6 +3,7 @@ import json
 import math
 import random
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,12 @@ from rpi_vstim.protocols.retinotopy.stimulus import (
 )
 from rpi_vstim.protocols.visual_mapping.cache import FrameCacheError
 from rpi_vstim.protocols.visual_mapping.config import load_protocol_settings
+from rpi_vstim.protocols.visual_mapping.geometry import (
+    geometry_snapshot,
+    pixel_edge_to_screen_cm,
+    pixel_to_screen_cm,
+    screen_cm_to_visual_angle_deg,
+)
 from rpi_vstim.protocols.visual_mapping.runner import run_visual_mapping
 
 
@@ -143,6 +150,45 @@ def test_grating_render_phase_frequency_luminance_and_no_clipping(tmp_path):
     patch = generate_grating_frame(config, patch_settings, bar_orientation_deg=0, frame_index=0)
     assert np.all(patch[0, 0] == 127)
     assert np.any(patch[30, 40] != 127)
+    out_of_bounds_patch = replace(
+        patch_settings,
+        rectangular_patch_geometry=RectangularPatchGeometry(0, 0, 100, 100),
+    )
+    with pytest.raises(ValueError, match="exceeds the configured active screen"):
+        generate_grating_frame(
+            config, out_of_bounds_patch, bar_orientation_deg=0, frame_index=0
+        )
+
+
+@pytest.mark.parametrize("refresh_hz", [60.0, 59.82])
+def test_grating_phase_uses_configured_refresh_for_frame_count_and_duration(tmp_path, refresh_hz):
+    config = replace(
+        small_config(tmp_path),
+        display=replace(small_config(tmp_path).display, refresh_hz=refresh_hz),
+    )
+    settings = DriftingGratingSettings(
+        orientations_deg=(0.0,),
+        trials_per_orientation=1,
+        stim_duration_s=0.5,
+        refresh_hz=refresh_hz,
+    )
+    assert settings.stimulus_frame_count == 30
+    assert settings.stimulus_frame_count / refresh_hz == pytest.approx(0.5 if refresh_hz == 60 else 30 / 59.82)
+    row, column = 11, 17
+    y_cm = ((config.display.height_px - 1) / 2 - row) * (
+        config.display.physical_height_cm / config.display.height_px
+    )
+    for frame_index in (0, 1, 29):
+        frame = generate_grating_frame(
+            config, settings, bar_orientation_deg=0.0, frame_index=frame_index
+        )
+        phase = 2 * math.pi * settings.temporal_frequency_hz * frame_index / refresh_hz
+        luminance = settings.mean_luminance * (
+            1 + settings.contrast * math.sin(
+                2 * math.pi * settings.spatial_frequency_cycles_per_cm * y_cm + phase
+            )
+        )
+        assert frame[row, column, 0] == np.rint(luminance * 255)
 
 
 def test_grating_cache_contact_sheet_hash_and_corruption_validation(tmp_path):
@@ -176,10 +222,13 @@ def test_grating_cache_contact_sheet_hash_and_corruption_validation(tmp_path):
 
 def test_grating_preview_is_hardware_free(tmp_path):
     config = small_config(tmp_path)
-    path = write_grating_preview(config, DriftingGratingSettings(), tmp_path / "gratings.png")
+    settings = DriftingGratingSettings(refresh_hz=config.display.refresh_hz)
+    path = write_grating_preview(config, settings, tmp_path / "gratings.png")
     assert path.is_file()
     with Image.open(path) as image:
         assert image.width == 4 * 256
+        pixels = np.asarray(image)
+        assert np.count_nonzero(np.all(pixels == (255, 0, 255), axis=2)) > 0
 
 
 def test_retinotopy_default_and_4_direction_fixed_and_shuffled_plans():
@@ -248,13 +297,34 @@ def test_retinotopy_direction_positions_and_bar_polarity(tmp_path, direction, fi
     assert np.all(generate_retinotopy_frame(
         config, settings, direction=direction, source_frame_index=4
     ) == 127)
+    first_visible = generate_retinotopy_frame(
+        config, settings, direction=direction, source_frame_index=1
+    )
+    last_visible = generate_retinotopy_frame(
+        config, settings, direction=direction, source_frame_index=3
+    )
+    expected_leading_color = 255 if direction in {"left_to_right", "top_to_bottom"} else 0
+    for visible_frame, source_index in ((first_visible, 1), (last_visible, 3)):
+        boundary = round(boundary_positions_px(config, settings, direction)[source_index])
+        if axis == "x":
+            leading_sample = visible_frame[30, boundary if expected_leading_color == 255 else boundary - 1, 0]
+            trailing_sample = visible_frame[30, boundary - 1 if expected_leading_color == 255 else boundary, 0]
+        else:
+            leading_sample = visible_frame[boundary if expected_leading_color == 255 else boundary - 1, 40, 0]
+            trailing_sample = visible_frame[boundary - 1 if expected_leading_color == 255 else boundary, 40, 0]
+        assert leading_sample == expected_leading_color
+        assert trailing_sample == (0 if expected_leading_color == 255 else 255)
 
 
 def test_retinotopy_59_82hz_refresh_mapping_and_complete_analysis_frame_plan(tmp_path):
     config = small_config(tmp_path)
     counts = refreshes_per_source_frame(300, 59.82, 15)
     assert set(counts) == {3, 4}
+    assert counts.count(3) == 4
+    assert counts.count(4) == 296
     assert sum(counts) == round(20 * 59.82)
+    with pytest.raises(ValueError, match="must not be below movement rate"):
+        refreshes_per_source_frame(30, 59.82, 60)
     settings = RetinotopySettings(
         sweep_duration_s=1.0,
         inter_sweep_gray_s=0.2,
@@ -271,10 +341,32 @@ def test_retinotopy_59_82hz_refresh_mapping_and_complete_analysis_frame_plan(tmp
     assert all(row["screen_width_px"] == 80 for row in rows)
     assert all(row["active_width_cm"] == 12.0 for row in rows)
     assert all(row["eye_screen_distance_cm"] == 16.0 for row in rows)
+    assert all(row["nominal_refresh_hz"] == 59.82 for row in rows)
+    assert all(row["pixel_coordinate_convention"].endswith("+y down") for row in rows)
+    assert all(row["screen_plane_coordinate_convention"].endswith("+y up") for row in rows)
+    assert all(row["boundary_coordinate_semantics"].startswith("integer boundary") for row in rows)
     first_sweep_positions = boundary_positions_px(config, settings, "left_to_right")
     left_rows = [row for row in rows if row["direction"] == "left_to_right"]
     assert [row["nominal_boundary_position_px"] for row in left_rows] == list(first_sweep_positions)
     assert [row["boundary_position_px"] for row in left_rows] == [round(value) for value in first_sweep_positions]
+    assert left_rows[7]["boundary_screen_x_cm"] == pytest.approx(0.0)
+    top_rows = [row for row in rows if row["direction"] == "top_to_bottom"]
+    assert top_rows[7]["boundary_screen_y_cm"] == pytest.approx(0.0)
+    assert all(
+        row["last_nominal_display_refresh_index"]
+        == row["first_nominal_display_refresh_index"] + row["refresh_count"] - 1
+        for row in rows
+    )
+    for sweep_rows in (
+        [row for row in rows if row["sweep_index"] == sweep]
+        for sweep in {row["sweep_index"] for row in rows}
+    ):
+        assert [row["source_frame_index"] for row in sweep_rows] == list(range(15))
+        assert all(
+            right["first_nominal_display_refresh_index"]
+            == left["last_nominal_display_refresh_index"] + 1
+            for left, right in pairwise(sweep_rows)
+        )
     update_actual_kms_mapping(rows, [{
         "frame_index": rows[0]["first_nominal_display_refresh_index"],
         "kernel_event_ns": 123,
@@ -287,6 +379,30 @@ def test_retinotopy_59_82hz_refresh_mapping_and_complete_analysis_frame_plan(tmp
         loaded = list(csv.DictReader(handle))
     assert len(loaded) == len(rows)
     assert loaded[0]["boundary_visual_angle_x_deg"] != ""
+    assert loaded[0]["black_visible_start_px"] != ""
+    assert loaded[0]["screen_center_convention"].startswith("pixel center")
+
+
+def test_screen_geometry_coordinate_sign_conventions(tmp_path):
+    config = small_config(tmp_path)
+    display = config.display
+    center = ((display.width_px - 1) / 2, (display.height_px - 1) / 2)
+    assert pixel_to_screen_cm(config, *center) == pytest.approx((0.0, 0.0))
+    assert pixel_edge_to_screen_cm(
+        config, display.width_px / 2, display.height_px / 2
+    ) == pytest.approx((0.0, 0.0))
+    left_x, left_y = pixel_to_screen_cm(config, 0, center[1])
+    right_x, right_y = pixel_to_screen_cm(config, display.width_px - 1, center[1])
+    top_x, top_y = pixel_to_screen_cm(config, center[0], 0)
+    bottom_x, bottom_y = pixel_to_screen_cm(config, center[0], display.height_px - 1)
+    assert left_x < 0 < right_x and left_y == right_y == 0
+    assert top_y > 0 > bottom_y and top_x == bottom_x == 0
+    left_angle, _ = screen_cm_to_visual_angle_deg(config, left_x, left_y)
+    right_angle, _ = screen_cm_to_visual_angle_deg(config, right_x, right_y)
+    _, top_angle = screen_cm_to_visual_angle_deg(config, top_x, top_y)
+    _, bottom_angle = screen_cm_to_visual_angle_deg(config, bottom_x, bottom_y)
+    assert left_angle < 0 < right_angle and bottom_angle < 0 < top_angle
+    assert geometry_snapshot(config)["pixel_coordinate_convention"].endswith("+y down")
 
 
 def test_retinotopy_frame_plan_maps_reverse_sweeps_to_reversed_axis_cache(tmp_path):
@@ -421,6 +537,63 @@ def test_fake_display_simulated_grating_session_and_failure_cleanup(tmp_path):
     assert not failed.ok
     assert failing.closed
     assert json.loads((failed.session_root / "final_status.json").read_text())["status"] == "FAILED"
+
+    class InterruptedDisplay(FailingDisplay):
+        def present_sequence(self, _frames):
+            raise KeyboardInterrupt
+
+    interrupted_display = InterruptedDisplay()
+    interrupted = run_visual_mapping(
+        config,
+        protocol_name="drifting-gratings",
+        settings=settings,
+        session_id="fake-gratings-interrupted",
+        seed=settings.sequence_seed,
+        cache_root=tmp_path / "cache",
+        simulate=True,
+        display_factory=lambda: interrupted_display,
+    )
+    assert interrupted.status == "INTERRUPTED"
+    assert interrupted_display.closed
+    assert json.loads(
+        (interrupted.session_root / "final_status.json").read_text()
+    )["status"] == "INTERRUPTED"
+
+
+def test_missing_visual_mapping_cache_fails_before_session_creation(tmp_path):
+    config = small_config(tmp_path)
+    settings = DriftingGratingSettings(
+        orientations_deg=(0.0,), trials_per_orientation=1, refresh_hz=59.82
+    )
+    with pytest.raises(FrameCacheError, match="cache"):
+        run_visual_mapping(
+            config,
+            protocol_name="drifting-gratings",
+            settings=settings,
+            session_id="missing-cache",
+            seed=settings.sequence_seed,
+            cache_root=tmp_path / "missing-cache-root",
+            simulate=True,
+        )
+    assert not (tmp_path / "sessions" / "missing-cache").exists()
+
+
+def test_visual_mapping_rejects_protocol_refresh_mismatch_before_cache_access(tmp_path):
+    config = small_config(tmp_path)
+    settings = DriftingGratingSettings(
+        orientations_deg=(0.0,), trials_per_orientation=1, refresh_hz=60.0
+    )
+    with pytest.raises(ValueError, match="protocol refresh_hz .* must match configured display"):
+        run_visual_mapping(
+            config,
+            protocol_name="drifting-gratings",
+            settings=settings,
+            session_id="refresh-mismatch",
+            seed=settings.sequence_seed,
+            cache_root=tmp_path / "no-cache-required-to-fail",
+            simulate=True,
+        )
+    assert not (tmp_path / "sessions" / "refresh-mismatch").exists()
 
 
 def test_simulated_retinotopy_session_writes_frame_plan(tmp_path):

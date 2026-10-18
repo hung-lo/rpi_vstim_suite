@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import fields
 from pathlib import Path
@@ -52,3 +53,13 @@ def load_protocol_settings(protocol_name: str, path: Path, *, refresh_hz: float,
         return settings_type(**values)
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"invalid {protocol_name} settings: {exc}") from exc
+
+
+def validate_refresh_rate(config, settings) -> None:
+    protocol_refresh_hz = float(settings.refresh_hz)
+    display_refresh_hz = float(config.display.refresh_hz)
+    if not math.isclose(protocol_refresh_hz, display_refresh_hz, rel_tol=0.0, abs_tol=1e-9):
+        raise ConfigError(
+            f"protocol refresh_hz ({protocol_refresh_hz:g}) must match configured "
+            f"display refresh_hz ({display_refresh_hz:g})"
+        )

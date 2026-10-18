@@ -25,6 +25,7 @@ from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
 from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
+from rpi_vstim.protocols.visual_mapping.config import validate_refresh_rate
 
 from .cache import FrameCache, cache_key_for, open_frame_cache
 from .geometry import geometry_snapshot
@@ -313,6 +314,7 @@ def run_visual_mapping(
     else:
         raise ValueError(f"unsupported visual-mapping protocol {protocol_name!r}")
     config.validate()
+    validate_refresh_rate(config, settings)
     configured_seed = getattr(settings, "sequence_seed", seed)
     if configured_seed != seed:
         raise ConfigError(

@@ -7,6 +7,7 @@ import numpy as np
 
 from rpi_vstim.core.config import Config
 from rpi_vstim.protocols.visual_mapping.cache import FrameCache, FrameSetSpec, build_frame_cache
+from rpi_vstim.protocols.visual_mapping.config import validate_refresh_rate
 from rpi_vstim.protocols.visual_mapping.rendering import (
     display_render_settings,
     make_renderer,
@@ -19,6 +20,7 @@ from .stimulus import generate_grating_frame
 
 
 def render_settings(config: Config, settings: DriftingGratingSettings) -> dict[str, Any]:
+    validate_refresh_rate(config, settings)
     return {
         "renderer_schema": 1,
         "display": display_render_settings(config),
@@ -87,6 +89,7 @@ def build_cache(config: Config, settings: DriftingGratingSettings, cache_root: P
 
 
 def write_preview(config: Config, settings: DriftingGratingSettings, output_path: Path) -> Path:
+    validate_refresh_rate(config, settings)
     tiles = [
         (
             f"{index}: bar {angle:g} deg; drift {drift_direction_deg(angle):g} deg",
@@ -94,4 +97,10 @@ def write_preview(config: Config, settings: DriftingGratingSettings, output_path
         )
         for index, angle in enumerate(settings.orientations_deg, start=1)
     ]
-    return save_labeled_contact_sheet(tiles, output_path, columns=4, tile_width=256)
+    return save_labeled_contact_sheet(
+        tiles,
+        output_path,
+        columns=4,
+        tile_width=256,
+        arrow_angles_deg=[drift_direction_deg(angle) for angle in settings.orientations_deg],
+    )
