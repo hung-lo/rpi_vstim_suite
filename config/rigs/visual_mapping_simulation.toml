@@ -1,0 +1,41 @@
+# Small, hardware-independent display geometry for visual-mapping previews,
+# cache checks, and fake-display session tests.
+[paths]
+output_root = "/tmp/rpi-vstim-visual-mapping-sessions"
+cache_root = "/tmp/rpi-vstim-visual-mapping-cache"
+
+[display]
+backend = "fake"
+width_px = 320
+height_px = 180
+refresh_hz = 60.0
+pixel_format = "RGB565"
+physical_width_cm = 16.0
+physical_height_cm = 9.0
+eye_distance_cm = 20.0
+calibration_id = "simulation-only"
+
+[photodiode]
+enabled = false
+size_px = 12
+
+[hardware]
+backend = "simulated"
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+ttl_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+
+[operator_controls]
+bait_button_gpio = -1
+
+[session]
+simulation = true
