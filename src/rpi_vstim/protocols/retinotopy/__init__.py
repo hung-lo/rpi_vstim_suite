@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
+from itertools import pairwise
 
-from rpi_vstim.core.duration import seconds_to_frames
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
-
 
 DIRECTIONS = {
     "left_to_right": (0, "azimuth", "left", "right", "x"),
@@ -30,27 +30,46 @@ class RetinotopySettings:
     sequence_seed: int = 0
 
     def __post_init__(self) -> None:
+        numeric_values = (
+            self.sweep_duration_s,
+            self.inter_sweep_gray_s,
+            self.initial_gray_s,
+            self.final_gray_s,
+            self.bar_width_fraction,
+            self.refresh_hz,
+        )
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("retinotopy settings must be finite numbers")
         if min(self.sweep_duration_s, self.inter_sweep_gray_s, self.initial_gray_s, self.final_gray_s) <= 0:
             raise ValueError("all durations must be positive")
-        if self.refresh_hz <= 0 or self.movement_frame_rate_hz <= 0:
+        if self.refresh_hz <= 0 or type(self.movement_frame_rate_hz) is not int or self.movement_frame_rate_hz <= 0:
             raise ValueError("frame rates must be positive")
-        if self.refresh_hz % self.movement_frame_rate_hz:
-            raise ValueError("refresh_hz must be divisible by movement_frame_rate_hz")
+        if self.refresh_hz < self.movement_frame_rate_hz:
+            raise ValueError("refresh_hz must be at least movement_frame_rate_hz")
         if not 0 < self.bar_width_fraction < 0.5:
             raise ValueError("bar_width_fraction must be between 0 and 0.5")
-        if not self.enabled_directions or len(set(self.enabled_directions)) != len(self.enabled_directions):
+        directions = tuple(self.enabled_directions)
+        if not directions or len(set(directions)) != len(directions):
             raise ValueError("enabled_directions must be unique and non-empty")
-        if any(direction not in DIRECTIONS for direction in self.enabled_directions):
+        if any(direction not in DIRECTIONS for direction in directions):
             raise ValueError("unknown retinotopy direction")
-        if self.repeats_per_direction < 1:
+        object.__setattr__(self, "enabled_directions", directions)
+        if type(self.repeats_per_direction) is not int or self.repeats_per_direction < 1:
             raise ValueError("repeats_per_direction must be positive")
         if self.sequence_order_mode not in {"fixed", "shuffled"}:
             raise ValueError("sequence_order_mode must be fixed or shuffled")
+        if type(self.sequence_seed) is not int:
+            raise ValueError("sequence_seed must be an integer")
 
 
 def build_plan(settings: RetinotopySettings) -> SessionPlan:
     sweep_source_frames = round(settings.sweep_duration_s * settings.movement_frame_rate_hz)
-    sweep_frames = sweep_source_frames * round(settings.refresh_hz / settings.movement_frame_rate_hz)
+    if sweep_source_frames < 1:
+        raise ValueError("sweep_duration_s must produce at least one movement frame")
+    refresh_counts = refreshes_per_source_frame(
+        sweep_source_frames, settings.refresh_hz, settings.movement_frame_rate_hz
+    )
+    sweep_frames = sum(refresh_counts)
     rng = random.Random(settings.sequence_seed)
     directions: list[str] = []
     for _ in range(settings.repeats_per_direction):
@@ -62,7 +81,7 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
         PlannedEvent(
             "initial-gray",
             "gray",
-            seconds_to_frames(settings.initial_gray_s, settings.refresh_hz),
+            round(settings.initial_gray_s * settings.refresh_hz),
             phase="PRE",
         )
     ]
@@ -92,7 +111,7 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
             PlannedEvent(
                 f"inter-sweep-gray-{index}",
                 "gray",
-                seconds_to_frames(settings.inter_sweep_gray_s, settings.refresh_hz),
+                round(settings.inter_sweep_gray_s * settings.refresh_hz),
                 trial_id=str(index),
                 photodiode="off",
             )
@@ -101,7 +120,7 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
         PlannedEvent(
             "final-gray",
             "gray",
-            seconds_to_frames(settings.final_gray_s, settings.refresh_hz),
+            round(settings.final_gray_s * settings.refresh_hz),
             phase="POST",
         )
     )
@@ -113,9 +132,27 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
     )
 
 
+def refreshes_per_source_frame(
+    source_frame_count: int,
+    refresh_hz: float,
+    movement_frame_rate_hz: float,
+) -> tuple[int, ...]:
+    """Distribute nominal refreshes by cumulative rounded frame boundaries."""
+    if source_frame_count < 1 or refresh_hz <= 0 or movement_frame_rate_hz <= 0:
+        raise ValueError("frame counts and rates must be positive")
+    if refresh_hz < movement_frame_rate_hz:
+        raise ValueError("display refresh rate must not be below movement rate")
+    ratio = refresh_hz / movement_frame_rate_hz
+    boundaries = [round(index * ratio) for index in range(source_frame_count + 1)]
+    counts = tuple(right - left for left, right in pairwise(boundaries))
+    if any(count < 1 for count in counts):
+        raise ValueError("movement rate produces a source frame with no display refresh")
+    return counts
+
+
 class RetinotopyProtocol:
     name = "retinotopy"
-    version = "software-groundwork"
+    version = "unified-0.1"
 
     def build_plan(self, settings: RetinotopySettings) -> SessionPlan:
         return build_plan(settings)

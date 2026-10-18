@@ -1,6 +1,6 @@
 [protocol]
 name = "retinotopy"
-version = "software-groundwork"
+version = "unified-0.1"
 sweep_duration_s = 20.0
 inter_sweep_gray_s = 5.0
 initial_gray_s = 3.0
@@ -8,5 +8,6 @@ final_gray_s = 3.0
 movement_frame_rate_hz = 15
 bar_width_fraction = 0.10
 enabled_directions = ["left_to_right", "top_to_bottom"]
-repeats_per_direction = 1
+repeats_per_direction = 20
 sequence_order_mode = "fixed"
+sequence_seed = 20261018
