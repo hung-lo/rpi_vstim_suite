@@ -66,10 +66,11 @@ def build_frame_plan_rows(
         if event.kind != "retinotopy-sweep":
             continue
         direction = str(event.metadata["direction"])
-        axis = DIRECTIONS[direction][1]
-        cache_axis = DIRECTIONS[direction][4]
+        definition = DIRECTIONS[direction]
+        axis = definition.axis
+        cache_axis = definition.movement_axis
         width = bar_width_px(config, settings, direction)
-        dimension = config.display.width_px if DIRECTIONS[direction][4] == "x" else config.display.height_px
+        dimension = config.display.width_px if definition.movement_axis == "x" else config.display.height_px
         positions = boundary_positions_px(config, settings, direction)
         global_refresh = event.planned_start_frame
         for source_index, (boundary, refresh_count) in enumerate(zip(positions, refresh_counts)):
@@ -80,7 +81,7 @@ def build_frame_plan_rows(
                 if direction in {"left_to_right", "top_to_bottom"}
                 else source_count - 1 - source_index
             )
-            if DIRECTIONS[direction][4] == "x":
+            if definition.movement_axis == "x":
                 black_start, black_end = rendered_boundary - width, rendered_boundary
                 white_start, white_end = rendered_boundary, rendered_boundary + width
                 x_px, y_px = rendered_boundary, (config.display.height_px - 1) / 2.0

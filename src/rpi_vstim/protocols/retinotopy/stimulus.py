@@ -4,23 +4,25 @@ import numpy as np
 
 from rpi_vstim.core.config import Config
 
-from . import DIRECTIONS, RetinotopySettings
+from . import RetinotopySettings
+from .directions import get_direction
 
 
 def bar_width_px(config: Config, settings: RetinotopySettings, direction: str) -> int:
-    axis = DIRECTIONS[direction][4]
+    axis = get_direction(direction).movement_axis
     dimension = config.display.width_px if axis == "x" else config.display.height_px
     return max(1, round(dimension * settings.bar_width_fraction))
 
 
 def boundary_positions_px(config: Config, settings: RetinotopySettings, direction: str) -> np.ndarray:
-    axis = DIRECTIONS[direction][4]
+    definition = get_direction(direction)
+    axis = definition.movement_axis
     dimension = config.display.width_px if axis == "x" else config.display.height_px
     width = bar_width_px(config, settings, direction)
     positions = np.linspace(-width, dimension + width, round(
         settings.sweep_duration_s * settings.movement_frame_rate_hz
     ))
-    if direction in {"right_to_left", "bottom_to_top"}:
+    if definition.sign < 0:
         positions = positions[::-1]
     return positions
 
@@ -44,7 +46,7 @@ def generate_retinotopy_frame(
     def clipped(start: int, end: int, dimension: int) -> tuple[int, int]:
         return max(0, min(dimension, start)), max(0, min(dimension, end))
 
-    if DIRECTIONS[direction][4] == "x":
+    if get_direction(direction).movement_axis == "x":
         black_start, black_end = clipped(boundary - width, boundary, config.display.width_px)
         white_start, white_end = clipped(boundary, boundary + width, config.display.width_px)
         if black_start < black_end:

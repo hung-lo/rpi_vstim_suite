@@ -44,7 +44,9 @@ def build_cache(config: Config, settings: RetinotopySettings, cache_root: Path):
         renderer, gray, photodiode_state="off", asset_key="gray:127"
     ))]
     source_count = round(settings.sweep_duration_s * settings.movement_frame_rate_hz)
-    axes = tuple(dict.fromkeys(DIRECTIONS[direction][4] for direction in settings.enabled_directions))
+    axes = tuple(dict.fromkeys(
+        DIRECTIONS[direction].movement_axis for direction in settings.enabled_directions
+    ))
     for axis in axes:
         frame_sets.append(FrameSetSpec(
             axis,

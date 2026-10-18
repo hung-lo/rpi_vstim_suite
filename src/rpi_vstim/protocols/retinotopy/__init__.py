@@ -7,12 +7,8 @@ from itertools import pairwise
 
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
 
-DIRECTIONS = {
-    "left_to_right": (0, "azimuth", "left", "right", "x"),
-    "right_to_left": (1, "azimuth", "right", "left", "x"),
-    "top_to_bottom": (2, "elevation", "top", "bottom", "y"),
-    "bottom_to_top": (3, "elevation", "bottom", "top", "y"),
-}
+from .directions import DIRECTION_DEFINITIONS as DIRECTIONS
+from .directions import get_direction
 
 
 @dataclass(frozen=True)
@@ -86,7 +82,7 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
         )
     ]
     for index, direction in enumerate(directions, start=1):
-        code, axis, start_edge, end_edge, movement_axis = DIRECTIONS[direction]
+        definition = get_direction(direction)
         events.append(
             PlannedEvent(
                 f"sweep-{index}",
@@ -97,11 +93,11 @@ def build_plan(settings: RetinotopySettings) -> SessionPlan:
                 photodiode="on",
                 metadata={
                     "direction": direction,
-                    "direction_code": code,
-                    "axis": axis,
-                    "start_edge": start_edge,
-                    "end_edge": end_edge,
-                    "movement_axis": movement_axis,
+                    "direction_code": definition.direction_code,
+                    "axis": definition.axis,
+                    "start_edge": definition.start_edge,
+                    "end_edge": definition.end_edge,
+                    "movement_axis": definition.movement_axis,
                     "repeat_number": (index - 1) // len(settings.enabled_directions) + 1,
                     "bar_width_fraction": settings.bar_width_fraction,
                 },

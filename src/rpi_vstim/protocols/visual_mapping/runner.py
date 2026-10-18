@@ -386,7 +386,7 @@ def run_visual_mapping(
             elif event_value["kind"] == "retinotopy-sweep":
                 from rpi_vstim.protocols.retinotopy import DIRECTIONS
 
-                set_name = DIRECTIONS[str(event_value["metadata"]["direction"])][4]
+                set_name = DIRECTIONS[str(event_value["metadata"]["direction"])].movement_axis
                 event_value["metadata"].update({
                     "cache_key": cache.cache_key,
                     "cache_frame_set": set_name,
@@ -500,12 +500,13 @@ def run_visual_mapping(
                     from rpi_vstim.protocols.retinotopy import DIRECTIONS
 
                     direction = str(planned.metadata["direction"])
-                    set_name = DIRECTIONS[direction][4]
+                    definition = DIRECTIONS[direction]
+                    set_name = definition.movement_axis
                     counts = planned.metadata["refreshes_per_source_frame"]
                     for source_index, refresh_count in enumerate(counts):
                         cache_index = (
                             source_index
-                            if direction in {"left_to_right", "top_to_bottom"}
+                            if definition.sign > 0
                             else len(counts) - 1 - source_index
                         )
                         payload = cache.read_frame(set_name, cache_index)

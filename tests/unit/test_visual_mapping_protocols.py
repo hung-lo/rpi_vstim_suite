@@ -185,6 +185,10 @@ def test_grating_preview_is_hardware_free(tmp_path):
 def test_retinotopy_default_and_4_direction_fixed_and_shuffled_plans():
     default = RetinotopySettings()
     assert default.enabled_directions == ("left_to_right", "top_to_bottom")
+    assert [DIRECTIONS[name].sign for name in DIRECTIONS] == [1, -1, 1, -1]
+    assert [(DIRECTIONS[name].start_edge, DIRECTIONS[name].end_edge) for name in DIRECTIONS] == [
+        ("left", "right"), ("right", "left"), ("top", "bottom"), ("bottom", "top")
+    ]
     assert default.repeats_per_direction == 20
     assert default.sequence_order_mode == "fixed"
     assert default.sweep_duration_s == 20.0 and default.inter_sweep_gray_s == 5.0
@@ -231,7 +235,7 @@ def test_retinotopy_direction_positions_and_bar_polarity(tmp_path, direction, fi
     width = bar_width_px(config, settings, direction)
     assert width == (8 if direction in {"left_to_right", "right_to_left"} else 6)
     frame = generate_retinotopy_frame(config, settings, direction=direction, source_frame_index=2)
-    axis = DIRECTIONS[direction][4]
+    axis = DIRECTIONS[direction].movement_axis
     if axis == "x":
         assert np.all(frame[:, 40 - width:40] == 0)
         assert np.all(frame[:, 40:40 + width] == 255)
@@ -305,7 +309,7 @@ def test_retinotopy_frame_plan_maps_reverse_sweeps_to_reversed_axis_cache(tmp_pa
     for direction, direction_rows in by_direction.items():
         expected = (
             list(range(source_count - 1, -1, -1))
-            if direction in {"right_to_left", "bottom_to_top"}
+            if DIRECTIONS[direction].sign < 0
             else list(range(source_count))
         )
         assert [row["cache_frame_index"] for row in direction_rows] == expected
@@ -324,7 +328,7 @@ def test_retinotopy_cache_and_labeled_preview(tmp_path):
     )
     cache = build_retinotopy_cache(config, settings, tmp_path / "cache")
     for direction in settings.enabled_directions:
-        axis = DIRECTIONS[direction][4]
+        axis = DIRECTIONS[direction].movement_axis
         assert len(cache.read_frame(axis, 1)) == 80 * 60 * 2
     cache.close()
     path = write_retinotopy_preview(config, settings, tmp_path / "retinotopy.png")
