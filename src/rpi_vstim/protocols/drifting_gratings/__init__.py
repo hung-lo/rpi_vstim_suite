@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 
-from rpi_vstim.core.duration import seconds_to_frames
 from rpi_vstim.core.plan import PlannedEvent, SessionPlan, with_frame_offsets
 
-
 DEFAULT_ORIENTATIONS_DEG = (0.0, 22.5, 45.0, 67.5, 90.0, 112.5, 135.0, 157.5)
+
+
+@dataclass(frozen=True)
+class RectangularPatchGeometry:
+    center_x_cm: float
+    center_y_cm: float
+    width_cm: float
+    height_cm: float
 
 
 def normalize_orientation_deg(value: float) -> float:
@@ -35,12 +42,30 @@ class DriftingGratingSettings:
     refresh_hz: float = 60.0
     sequence_seed: int = 0
     grating_mode: str = "fullscreen"
+    rectangular_patch_geometry: RectangularPatchGeometry | None = None
 
     def __post_init__(self) -> None:
+        numeric_values = (
+            self.stim_duration_s,
+            self.iti_base_s,
+            self.iti_jitter_max_s,
+            self.temporal_frequency_hz,
+            self.spatial_frequency_cycles_per_cm,
+            self.contrast,
+            self.mean_luminance,
+            self.starting_phase_deg,
+            self.initial_gray_s,
+            self.final_gray_s,
+            self.refresh_hz,
+        )
+        if any(not math.isfinite(value) for value in numeric_values):
+            raise ValueError("grating settings must be finite numbers")
         orientations = tuple(normalize_orientation_deg(value) for value in self.orientations_deg)
+        if any(not math.isfinite(value) for value in orientations):
+            raise ValueError("orientations must be finite")
         if not orientations or len(set(orientations)) != len(orientations):
             raise ValueError("orientations must be unique and non-empty")
-        if self.trials_per_orientation < 1:
+        if type(self.trials_per_orientation) is not int or self.trials_per_orientation < 1:
             raise ValueError("trials_per_orientation must be positive")
         if self.refresh_hz <= 0 or self.stim_duration_s <= 0:
             raise ValueError("refresh_hz and stim_duration_s must be positive")
@@ -54,7 +79,23 @@ class DriftingGratingSettings:
             raise ValueError("mean_luminance and contrast exceed display range")
         if self.grating_mode not in {"fullscreen", "rectangular_patch"}:
             raise ValueError("unsupported grating_mode")
+        if self.grating_mode == "rectangular_patch":
+            geometry = self.rectangular_patch_geometry
+            if geometry is None:
+                raise ValueError("rectangular_patch_geometry is required in rectangular_patch mode")
+            if any(not math.isfinite(value) for value in vars(geometry).values()):
+                raise ValueError("rectangular patch geometry must be finite")
+            if geometry.width_cm <= 0 or geometry.height_cm <= 0:
+                raise ValueError("rectangular patch dimensions must be positive")
+        elif self.rectangular_patch_geometry is not None:
+            raise ValueError("rectangular_patch_geometry requires grating_mode='rectangular_patch'")
+        if type(self.sequence_seed) is not int:
+            raise ValueError("sequence_seed must be an integer")
         object.__setattr__(self, "orientations_deg", orientations)
+
+    @property
+    def stimulus_frame_count(self) -> int:
+        return max(1, round(self.stim_duration_s * self.refresh_hz))
 
 
 def _iti_frames(settings: DriftingGratingSettings, rng: random.Random) -> int:
@@ -63,9 +104,9 @@ def _iti_frames(settings: DriftingGratingSettings, rng: random.Random) -> int:
 
 
 def build_plan(settings: DriftingGratingSettings) -> SessionPlan:
-    stim_frames = seconds_to_frames(settings.stim_duration_s, settings.refresh_hz)
-    initial_frames = seconds_to_frames(settings.initial_gray_s, settings.refresh_hz)
-    final_frames = seconds_to_frames(settings.final_gray_s, settings.refresh_hz)
+    stim_frames = settings.stimulus_frame_count
+    initial_frames = round(settings.initial_gray_s * settings.refresh_hz)
+    final_frames = round(settings.final_gray_s * settings.refresh_hz)
     rng = random.Random(settings.sequence_seed)
     trials = [
         (orientation_id, orientation, repeat_number)
@@ -77,6 +118,7 @@ def build_plan(settings: DriftingGratingSettings) -> SessionPlan:
         PlannedEvent("initial-gray", "gray", initial_frames, phase="PRE", photodiode="off")
     ]
     for trial_index, (orientation_id, orientation, repeat_number) in enumerate(trials, start=1):
+        iti_frames = _iti_frames(settings, rng)
         events.append(
             PlannedEvent(
                 f"trial-{trial_index}",
@@ -100,7 +142,7 @@ def build_plan(settings: DriftingGratingSettings) -> SessionPlan:
             PlannedEvent(
                 f"iti-{trial_index}",
                 "iti",
-                _iti_frames(settings, rng),
+                iti_frames,
                 trial_id=str(trial_index),
                 photodiode="off",
             )
@@ -116,7 +158,7 @@ def build_plan(settings: DriftingGratingSettings) -> SessionPlan:
 
 class DriftingGratingsProtocol:
     name = "drifting-gratings"
-    version = "software-groundwork"
+    version = "unified-0.1"
 
     def build_plan(self, settings: DriftingGratingSettings) -> SessionPlan:
         return build_plan(settings)

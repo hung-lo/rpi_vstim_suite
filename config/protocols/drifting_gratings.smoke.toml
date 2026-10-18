@@ -1,0 +1,18 @@
+# Short visual validation only; not a scientific production schedule.
+[protocol]
+name = "drifting-gratings"
+version = "unified-0.1-smoke"
+orientations_deg = [0.0, 22.5, 45.0, 67.5, 90.0, 112.5, 135.0, 157.5]
+trials_per_orientation = 1
+stim_duration_s = 0.5
+iti_base_s = 0.5
+iti_jitter_max_s = 0.0
+temporal_frequency_hz = 2.0
+spatial_frequency_cycles_per_cm = 0.2
+contrast = 1.0
+mean_luminance = 0.5
+starting_phase_deg = 0.0
+initial_gray_s = 0.5
+final_gray_s = 0.5
+grating_mode = "fullscreen"
+sequence_seed = 20261018
