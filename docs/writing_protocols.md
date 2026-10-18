@@ -27,3 +27,10 @@ The [natural-image protocol](../src/rpi_vstim/protocols/natural_images/) shows
 deterministic planning and selection. Its current Pi 5 runner in
 `core.natural_image_demo` integrates KMS, cameras, licks, logs, and storage.
 Supply your own image corpus; this repository grants no dataset rights.
+
+The new visual-mapping runners demonstrate pre-rendered, checksum-validated
+frame caches on the existing KMS/session/camera/event services. See [drifting
+gratings](drifting_gratings.md) and [retinotopy](retinotopy.md) for configuration,
+session artifacts, and short Pi smoke commands. They do not claim physical
+visual-onset calibration; use the retained KMS trace and photodiode validation
+when interpreting onset timing.

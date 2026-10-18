@@ -32,13 +32,12 @@ capabilities.
 | USB audio pilot protocol | Persistent USB playback with preloaded stimuli and session timing/events |
 | USB audio with the full VStim stack | **Validated** in a ~2-minute Pi 5 coexistence run; [session record](docs/hardware/pi5_av_coexistence_2026-10-16.md) |
 
-Still pending are final animal-facing water calibration, audio SPL calibration
-at the mouse position, physical acoustic-onset calibration, photodiode
-visual-onset calibration, and downstream acquisition-device IRIG validation.
-Drifting-grating and retinotopy planners and compatibility wrappers exist, but
-they have not been migrated to or validated through the current Pi KMS display
-runner. See [the Pi 5 deployment notes](docs/pi5_rig.md) and
-[hardware records](docs/hardware/).
+Drifting gratings and retinotopy are implemented and software-tested in the
+unified protocol/session runner; Pi physical validation is pending. Still
+pending are final animal-facing water calibration, audio SPL calibration at the
+mouse position, physical acoustic-onset calibration, photodiode visual-onset
+calibration, and downstream acquisition-device IRIG validation. See [the Pi 5
+deployment notes](docs/pi5_rig.md) and [hardware records](docs/hardware/).
 
 ## Current Pi 5 rig
 
@@ -72,6 +71,8 @@ source .venv/bin/activate
 python -m pip install --no-build-isolation -e .
 # Only needed for USB audio:
 python -m pip install --no-build-isolation -e '.[audio]'
+# Needed for visual-mapping previews and rendered-frame caches:
+python -m pip install --no-build-isolation -e '.[visual]'
 ```
 
 Check the machine and validate the current rig profile before a session:
@@ -144,18 +145,30 @@ rpi-vstim natural-images run \
 See the [coexistence validation record](docs/hardware/pi5_av_coexistence_2026-10-16.md)
 for the actual session results and limits.
 
-### Simulation
+### Visual-mapping simulation
 
-This creates a simulated session without Pi display, camera, GPIO, audio, or
-production storage:
+The small fake-display profile supports previews, cache checks, and a session
+run without Pi display, camera, GPIO, audio, or production storage:
 
 ```bash
-rpi-vstim run drifting-gratings --simulate \
+rpi-vstim drifting-gratings preview \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml \
+  --output /tmp/drifting-gratings.png
+
+rpi-vstim drifting-gratings build-cache \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml
+
+rpi-vstim drifting-gratings run --simulate \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml \
   --output-root /tmp/rpi-vstim-sim
 ```
 
-The drifting-grating plan is software groundwork only; simulation success is
-not hardware validation.
+Retinotopy uses the same `preview`, `build-cache`, and `run` progression. A run
+requires a prebuilt cache matching the selected rig and protocol configuration.
+Fake-display completion is software testing, not Pi physical validation.
 
 ## Configuration and data
 
@@ -204,14 +217,21 @@ rig. No reward, vacuum, or airpuff output is activated by the examples. See
 |---|---|
 | Natural images | Real Pi 5 demo runner and integrated validation are available |
 | Audio pilot | Persistent USB playback, audio-only pilot, and opt-in same-session natural-image/audio coexistence are implemented; the coexistence path passed a ~2-minute Pi 5 run |
-| Drifting gratings | Seeded planner and root-level compatibility wrapper exist; not validated through the current Pi KMS runner |
-| Retinotopy | Seeded sweep planner and root-level compatibility wrapper exist; geometry/rendering and current Pi KMS validation remain pending |
+| Drifting gratings | Unified frame rendering, validated cache, preview, seeded plan, and standard session path implemented; software tested; Pi physical validation pending |
+| Retinotopy | Unified moving-bar rendering, validated cache, direction previews, analysis frame plan, and standard session path implemented; software tested; Pi physical validation pending |
 
 Start with [writing a protocol](docs/writing_protocols.md). The intended split
 is reusable session/hardware services beneath protocol-specific planning and
 trial logic. NeuroKairos is external: VStim does not start or stop its sender,
 and never acquires GPIO9. IRIG can support offline timing alignment when it is
 physically recorded by the relevant camera or acquisition system.
+
+Protocol references: [drifting gratings](docs/drifting_gratings.md) and
+[retinotopy](docs/retinotopy.md). The exact frozen migration basis is recorded
+in [the migration audit](docs/visual_mapping_migration_audit.md). The root
+`run_drifting_gratings.py` and `run_retinotopy.py` remain compatibility
+wrappers; use `rpi-vstim drifting-gratings` and `rpi-vstim retinotopy` for the
+supported interface.
 
 ## Internal lab setup
 

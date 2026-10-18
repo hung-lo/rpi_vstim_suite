@@ -16,8 +16,9 @@ python -m pip install --no-build-isolation -e .
 rpi-vstim --version
 ```
 
-The venv needs `setuptools`. For development, install `.[dev]` and run
-`python -m pytest`; non-Pi machines need Python 3.13 but no Pi devices.
+The venv needs `setuptools`. For development, install `.[dev,visual]` to include
+the preview/cache dependencies, then run `python -m pytest`. Non-Pi machines
+need Python 3.13 but no Pi devices.
 
 1. `rpi-vstim doctor --config config/rigs/pi5_default.toml` inspects only.
 2. `rpi-vstim hardware display-probe --config <rig.toml>` reads connector modes.

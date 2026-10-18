@@ -5,7 +5,8 @@ Start with [getting started](getting_started.md), then
 
 Reference: [timing](timing.md), [cameras](cameras.md), [GPIO](gpio.md),
 [storage](storage.md), [current Pi 5 deployment](pi5_rig.md), [audio pilot](audio_pilot.md),
-[display](display_backend.md), and [natural-image assets](natural_image_assets.md).
+[display](display_backend.md), [drifting gratings](drifting_gratings.md),
+[retinotopy](retinotopy.md), and [natural-image assets](natural_image_assets.md).
 
 The [architecture audit](productization_architecture_audit.md) records v0.1
 module boundaries. [Hardware reports](hardware/) retain validation evidence;

@@ -42,3 +42,49 @@ The archived grating direction convention is intentionally preserved: a 0°
 bar orientation is horizontal and drifts at 270°; a 90° bar orientation is
 vertical and drifts at 0°. The old retinotopy geometry is linear in screen
 pixels, not corrected for visual-angle velocity.
+
+## Unified implementation result
+
+`rpi-vstim drifting-gratings` and `rpi-vstim retinotopy` now provide
+`preview`, `build-cache`, and `run` entry points. Protocol modules render
+before acquisition into checksummed packed-frame caches and pass frames to the
+existing `KmsDisplayBackend.present_sequence`; runs use the existing session,
+unified event stream, camera supervisor, and output finalization. No new
+display, camera, storage, or GPIO engine was added. Root scripts are
+compatibility wrappers only.
+
+The frozen retinotopy implementation required integer divisibility between
+refresh and movement rates. To support the current nominal 59.82 Hz Pi profile
+without changing the 15 Hz source trajectory, this migration assigns three or
+four refreshes per source frame using cumulative rounded frame boundaries. A
+20 s, 300-position sweep therefore maps to 1,196 nominal display refreshes.
+Drifting grating and gray durations are rounded to the nearest configured
+refresh; 0.5 s at 59.82 Hz becomes 30 refreshes (~0.5015 s). Stimulus geometry,
+contrast, frequency units, phase, direction convention, and sweep/bar ordering
+remain those of the frozen implementation.
+
+The optional Pi smoke configs and exact commands are documented in
+[`drifting_gratings.md`](drifting_gratings.md) and
+[`retinotopy.md`](retinotopy.md). These are prepared procedures: software
+validation passed, but no physical Pi grating/retinotopy validation is claimed
+by this implementation pass.
+
+## Frozen-reference equivalence spot check
+
+The frozen implementation was imported directly from the specified commit and
+compared with the new planners/renderers using its 1280×720, 60 Hz screen
+geometry, with the photodiode patch disabled for the pixel comparison (the
+unified renderer applies that patch through its normal display wrapper).
+
+- Drifting gratings: seed 123 with two repeats produced the same 16-trial
+  condition order, orientation IDs, bar/drift labels, repeat numbers, stimulus
+  frame counts, and frame-quantized ITIs. Frames at source index 7 for 0°,
+  45°, 90°, and 157.5° were pixel-identical.
+- Retinotopy: seed 7 with two shuffled repeats of all four directions produced
+  the same eight-direction order. Start, middle, and final frames were
+  pixel-identical for all four directions, including reversed sweeps.
+
+The intentional current-profile timing adaptation is limited to the nominal
+59.82 Hz mode: instead of rejecting a 15 Hz movement rate as non-divisible,
+the unified planner distributes three/four refreshes by cumulative rounded
+boundaries. The source trajectory and bar images are unchanged.

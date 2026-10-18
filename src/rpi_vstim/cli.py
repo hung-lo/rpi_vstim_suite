@@ -204,6 +204,36 @@ def build_parser() -> argparse.ArgumentParser:
     audio_pilot.add_argument("--simulate", action="store_true", help="use fake audio without waiting")
     audio_pilot.add_argument("--json", action="store_true", dest="as_json")
 
+    protocol_root = Path(__file__).resolve().parents[2] / "config" / "protocols"
+    rig_default = Path(__file__).resolve().parents[2] / "config/rigs/pi5_natural_image_demo.example.toml"
+    for protocol_name, protocol_filename, description in (
+        ("drifting-gratings", "drifting_gratings.example.toml", "sinusoidal drifting gratings"),
+        ("retinotopy", "retinotopy.example.toml", "moving adjacent-bar retinotopy"),
+    ):
+        mapping = commands.add_parser(protocol_name, help=f"{description} protocol")
+        mapping_commands = mapping.add_subparsers(dest="visual_mapping_action", required=True)
+        for action in ("preview", "build-cache", "run"):
+            command = mapping_commands.add_parser(action)
+            command.add_argument("--config", type=Path, default=rig_default, help="rig TOML profile")
+            command.add_argument(
+                "--protocol-config",
+                type=Path,
+                default=protocol_root / protocol_filename,
+                help="protocol-specific TOML settings",
+            )
+            if action == "preview":
+                command.add_argument("--output", type=Path)
+            else:
+                command.add_argument("--cache-root", type=Path)
+            if action == "run":
+                command.add_argument("--output-root", type=Path)
+                command.add_argument("--session-id")
+                command.add_argument("--seed", type=int)
+                command.add_argument("--cameras", action="store_true", help="record both configured local cameras")
+                command.add_argument("--simulate", action="store_true", help="use the fake display backend")
+                command.add_argument("--native-binary", type=Path)
+                command.add_argument("--json", action="store_true", dest="as_json")
+
     virtual = commands.add_parser("virtual-run", help="run a production-shaped virtual rig")
     virtual.add_argument("protocol", choices=[p.name for p in available_protocols()])
     virtual.add_argument("--output-root", type=Path, required=True)
@@ -417,8 +447,90 @@ def _run_water_service(args: argparse.Namespace) -> int:
     return 0
 
 
+def _visual_mapping_command(args: argparse.Namespace) -> int:
+    protocol_name = args.command
+    try:
+        config = load_config(args.config)
+        settings = None
+        if args.visual_mapping_action == "run":
+            selected_seed = args.seed
+        else:
+            selected_seed = None
+        from .protocols.visual_mapping.config import load_protocol_settings
+
+        settings = load_protocol_settings(
+            protocol_name,
+            args.protocol_config,
+            refresh_hz=config.display.refresh_hz,
+            seed=selected_seed,
+        )
+        if args.visual_mapping_action == "preview":
+            if protocol_name == "drifting-gratings":
+                from .protocols.drifting_gratings.cache import write_preview
+            else:
+                from .protocols.retinotopy.cache import write_preview
+            output = args.output or Path.cwd() / f"{protocol_name.replace('-', '_')}_preview.png"
+            result = write_preview(config, settings, output)
+            print(result)
+            return 0
+
+        cache_root = args.cache_root or config.paths.cache_root / "visual-mapping"
+        if args.visual_mapping_action == "build-cache":
+            if protocol_name == "drifting-gratings":
+                from .protocols.drifting_gratings.cache import build_cache
+            else:
+                from .protocols.retinotopy.cache import build_cache
+            cache = build_cache(config, settings, cache_root)
+            try:
+                print(json.dumps({"cache_key": cache.cache_key, "cache_path": str(cache.path)}, sort_keys=True))
+            finally:
+                cache.close()
+            return 0
+
+        if args.simulate and args.cameras:
+            raise ConfigError("simulated visual-mapping runs do not acquire cameras; omit --cameras")
+        if args.output_root is not None:
+            config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+        from .protocols.visual_mapping.runner import run_visual_mapping
+
+        session_id = args.session_id or datetime.now(UTC).strftime(
+            protocol_name + "-%Y%m%dT%H%M%S%fZ"
+        )
+        result = run_visual_mapping(
+            config,
+            protocol_name=protocol_name,
+            settings=settings,
+            session_id=session_id,
+            seed=settings.sequence_seed,
+            cache_root=cache_root,
+            use_cameras=args.cameras,
+            simulate=args.simulate,
+            native_binary=args.native_binary,
+        )
+    except (ConfigError, OSError, TypeError, ValueError, RuntimeError, ImportError) as exc:
+        print(f"{protocol_name} failed: {exc}", file=sys.stderr)
+        return 2
+    payload = {
+        "status": result.status,
+        "session_root": str(result.session_root),
+        "error": result.error,
+        "event_diagnostics": result.event_diagnostics,
+        "camera_manifest": result.camera_manifest,
+        "requested_frames": (
+            result.display_payload.get("requested_frame_count") if result.display_payload else None
+        ),
+        "completed_frames": (
+            result.display_payload.get("completed_frame_count") if result.display_payload else None
+        ),
+    }
+    print(json.dumps(payload, indent=2, sort_keys=True) if args.as_json else f"{result.status}: {result.session_root}")
+    return 0 if result.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command in {"drifting-gratings", "retinotopy"}:
+        return _visual_mapping_command(args)
     if args.command == "audio-pilot":
         try:
             config = load_config(args.config)

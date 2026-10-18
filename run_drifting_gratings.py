@@ -3,7 +3,6 @@ import sys
 
 from rpi_vstim.cli import main
 
-
 if __name__ == "__main__":
-    raise SystemExit(main(["run", "drifting-gratings", *sys.argv[1:]]))
+    raise SystemExit(main(["drifting-gratings", "run", *sys.argv[1:]]))
 
