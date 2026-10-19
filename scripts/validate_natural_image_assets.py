@@ -22,8 +22,8 @@ from rpi_vstim.core.assets import AssetPreparer, AssetResolver
 from rpi_vstim.core.config import Config, load_config
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
-from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 from rpi_vstim.display.renderer import ProductionFrameRenderer
+from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 
 EXPECTED_NAMES = tuple(f"natimg_center_{index:04d}.png" for index in range(2800))
 EXPECTED_DIMENSIONS = (90, 68)
@@ -108,7 +108,7 @@ def _legacy_crop(path: Path, target_size: tuple[int, int]) -> bytes:
 def validate_assets(root: Path, *, width: int, height: int, pixel_format: str) -> dict[str, object]:
     names = tuple(path.name for path in sorted(root.glob("*.png")))
     _check(names == EXPECTED_NAMES, "extracted image names are not exactly 0000..2799")
-    allowed = set(EXPECTED_NAMES) | {"README.md", "MANIFEST.sha256"}
+    allowed = set(EXPECTED_NAMES) | {"README.md", "LICENSE.md", "MANIFEST.sha256"}
     _check(
         tuple(sorted(path.name for path in root.iterdir())) == tuple(sorted(allowed)),
         "asset directory contains unexpected files or directories",
