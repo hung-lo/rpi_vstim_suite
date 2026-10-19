@@ -7,15 +7,16 @@ demo/validation runner, not the final production animal-data session runner.
 
 The checkout contains the 2,800-image corpus at
 `assets/natural_images/stringer_natimg2800_center_crop/`, which is the path
-used by the Pi 5 profile. This repository does not establish the corpus's
-licensing terms; verify them before redistribution outside the lab.
+used by the Pi 5 profile. Its source, verified transformations, CC BY-NC 4.0
+license, and citation requirements are documented in the
+[asset README](../assets/natural_images/stringer_natimg2800_center_crop/README.md).
 
 On the production Pi, the bundled profile writes directly to the mounted NVMe
 filesystem at `/mnt/behavbox_ssd/sessions` (not to the checkout or SD card):
 
 ```text
 rpi-vstim natural-images run \
-  --mouse-id V1_2 \
+  --mouse-id example_mouse \
   --output-root /mnt/behavbox_ssd/sessions \
   --licks \
   --cameras \
