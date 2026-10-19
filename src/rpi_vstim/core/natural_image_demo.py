@@ -39,6 +39,7 @@ from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMet
 from rpi_vstim.hardware.lgpio_lick import ClassifiedLick, LgpioLickMonitor, RawLickEdge
 from rpi_vstim.protocols.audio_pilot import ASSET_ROOT as PILOT_AUDIO_ASSET_ROOT
 from rpi_vstim.protocols.natural_images import NaturalImageSettings, build_plan, discover_images
+from rpi_vstim.telemetry.lick_state import LickTelemetryState
 
 DEMO_CAMERA_WIDTH = 640
 DEMO_CAMERA_HEIGHT = 480
@@ -785,6 +786,8 @@ def run_natural_image_demo(
     camera_watch_thread: Thread | None = None
     camera_failures: list[str] = []
     audio_stop = Event()
+    lick_telemetry_stop = Event()
+    lick_telemetry_thread: Thread | None = None
     audio_thread: Thread | None = None
     audio_errors: list[str] = []
     audio_latencies_ms: list[float] = []
@@ -804,9 +807,13 @@ def run_natural_image_demo(
 
     raw_counts = {"lick_left": 0, "lick_right": 0}
     classified_counts = {"lick_left": 0, "lick_right": 0}
+    lick_telemetry = LickTelemetryState(
+        requested=use_licks, active_level=config.hardware.lick_active_level
+    )
 
     def on_raw(edge: RawLickEdge) -> None:
         raw_counts[edge.channel] += 1
+        lick_telemetry.record_edge(edge.channel, edge.level)
         events.emit(
             "LICK_RAW_EDGE",
             source_monotonic_ns=edge.timestamp_ns,
@@ -818,6 +825,7 @@ def run_natural_image_demo(
 
     def on_classified(lick: ClassifiedLick) -> None:
         classified_counts[lick.channel] += 1
+        lick_telemetry.record_onset(lick.channel, lick.timestamp_ns)
         events.emit(
             "LICK",
             source_monotonic_ns=lick.timestamp_ns,
@@ -982,12 +990,26 @@ def run_natural_image_demo(
                 on_classified=on_classified,
             )
             monitor.start()
+            lick_telemetry.set_available(True)
+            for channel, level in monitor.last_level.items():
+                lick_telemetry.record_edge(channel, level)
             lick_monitor_diagnostics = monitor.diagnostics()
             events.emit(
                 "LICK_MONITOR_READY",
                 **monitor.diagnostics(),
                 raw_and_classified_streams=True,
             )
+            if control is not None:
+                def update_lick_telemetry() -> None:
+                    while not lick_telemetry_stop.wait(0.5):
+                        control.update_snapshot(
+                            protocol_state={"lick_state": lick_telemetry.snapshot()}
+                        )
+
+                lick_telemetry_thread = Thread(
+                    target=update_lick_telemetry, name="rpi-vstim-lick-telemetry", daemon=True
+                )
+                lick_telemetry_thread.start()
 
         if use_cameras:
             specs, camera_commands = _resolve_camera_specs(
@@ -1086,6 +1108,33 @@ def run_natural_image_demo(
                     raise NaturalImageDemoError(
                         f"audio coexistence failed: {audio_errors[0]}"
                     )
+                if planned.kind == "image":
+                    image_filename = str(planned.metadata["image"])
+                    image_id = Path(image_filename).stem
+                    image_index = None
+                    suffix = image_id.rsplit("_", 1)[-1]
+                    if suffix.isdecimal():
+                        image_index = int(suffix)
+                    phase, stimulus_kind = "TASK", "natural_image"
+                else:
+                    image_filename = image_id = None
+                    image_index = None
+                    phase = "PRE" if planned.event_id == "initial-gray" else (
+                        "POST" if planned.event_id == "final-gray" else
+                        "ITI" if planned.kind == "iti" else planned.phase
+                    )
+                    stimulus_kind = "gray"
+                if control is not None:
+                    control.update_snapshot(protocol_state={
+                        "stimulus_state": {
+                            "phase": phase,
+                            "stimulus_kind": stimulus_kind,
+                            "image_id": image_id,
+                            "image_index": image_index,
+                            "image_filename": image_filename,
+                            "sequence_index": int(planned.trial_id) if planned.trial_id else None,
+                        }
+                    })
                 if planned.kind == "image":
                     prepared = preparer.prepare(str(planned.metadata["image"]))
                     rgb888 = prepared.rgb888
@@ -1279,9 +1328,14 @@ def run_natural_image_demo(
                 lick_monitor_diagnostics = monitor.diagnostics()
                 events.emit("LICK_MONITOR_STATUS", **lick_monitor_diagnostics)
                 monitor.stop()
+                lick_telemetry.set_available(False)
                 events.emit("LICK_MONITOR_STOPPED", **monitor.diagnostics())
             except Exception as exc:  # noqa: BLE001 — preserve cleanup diagnostics
+                lick_telemetry.set_available(False)
                 degraded.append(f"lick cleanup: {exc}")
+        lick_telemetry_stop.set()
+        if lick_telemetry_thread is not None:
+            lick_telemetry_thread.join(timeout=1.0)
         camera_watch_stop.set()
         if camera_watch_thread is not None:
             camera_watch_thread.join(timeout=2.0)
@@ -1372,6 +1426,13 @@ def run_natural_image_demo(
             degraded.append(f"session finalization: {exc}")
         if control is not None:
             control.update_snapshot(hardware={"storage": "finalized"})
+            control.update_snapshot(protocol_state={
+                "lick_state": lick_telemetry.snapshot(),
+                "stimulus_state": {
+                    "phase": status, "stimulus_kind": "gray", "image_id": None,
+                    "image_index": None, "image_filename": None, "sequence_index": None,
+                },
+            })
         _write_demo_metadata(
             session.context.session_root,
             mouse_id=mouse_id,

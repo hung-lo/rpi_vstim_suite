@@ -171,6 +171,13 @@ def test_operator_simulation_ready_reconnect_start_stop_and_telemetry(
         telemetry = json.loads(receiver.recv(4096))
         assert telemetry["lifecycle"] == "READY"
         assert telemetry["session"]["id"] == session_id
+        assert telemetry["stimulus_state"] == {
+            "phase": "READY", "stimulus_kind": "gray", "image_id": None,
+            "image_index": None, "image_filename": None, "sequence_index": None,
+        }
+        assert telemetry["lick_state"]["requested"] is False
+        assert telemetry["lick_state"]["channels"]["left"]["status"] == "not_requested"
+        assert telemetry["lick_state"]["channels"]["left"]["recent_lick_count_2s"] is None
         assert _send(socket_path, {"command": "status"})["status"]["state"] == "READY"
 
         start_request = {"request_id": "start-one", "command": "start"}

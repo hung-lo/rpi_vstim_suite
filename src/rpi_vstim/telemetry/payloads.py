@@ -33,6 +33,12 @@ _RESERVED_ENVELOPE_KEYS = frozenset(
         "hardware",
         "integrity",
         "protocol_state",
+        "stimulus_state",
+        "lick_state",
+        "licking_active",
+        "last_lick_age_sec",
+        "recent_lick_count_2s",
+        "total_lick_onset_count_session",
         "capabilities",
         "elapsed_s",
         "eta_s",
@@ -89,6 +95,8 @@ class TelemetryMessage:
     hardware: dict[str, Any] | None = None
     integrity: dict[str, Any] | None = None
     protocol_state: dict[str, Any] | None = None
+    stimulus_state: dict[str, Any] | None = None
+    lick_state: dict[str, Any] | None = None
     capabilities: dict[str, bool] | None = None
     elapsed_s: float | None = None
     eta_s: float | None = None
@@ -125,7 +133,8 @@ class TelemetryMessage:
         if self.timestamp_utc is not None:
             value["timestamp_utc"] = self.timestamp_utc
         for name in (
-            "session", "hardware", "integrity", "protocol_state", "capabilities",
+            "session", "hardware", "integrity", "protocol_state", "stimulus_state",
+            "lick_state", "capabilities",
             "elapsed_s", "eta_s", "control_schema_version",
         ):
             item = getattr(self, name)
@@ -145,6 +154,13 @@ class TelemetryMessage:
             item = getattr(self, name)
             if item is not None:
                 value[name] = item
+        if self.lick_state is not None:
+            for name in (
+                "licking_active", "last_lick_age_sec", "recent_lick_count_2s",
+                "total_lick_onset_count_session",
+            ):
+                if name in self.lick_state:
+                    value[name] = self.lick_state[name]
         if self.counters:
             collisions = _RESERVED_ENVELOPE_KEYS.intersection(self.counters)
             if collisions:
@@ -187,6 +203,8 @@ class TelemetryMessage:
             hardware=value.get("hardware"),
             integrity=value.get("integrity"),
             protocol_state=value.get("protocol_state"),
+            stimulus_state=value.get("stimulus_state"),
+            lick_state=value.get("lick_state"),
             capabilities=value.get("capabilities"),
             elapsed_s=value.get("elapsed_s"),
             eta_s=value.get("eta_s"),

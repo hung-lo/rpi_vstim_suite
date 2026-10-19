@@ -166,6 +166,9 @@ def test_operator_natural_images_ready_start_stop_abort_and_finalize(
 
     assert control.state == expected_state
     assert control.result.status == expected_status
+    terminal_stimulus = control.status()["protocol_state"]["stimulus_state"]
+    assert terminal_stimulus["phase"] == expected_status
+    assert terminal_stimulus["image_id"] is None
     assert display_instances[0].closed
     events = [
         json.loads(line)
@@ -226,3 +229,87 @@ def test_operator_natural_images_failure_is_not_complete_and_closes_display(tmp_
     assert display.closed
     final = json.loads((control.result.session_root / "final_status.json").read_text())
     assert final["status"] == "FAILED"
+
+
+def test_operator_current_stimulus_tracks_seeded_plan_and_clears_each_gray_interval(
+    tmp_path, monkeypatch
+):
+    config = _config(tmp_path)
+    for index in (1, 2):
+        Image.new("RGB", (4, 2), (30 + index, 100, 180)).save(
+            config.paths.asset_root / f"natimg_center_{index:04d}.png"
+        )
+    config = replace(
+        config,
+        protocol=replace(config.protocol, parameters=config.protocol.parameters | {"image_count": 3}),
+    )
+    session_id = "operator-stimulus-identity"
+    prepared = prepare_natural_image_demo(config, session_id=session_id, image_count=3)
+    selected = prepared.plan.metadata["selected_images"]
+    holder = {}
+    observed = {}
+
+    class FakeDisplay:
+        def __init__(self, **_kwargs):
+            self.renderer = None
+            self.photodiode = None
+
+        def open(self, display_config):
+            self.renderer = ProductionFrameRenderer(
+                display_config.width_px, display_config.height_px,
+                display_config.pixel_format, photodiode=None,
+            )
+
+        def present_sequence(self, frames):
+            values = []
+            for frame in frames:
+                observed.setdefault(
+                    frame.metadata.event_id,
+                    holder["control"].status()["protocol_state"]["stimulus_state"].copy(),
+                )
+                values.append(frame)
+            return {
+                "connector": "HDMI-A-2", "ownership": "lease-active",
+                "requested_frame_count": len(values), "completed_frame_count": len(values),
+                "first_page_flip_callback_monotonic_ns": 1_000_000_000,
+                "last_page_flip_callback_monotonic_ns": 1_000_000_000 + len(values) * 16_666_667,
+                "restored": True, "ownership_lifecycle": {"lease_acquire_count": 1, "restore_count": 1},
+                "flip_events": [{
+                    "frame_index": index, "kernel_sequence": index + 1,
+                    "kernel_event_ns": 2_000_000_000 + index * 16_666_667,
+                    "callback_monotonic_ns": 1_000_000_000 + index * 16_666_667,
+                    "callback_realtime_ns": 3_000_000_000 + index * 16_666_667,
+                } for index in range(len(values))],
+            }
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("rpi_vstim.core.natural_image_demo.KmsDisplayBackend", FakeDisplay)
+    control = ExperimentControl(
+        session_id=session_id,
+        protocol="natural-images",
+        run=lambda active: run_natural_image_demo(
+            config, mouse_id="test", session_id=session_id, image_count=3,
+            prepared=prepared, control=active,
+        ),
+    )
+    holder["control"] = control
+    control.mark_ready()
+    assert control.handle_request({"request_id": "start", "command": "start"})["ok"]
+    assert control.wait(3)
+    control.join()
+
+    assert observed["initial-gray"]["phase"] == "PRE"
+    assert observed["initial-gray"]["stimulus_kind"] == "gray"
+    for index, filename in enumerate(selected, 1):
+        current = observed[f"image-{index}"]
+        assert current["phase"] == "TASK"
+        assert current["image_filename"] == filename
+        assert current["image_id"] == filename.removesuffix(".png")
+        assert current["sequence_index"] == index
+        assert observed[f"iti-{index}"]["phase"] == "ITI"
+        assert observed[f"iti-{index}"]["image_id"] is None
+    assert observed["final-gray"]["phase"] == "POST"
+    assert observed["final-gray"]["image_filename"] is None
+    assert control.status()["protocol_state"]["stimulus_state"]["phase"] == "COMPLETE"

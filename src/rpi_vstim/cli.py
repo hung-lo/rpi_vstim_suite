@@ -55,6 +55,7 @@ from .protocols.audio_pilot import AudioPilotSettings, run_audio_pilot
 from .telemetry.benchmark import run_benchmark
 from .telemetry.payloads import TelemetryMessage
 from .telemetry.publisher import UdpTelemetryPublisher
+from .telemetry.lick_state import LickTelemetryState
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -278,13 +279,22 @@ def _run_operator_session(
         if telemetry is None:
             return
         status = control.status()
+        protocol_state = status["protocol_state"]
+        stimulus_state = protocol_state.get("stimulus_state")
+        if status["state"] in {"COMPLETE", "ERROR", "ABORTED"}:
+            stimulus_state = {
+                "phase": status["state"], "stimulus_kind": "gray", "image_id": None,
+                "image_index": None, "image_filename": None, "sequence_index": None,
+            }
         telemetry.publish(TelemetryMessage(
             "lifecycle", session_id, protocol, status["state"],
             sequence_number=sequence,
             session=status["session"],
             hardware=status["hardware"],
             integrity=status["integrity"],
-            protocol_state=status["protocol_state"],
+            protocol_state=protocol_state,
+            stimulus_state=stimulus_state,
+            lick_state=protocol_state.get("lick_state"),
             capabilities=status["capabilities"],
             elapsed_s=status["elapsed_s"],
             eta_s=status["eta_s"],
@@ -312,6 +322,8 @@ def _run_operator_session(
         endpoint.start()
         prepared = prepare()
         control.planned_duration_s = prepared["duration_s"]
+        if isinstance(prepared.get("protocol_state"), dict):
+            control.update_snapshot(protocol_state=prepared["protocol_state"])
         if control.state == ExperimentState.PREPARING:
             control.mark_ready()
         print(json.dumps({
@@ -651,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.operator_control:
                 prepared_run = {}
 
-                def prepare_natural_images() -> dict[str, float]:
+                def prepare_natural_images() -> dict[str, object]:
                     display_config = (
                         config.display
                         if args.camera_preview
@@ -669,9 +681,21 @@ def main(argv: list[str] | None = None) -> int:
                         session_id=session_id,
                         simulate=args.simulate,
                     )
+                    initial_lick_state = LickTelemetryState(
+                        requested=args.licks,
+                        active_level=config.hardware.lick_active_level,
+                    ).snapshot()
                     return {
                         "duration_s": prepared_run["plan"].plan.total_frames
-                        / config.display.refresh_hz
+                        / config.display.refresh_hz,
+                        "protocol_state": {
+                            "stimulus_state": {
+                                "phase": "READY", "stimulus_kind": "gray", "image_id": None,
+                                "image_index": None, "image_filename": None,
+                                "sequence_index": None,
+                            },
+                            "lick_state": initial_lick_state,
+                        },
                     }
 
                 def run_natural_images(control: ExperimentControl):

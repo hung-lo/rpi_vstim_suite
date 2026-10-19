@@ -2,6 +2,7 @@ import pytest
 
 from rpi_vstim.core.config import HardwareConfig
 from rpi_vstim.hardware.lgpio_lick import LgpioLickError, LgpioLickMonitor, LickEventRecorder
+from rpi_vstim.telemetry.lick_state import LickTelemetryState
 
 
 class FakeCallback:
@@ -124,3 +125,46 @@ def test_configured_timing_is_passed_to_each_channel():
     monitor.stop()
 
     assert monitor.classified_count["lick_left"] == 1
+
+
+def test_telemetry_uses_only_classified_onsets_and_keeps_channels_separate():
+    api = FakeLgpio()
+    state = LickTelemetryState(requested=True, active_level=1)
+    monitor = LgpioLickMonitor(
+        HardwareConfig(),
+        api=api,
+        on_raw_edge=lambda edge: state.record_edge(edge.channel, edge.level),
+        on_classified=lambda lick: state.record_onset(lick.channel, lick.timestamp_ns),
+        clock_ns=lambda: 1_000_000_000,
+    )
+    monitor.start()
+    state.set_available(True)
+    for channel, level in monitor.last_level.items():
+        state.record_edge(channel, level)
+
+    _emit_burst(api.callbacks[0], 1_000_000_000)
+    left_only = state.snapshot(now_ns=1_200_000_000)
+    assert left_only["channels"]["left"]["total_lick_onset_count_session"] == 1
+    assert left_only["channels"]["right"]["total_lick_onset_count_session"] == 0
+    assert left_only["channels"]["left"]["contact_active"] is False
+
+    _emit_burst(api.callbacks[1], 1_300_000_000)
+    both = state.snapshot(now_ns=1_500_000_000)
+    assert both["channels"]["left"]["total_lick_onset_count_session"] == 1
+    assert both["channels"]["right"]["total_lick_onset_count_session"] == 1
+    assert both["total_lick_onset_count_session"] == sum(monitor.classified_count.values())
+    assert both["channels"]["center"]["status"] == "not_configured"
+    monitor.stop()
+    state.set_available(False)
+
+
+def test_failed_lick_initialization_is_not_reported_as_zero_sensor_counts():
+    api = FakeLgpio(levels={26: 1})
+    state = LickTelemetryState(requested=True, active_level=1)
+    monitor = LgpioLickMonitor(HardwareConfig(), api=api)
+    with pytest.raises(LgpioLickError, match="expected idle"):
+        monitor.start()
+    unavailable = state.snapshot(now_ns=1)
+    assert unavailable["channels"]["left"]["status"] == "not_available"
+    assert unavailable["channels"]["left"]["recent_lick_count_2s"] is None
+    assert unavailable["channels"]["center"]["status"] == "not_configured"
