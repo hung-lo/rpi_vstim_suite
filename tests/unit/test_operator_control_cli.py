@@ -129,9 +129,11 @@ def test_natural_image_cli_operator_control_is_opt_in_and_reconnectable(tmp_path
     assert direct_args.operator_control is False
     assert direct_args.simulate is False
     assert direct_args.control_socket is None
+    assert direct_args.control_state_file is None
 
     session_id = f"cli-operator-{os.getpid()}"
     socket_path = f"/tmp/rpi-vstim-cli-{os.getpid()}.sock"
+    state_path = tmp_path / "operator-state.json"
     result = {}
     thread = threading.Thread(
         target=lambda: result.setdefault(
@@ -140,6 +142,7 @@ def test_natural_image_cli_operator_control_is_opt_in_and_reconnectable(tmp_path
                 "natural-images", "run", "--mouse-id", "simulation-test",
                 "--config", "unused.toml", "--session-id", session_id,
                 "--operator-control", "--control-socket", socket_path,
+                "--control-state-file", str(state_path),
             ]),
         ),
         daemon=True,
@@ -167,6 +170,13 @@ def test_natural_image_cli_operator_control_is_opt_in_and_reconnectable(tmp_path
         assert not thread.is_alive()
         assert result["exit_code"] == 0
         assert display.closed
+        assert not os.path.exists(socket_path)
+        durable = json.loads(state_path.read_text())
+        assert durable["state"] == "COMPLETE" and durable["terminal"]
+        assert durable["session_id"] == session_id
+        assert durable["protocol"] == "natural-images"
+        assert durable["terminal_request_id"] == "monitor-stop"
+        assert durable["control_instance_id"]
         session_root = config.paths.output_root / session_id
         assert json.loads((session_root / "final_status.json").read_text())["status"] == "COMPLETE"
         control = json.loads((session_root / "operator_control.json").read_text())

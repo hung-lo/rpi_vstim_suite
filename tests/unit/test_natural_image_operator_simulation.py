@@ -148,6 +148,7 @@ def test_operator_simulation_ready_reconnect_start_stop_and_telemetry(
     monkeypatch.setattr(natural_image_demo, "FakeDisplayBackend", TrackedFakeDisplay)
     session_id = f"sim-stop-{os.getpid()}"
     socket_path = tmp_path / "operator.sock"
+    state_path = tmp_path / "operator-state.json"
     output_root = tmp_path / "sessions"
     receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     receiver.bind(("127.0.0.1", 0))
@@ -159,7 +160,7 @@ def test_operator_simulation_ready_reconnect_start_stop_and_telemetry(
         session_id=session_id,
         socket_path=socket_path,
         output_root=output_root,
-        extra=("--telemetry-port", str(telemetry_port)),
+        extra=("--telemetry-port", str(telemetry_port), "--control-state-file", str(state_path)),
     )
     try:
         ready = _wait_ready(socket_path, thread, result)
@@ -194,6 +195,10 @@ def test_operator_simulation_ready_reconnect_start_stop_and_telemetry(
         thread.join(5)
         assert not thread.is_alive()
         assert result["exit_code"] == 0
+        assert not socket_path.exists()
+        durable = json.loads(state_path.read_text())
+        assert durable["state"] == "COMPLETE" and durable["terminal"]
+        assert durable["terminal_request_id"] == "stop-one"
 
         session_root = output_root / session_id
         final = json.loads((session_root / "final_status.json").read_text())
@@ -240,12 +245,14 @@ def test_operator_simulation_abort_from_ready_is_idempotent_and_creates_no_sessi
     session_id = f"sim-abort-ready-{os.getpid()}"
     output_root = tmp_path / "sessions"
     socket_path = tmp_path / "operator.sock"
+    state_path = tmp_path / "operator-state.json"
     thread, result = _launch(
         monkeypatch,
         config,
         session_id=session_id,
         socket_path=socket_path,
         output_root=output_root,
+        extra=("--control-state-file", str(state_path)),
     )
     _wait_ready(socket_path, thread, result)
     request = {"request_id": "abort-ready", "command": "abort"}
@@ -254,7 +261,11 @@ def test_operator_simulation_abort_from_ready_is_idempotent_and_creates_no_sessi
     thread.join(3)
     assert not thread.is_alive()
     assert result["exit_code"] == 130
+    assert not socket_path.exists()
     assert not (output_root / session_id).exists()
+    ready_abort = json.loads(state_path.read_text())
+    assert ready_abort["state"] == "ABORTED" and ready_abort["terminal"]
+    assert ready_abort["terminal_request_id"] == "abort-ready"
 
 
 def test_operator_simulation_abort_while_running_finalizes_aborted_session(
@@ -265,12 +276,14 @@ def test_operator_simulation_abort_while_running_finalizes_aborted_session(
     session_id = f"sim-abort-running-{os.getpid()}"
     output_root = tmp_path / "sessions"
     socket_path = tmp_path / "operator.sock"
+    state_path = tmp_path / "operator-state.json"
     thread, result = _launch(
         monkeypatch,
         config,
         session_id=session_id,
         socket_path=socket_path,
         output_root=output_root,
+        extra=("--control-state-file", str(state_path)),
     )
     _wait_ready(socket_path, thread, result)
     started = _send(socket_path, {"request_id": "start-running", "command": "start"})
@@ -284,8 +297,44 @@ def test_operator_simulation_abort_while_running_finalizes_aborted_session(
     thread.join(5)
     assert not thread.is_alive()
     assert result["exit_code"] == 130
+    assert not socket_path.exists()
     final = json.loads((output_root / session_id / "final_status.json").read_text())
     assert final["status"] == "ABORTED"
+    durable = json.loads(state_path.read_text())
+    assert durable["state"] == "ABORTED" and durable["terminal"]
+    assert durable["terminal_request_id"] == "abort-running"
+
+
+def test_operator_simulation_natural_completion_state_survives_socket_shutdown(
+    tmp_path, monkeypatch
+):
+    config = _config(tmp_path)
+    _forbid_hardware(monkeypatch)
+    session_id = f"sim-natural-complete-{os.getpid()}"
+    output_root = tmp_path / "sessions"
+    socket_path = tmp_path / "operator.sock"
+    state_path = tmp_path / "operator-state.json"
+    thread, result = _launch(
+        monkeypatch,
+        config,
+        session_id=session_id,
+        socket_path=socket_path,
+        output_root=output_root,
+        extra=("--control-state-file", str(state_path)),
+    )
+    _wait_ready(socket_path, thread, result)
+    started = _send(socket_path, {"request_id": "natural-start", "command": "start"})
+    assert started["ok"] and started["state"] == "RUNNING"
+    thread.join(6)
+    assert not thread.is_alive()
+    assert result["exit_code"] == 0
+    assert not socket_path.exists()
+    final = json.loads((output_root / session_id / "final_status.json").read_text())
+    durable = json.loads(state_path.read_text())
+    assert final["status"] == "COMPLETE"
+    assert durable["state"] == "COMPLETE" and durable["terminal"]
+    assert durable["reason"] == "natural_completion"
+    assert durable["terminal_request_id"] is None
 
 
 def test_natural_image_simulation_cli_requires_explicit_output_root(tmp_path, monkeypatch):
