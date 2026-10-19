@@ -34,6 +34,20 @@ def test_telemetry_message_round_trips_with_optional_fields():
     assert payload["type"] == "trial_complete"
 
 
+def test_grouped_operator_status_fields_round_trip():
+    message = TelemetryMessage(
+        "lifecycle", "s1", "natural-images", "READY",
+        session={"id": "s1", "state": "READY"},
+        hardware={"display": "ready"},
+        integrity={"event_drops": 0},
+        protocol_state={"phase": "prepared"},
+        capabilities={"start": True, "stop": True, "abort": True},
+        elapsed_s=0.0,
+        control_schema_version=1,
+    )
+    assert TelemetryMessage.from_json(message.to_json()) == message
+
+
 def test_telemetry_message_rejects_wrong_version_or_missing_fields():
     with pytest.raises(ValueError, match="version"):
         TelemetryMessage.from_json('{"schema_version": 2}')
