@@ -24,11 +24,13 @@ from rpi_vstim.camera import (
     resolve_camera_identities,
     resolve_camera_preview_environment,
 )
+from rpi_vstim.control import ExperimentControl
 from rpi_vstim.core.assets import AssetPreparer, AssetResolver, build_selected_asset_manifest
 from rpi_vstim.core.camera import CameraState
 from rpi_vstim.core.config import Config, ConfigError
 from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.core.session import atomic_write_json, new_session
+from rpi_vstim.core.storage import prepare_session_output_root
 from rpi_vstim.core.unified_events import SessionClock, UnifiedEventStream
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
@@ -255,6 +257,58 @@ class NaturalImageDemoResult:
         return self.status == "COMPLETE"
 
 
+@dataclass(frozen=True)
+class PreparedNaturalImageDemo:
+    plan: Any
+    asset_manifest: Any
+
+
+def prepare_natural_image_demo(
+    config: Config,
+    *,
+    seed: int = 0,
+    image_count: int | None = None,
+    use_licks: bool = False,
+    use_cameras: bool = False,
+    camera_preview: bool = False,
+    session_id: str = "preflight",
+    enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
+) -> PreparedNaturalImageDemo:
+    """Validate a natural-image run without creating a session or starting hardware."""
+    if not session_id or any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+        for char in session_id
+    ):
+        raise ValueError("session_id contains unsupported characters")
+    validate_demo_config(
+        config, use_licks=use_licks, use_cameras=use_cameras, preview=camera_preview
+    )
+    prepare_session_output_root(config.paths.output_root)
+    session_root = config.paths.output_root / session_id
+    if session_root.exists() or session_root.is_symlink():
+        raise FileExistsError(f"session already exists: {session_id}")
+    plan = build_demo_plan(config, seed=seed, image_count=image_count)
+    resolver = AssetResolver(config.paths.asset_root)
+    manifest = build_selected_asset_manifest(
+        plan,
+        resolver,
+        target_width_px=config.display.width_px,
+        target_height_px=config.display.height_px,
+        transform=str(plan.metadata.get("asset_transform", "crop")),
+        background_value=int(plan.metadata.get("background_gray", 127)),
+    )
+    if use_cameras:
+        preview_environment = resolve_camera_preview_environment() if camera_preview else None
+        _resolve_camera_specs(
+            config,
+            config.paths.output_root / session_id,
+            preview=camera_preview,
+            preview_environment=preview_environment,
+            enumerate_cameras=enumerate_cameras,
+        )
+    return PreparedNaturalImageDemo(plan, manifest)
+
+
 def validate_demo_config(config: Config, *, use_licks: bool, use_cameras: bool, preview: bool) -> None:
     config.validate()
     if config.display.backend != "kms" or config.display.ownership != "lease":
@@ -460,7 +514,7 @@ def _emit_display_boundary_events(
     first_callback = payload.get("first_page_flip_callback_monotonic_ns")
     total_frames = int(payload.get("completed_frame_count", plan.total_frames))
     for event in plan.events:
-        if not event.frame_count:
+        if not event.frame_count or event.planned_start_frame >= total_frames:
             continue
         source, timing = _trace_timestamp(
             payload,
@@ -489,22 +543,31 @@ def _emit_display_boundary_events(
                 image_sha256=entry.sha256,
                 **fields,
             )
-            end_source, end_timing = _trace_timestamp(
-                payload,
-                event.planned_start_frame + event.frame_count,
-                traces=traces,
-                fallback_start_ns=int(first_callback) if first_callback else None,
-                refresh_hz=refresh_hz,
-            )
-            stream.emit_reliable(
-                "IMAGE_OFFSET",
-                source_monotonic_ns=end_source,
-                image_index=int(event.trial_id or 0),
-                filename=filename,
-                image_sha256=entry.sha256,
-                logical_frame_index=event.planned_start_frame + event.frame_count,
-                timing_source=end_timing["timing_source"],
-            )
+            if event.planned_start_frame + event.frame_count <= total_frames:
+                end_source, end_timing = _trace_timestamp(
+                    payload,
+                    event.planned_start_frame + event.frame_count,
+                    traces=traces,
+                    fallback_start_ns=int(first_callback) if first_callback else None,
+                    refresh_hz=refresh_hz,
+                )
+                stream.emit_reliable(
+                    "IMAGE_OFFSET",
+                    source_monotonic_ns=end_source,
+                    image_index=int(event.trial_id or 0),
+                    filename=filename,
+                    image_sha256=entry.sha256,
+                    logical_frame_index=event.planned_start_frame + event.frame_count,
+                    timing_source=end_timing["timing_source"],
+                )
+            else:
+                stream.emit_reliable(
+                    "STIMULUS_TRUNCATED",
+                    logical_frame_index=event.planned_start_frame,
+                    completed_frame_count=total_frames,
+                    trial_id=event.trial_id,
+                    filename=filename,
+                )
         else:
             stream.emit_reliable("GRAY_ONSET", source_monotonic_ns=source, **fields)
     if total_frames:
@@ -532,6 +595,7 @@ def _write_demo_metadata(
     lick_monitor_diagnostics: dict[str, Any] | None,
     camera_preview: dict[str, object],
     audio_summary: dict[str, Any],
+    operator_control: dict[str, Any] | None = None,
 ) -> None:
     for name in ("provenance.json", "final_status.json"):
         path = session_root / name
@@ -554,6 +618,8 @@ def _write_demo_metadata(
         }
         if audio_summary:
             value["audio_coexistence"] = audio_summary
+        if operator_control is not None:
+            value["operator_control"] = operator_control
         if name == "final_status.json":
             value["status"] = status
             if error:
@@ -566,7 +632,20 @@ def _write_demo_metadata(
         manifest["natural_image_demo_status"] = status
         if audio_summary:
             manifest["audio_coexistence"] = audio_summary
+        if operator_control is not None:
+            manifest["operator_control"] = operator_control
         atomic_write_json(manifest_path, manifest)
+
+
+def write_operator_control_metadata(session_root: Path, metadata: dict[str, Any]) -> None:
+    """Refresh the final control provenance after the control worker reaches terminal state."""
+    atomic_write_json(session_root / "operator_control.json", metadata)
+    for name in ("provenance.json", "session_manifest.json", "final_status.json"):
+        path = session_root / name
+        if path.is_file():
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["operator_control"] = metadata
+            atomic_write_json(path, value)
 
 
 def run_natural_image_demo(
@@ -582,15 +661,19 @@ def run_natural_image_demo(
     native_binary: Path | str | None = None,
     audio: AudioOutput | None = None,
     audio_settings: AudioCoexistenceSettings | None = None,
+    prepared: PreparedNaturalImageDemo | None = None,
+    control: ExperimentControl | None = None,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
 ) -> NaturalImageDemoResult:
-    validate_demo_config(
-        config,
-        use_licks=use_licks,
-        use_cameras=use_cameras,
-        preview=camera_preview,
-    )
-    plan = build_demo_plan(config, seed=seed, image_count=image_count)
+    if prepared is None:
+        validate_demo_config(
+            config, use_licks=use_licks, use_cameras=use_cameras, preview=camera_preview
+        )
+        plan = build_demo_plan(config, seed=seed, image_count=image_count)
+        manifest = None
+    else:
+        plan = prepared.plan
+        manifest = prepared.asset_manifest
     if (audio is None) != (audio_settings is None):
         raise ValueError("audio output and audio settings must be supplied together")
     audio_clips = load_pilot_clips(PILOT_AUDIO_ASSET_ROOT) if audio is not None else {}
@@ -604,7 +687,16 @@ def run_natural_image_demo(
         raise ValueError("natural-image plan is too short for the configured audio schedule")
     session = new_session(config, protocol_name="natural-images", session_id=session_id, seed=seed)
     session.write_initial_outputs()
-    clock = SessionClock.start(session_id)
+    control_metadata = control.provenance() if control is not None else None
+    start_metadata = (control_metadata or {}).get("start")
+    clock = (
+        SessionClock(
+            session_id,
+            int(start_metadata["accepted_utc_ns"]),
+            int(start_metadata["accepted_monotonic_ns"]),
+        )
+        if start_metadata else SessionClock.start(session_id)
+    )
     events = UnifiedEventStream(session.context.session_root / "events.jsonl", session_id=session_id, clock=clock)
     display: KmsDisplayBackend | None = None
     monitor: LgpioLickMonitor | None = None
@@ -628,6 +720,8 @@ def run_natural_image_demo(
     error: str | None = None
     interrupted = False
     degraded: list[str] = []
+    operator_stop = False
+    operator_abort = False
 
     raw_counts = {"lick_left": 0, "lick_right": 0}
     classified_counts = {"lick_left": 0, "lick_right": 0}
@@ -674,6 +768,26 @@ def run_natural_image_demo(
                         )
 
     try:
+        if control is not None:
+            def write_control_event(item: dict[str, Any]) -> None:
+                fields = item.copy()
+                event = fields.pop("event")
+                monotonic = fields.pop("monotonic_ns")
+                fields.pop("utc_time", None)
+                events.emit_reliable(event, source_monotonic_ns=monotonic, **fields)
+
+            control.bind_event_sink(write_control_event)
+            write_operator_control_metadata(session.context.session_root, control.provenance())
+            control.update_snapshot(
+                hardware={
+                    "storage": "session_open",
+                    "gpio": "monitoring" if use_licks else "not_requested",
+                    "audio": "not_requested" if audio is None else "preparing",
+                    "irig": "external_not_probed",
+                    "chrony": "external_not_probed",
+                },
+                protocol_state={"phase": "session_start", "planned_frames": plan.total_frames},
+            )
         events.emit("SESSION_START", mouse_id=mouse_id, protocol="natural-images")
         events.emit("CLOCK_SYNC", source_monotonic_ns=clock.reference_monotonic_ns, **clock.sync_fields())
         if audio is not None and audio_settings is not None:
@@ -726,6 +840,8 @@ def run_natural_image_demo(
                 persistent_stream=True,
                 preloaded_pcm=True,
             )
+            if control is not None:
+                control.update_snapshot(hardware={"audio": "prepared"})
         if use_cameras and camera_preview:
             preview_environment = resolve_camera_preview_environment()
             camera_preview_metadata = preview_environment.metadata
@@ -734,14 +850,15 @@ def run_natural_image_demo(
                 events.emit("CAMERA_PREVIEW_UNAVAILABLE", **camera_preview_metadata)
         session.write_plan(plan)
         resolver = AssetResolver(config.paths.asset_root)
-        manifest = build_selected_asset_manifest(
-            plan,
-            resolver,
-            target_width_px=config.display.width_px,
-            target_height_px=config.display.height_px,
-            transform=str(plan.metadata.get("asset_transform", "crop")),
-            background_value=int(plan.metadata.get("background_gray", 127)),
-        )
+        if manifest is None:
+            manifest = build_selected_asset_manifest(
+                plan,
+                resolver,
+                target_width_px=config.display.width_px,
+                target_height_px=config.display.height_px,
+                transform=str(plan.metadata.get("asset_transform", "crop")),
+                background_value=int(plan.metadata.get("background_gray", 127)),
+            )
         session.write_asset_manifest(manifest)
         session.write_preflight_report(
             PreflightReport(
@@ -824,7 +941,13 @@ def run_natural_image_demo(
                 )
             cameras.start(session.context.session_root)
             cameras_active = True
-            for camera_status in cameras.manifest():
+            camera_manifest = cameras.manifest()
+            if control is not None:
+                control.update_snapshot(hardware={
+                    f"camera_{index + 1}": str(item.get("state", "RECORDING")).lower()
+                    for index, item in enumerate(camera_manifest)
+                })
+            for camera_status in camera_manifest:
                 events.emit("CAMERA_READY", **camera_status)
                 if camera_status.get("preview_enabled"):
                     events.emit("CAMERA_PREVIEW_READY", verification="process_started", **camera_status)
@@ -839,6 +962,8 @@ def run_natural_image_demo(
             config.photodiode.off_value,
         )
         display.open(config.display)
+        if control is not None:
+            control.update_snapshot(hardware={"display": "acquiring"})
         if display.renderer is None:
             raise NaturalImageDemoError("KMS display did not provide a frame renderer")
         preparer = AssetPreparer(
@@ -855,9 +980,15 @@ def run_natural_image_demo(
         )
 
         def frame_stream():
+            nonlocal operator_stop, operator_abort
             frame_index = 0
             producer_sequence = 0
             for planned in plan.events:
+                if control is not None and frame_index and (control.stop_requested or control.abort_requested):
+                    operator_stop = control.stop_requested
+                    operator_abort = control.abort_requested
+                    audio_stop.set()
+                    break
                 if audio_errors:
                     raise NaturalImageDemoError(
                         f"audio coexistence failed: {audio_errors[0]}"
@@ -875,6 +1006,11 @@ def run_natural_image_demo(
                     asset_key=asset_key,
                 )
                 for _ in range(planned.frame_count):
+                    if control is not None and frame_index and (control.stop_requested or control.abort_requested):
+                        operator_stop = control.stop_requested
+                        operator_abort = control.abort_requested
+                        audio_stop.set()
+                        return
                     yield DisplaySequenceFrame(
                         DisplaySequenceMetadata(
                             logical_frame_index=frame_index,
@@ -930,6 +1066,22 @@ def run_natural_image_demo(
             )
             audio_thread.start()
         display_payload = display.present_sequence(frame_stream())
+        if control is not None:
+            control.mark_finishing()
+        operator_stop = operator_stop or bool(control and control.stop_requested)
+        operator_abort = operator_abort or bool(control and control.abort_requested)
+        display_payload["planned_frame_count"] = plan.total_frames
+        display_payload["operator_stopped_early"] = operator_stop
+        display_payload["operator_aborted"] = operator_abort
+        if control is not None:
+            control.update_snapshot(
+                hardware={"audio": "active" if audio is not None else "not_requested"},
+                protocol_state={
+                    "phase": "finishing",
+                    "planned_frames": plan.total_frames,
+                    "completed_frames": display_payload.get("completed_frame_count", 0),
+                },
+            )
         if audio_thread is not None:
             audio_thread.join(timeout=10.0)
             if audio_thread.is_alive():
@@ -962,7 +1114,14 @@ def run_natural_image_demo(
         session.write_display_result(display_payload)
         if camera_failures:
             raise NaturalImageDemoError("required camera failed during demo: " + "; ".join(camera_failures))
-        status = "COMPLETE"
+        if operator_abort:
+            status = "ABORTED"
+            error = "operator requested abort"
+            events.emit_reliable("SESSION_ABORTED", reason="operator", request=control.provenance().get("abort"))
+        else:
+            status = "COMPLETE"
+            if operator_stop:
+                events.emit_reliable("SESSION_STOPPED", reason="operator", request=control.provenance().get("stop"))
     except KeyboardInterrupt:
         interrupted = True
         status = "INTERRUPTED"
@@ -1024,6 +1183,11 @@ def run_natural_image_demo(
                     scientific_interval_monotonic_ns=scientific_interval,
                     coverage_timing_source=coverage_timing_source,
                 )
+                if control is not None:
+                    control.update_snapshot(hardware={
+                        f"camera_{index + 1}": status.state.value.lower()
+                        for index, status in enumerate(statuses)
+                    })
                 for camera_status in statuses:
                     events.emit(
                         "CAMERA_STOP",
@@ -1058,6 +1222,22 @@ def run_natural_image_demo(
         except Exception as exc:  # noqa: BLE001 — preserve final status
             event_diagnostics = events.diagnostics() | {"close_error": str(exc)}
             degraded.append(f"event writer cleanup: {exc}")
+        if control is not None:
+            control.update_snapshot(
+                hardware={
+                    "display": "released",
+                    "storage": "finalizing",
+                    "gpio": "closed" if use_licks else "not_requested",
+                    "audio": "closed" if audio is not None else "not_requested",
+                },
+                integrity={
+                    "event_drops": event_diagnostics.get("dropped_count", 0),
+                    "writer_errors": event_diagnostics.get("error_count", 0),
+                    "kms_completed": (display_payload or {}).get("completed_frame_count", 0),
+                    "camera_errors": len(camera_failures),
+                },
+                protocol_state={"phase": status.lower()},
+            )
         if event_diagnostics["error_count"] or event_diagnostics["dropped_count"]:
             status = "FAILED"
             error = (
@@ -1077,6 +1257,8 @@ def run_natural_image_demo(
             session.close()
         except Exception as exc:  # noqa: BLE001 — preserve best-effort final files
             degraded.append(f"session finalization: {exc}")
+        if control is not None:
+            control.update_snapshot(hardware={"storage": "finalized"})
         _write_demo_metadata(
             session.context.session_root,
             mouse_id=mouse_id,
@@ -1090,7 +1272,10 @@ def run_natural_image_demo(
             lick_monitor_diagnostics=lick_monitor_diagnostics,
             camera_preview=camera_preview_metadata,
             audio_summary=audio_summary,
+            operator_control=control.provenance() if control is not None else None,
         )
+        if control is not None:
+            control.bind_event_sink(lambda _item: None)
 
     return NaturalImageDemoResult(
         session.context.session_root,

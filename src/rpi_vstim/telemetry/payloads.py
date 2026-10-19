@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .schema import OUTER_SCHEMA_VERSION, PAYLOAD_SCHEMA_VERSION
-
 
 _RESERVED_ENVELOPE_KEYS = frozenset(
     {
@@ -30,6 +29,14 @@ _RESERVED_ENVELOPE_KEYS = frozenset(
         "counters",
         "error",
         "degraded",
+        "session",
+        "hardware",
+        "integrity",
+        "protocol_state",
+        "capabilities",
+        "elapsed_s",
+        "eta_s",
+        "control_schema_version",
     }
 )
 
@@ -78,6 +85,14 @@ class TelemetryMessage:
     degraded: list[str] | None = None
     protocol_version: str | None = None
     timestamp_utc: str | None = None
+    session: dict[str, Any] | None = None
+    hardware: dict[str, Any] | None = None
+    integrity: dict[str, Any] | None = None
+    protocol_state: dict[str, Any] | None = None
+    capabilities: dict[str, bool] | None = None
+    elapsed_s: float | None = None
+    eta_s: float | None = None
+    control_schema_version: int | None = None
 
     def __post_init__(self) -> None:
         if self.message_type == "state":
@@ -88,7 +103,7 @@ class TelemetryMessage:
             object.__setattr__(
                 self,
                 "timestamp_utc",
-                datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             )
 
     def as_dict(self) -> dict[str, Any]:
@@ -109,6 +124,13 @@ class TelemetryMessage:
             value["protocol_version"] = self.protocol_version
         if self.timestamp_utc is not None:
             value["timestamp_utc"] = self.timestamp_utc
+        for name in (
+            "session", "hardware", "integrity", "protocol_state", "capabilities",
+            "elapsed_s", "eta_s", "control_schema_version",
+        ):
+            item = getattr(self, name)
+            if item is not None:
+                value[name] = item
         if self.trial_id is not None:
             value["trial_id"] = self.trial_id
             value["trial"] = self.trial_id
@@ -135,7 +157,7 @@ class TelemetryMessage:
         return json.dumps(self.as_dict(), sort_keys=True, separators=(",", ":"))
 
     @classmethod
-    def from_json(cls, payload: str) -> "TelemetryMessage":
+    def from_json(cls, payload: str) -> TelemetryMessage:
         value = json.loads(payload)
         if value.get("schema_version") != OUTER_SCHEMA_VERSION:
             raise ValueError("unsupported outer telemetry schema version")
@@ -161,4 +183,12 @@ class TelemetryMessage:
             degraded=value.get("degraded"),
             protocol_version=value.get("protocol_version"),
             timestamp_utc=value.get("timestamp_utc"),
+            session=value.get("session"),
+            hardware=value.get("hardware"),
+            integrity=value.get("integrity"),
+            protocol_state=value.get("protocol_state"),
+            capabilities=value.get("capabilities"),
+            elapsed_s=value.get("elapsed_s"),
+            eta_s=value.get("eta_s"),
+            control_schema_version=value.get("control_schema_version"),
         )

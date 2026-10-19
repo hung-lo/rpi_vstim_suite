@@ -14,9 +14,20 @@ from pathlib import Path
 
 from . import __version__
 from .audio import AudioError, FakeAudio, SoundDeviceAudio
+from .control import (
+    ExperimentControl,
+    ExperimentState,
+    UnixControlServer,
+    default_control_socket_path,
+)
 from .core.config import CameraDeviceConfig, ConfigError, load_config
 from .core.dry_run import build_dry_run_report
-from .core.natural_image_demo import AudioCoexistenceSettings, run_natural_image_demo
+from .core.natural_image_demo import (
+    AudioCoexistenceSettings,
+    prepare_natural_image_demo,
+    run_natural_image_demo,
+    write_operator_control_metadata,
+)
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
@@ -192,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="audio pilot profile containing the unique USB device match and gains",
     )
     natural_image_run.add_argument("--native-binary", type=Path)
+    natural_image_run.add_argument("--operator-control", action="store_true", help="wait in READY for local supervisor commands")
+    natural_image_run.add_argument("--control-socket", type=Path, help="owner-only Unix control socket path")
+    natural_image_run.add_argument("--telemetry-port", type=int, help="optional local UDP status destination port")
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
 
     audio_pilot = commands.add_parser("audio-pilot", help="run the engineering USB-audio pilot")
@@ -234,6 +248,104 @@ def _doctor(config_path: Path | None, as_json: bool) -> int:
         for key, value in result.items():
             print(f"{key}: {json.dumps(value, sort_keys=True)}")
     return 0
+
+
+def _run_operator_session(
+    *,
+    session_id: str,
+    protocol: str,
+    prepare,
+    run,
+    socket_path: Path | None,
+    telemetry_port: int | None,
+) -> int:
+    control = ExperimentControl(session_id=session_id, protocol=protocol, run=run)
+    endpoint = UnixControlServer(socket_path or default_control_socket_path(session_id), control.handle_request)
+    telemetry = None
+    sequence = 0
+
+    def publish_status() -> None:
+        nonlocal sequence
+        if telemetry is None:
+            return
+        status = control.status()
+        telemetry.publish(TelemetryMessage(
+            "lifecycle", session_id, protocol, status["state"],
+            sequence_number=sequence,
+            session=status["session"],
+            hardware=status["hardware"],
+            integrity=status["integrity"],
+            protocol_state=status["protocol_state"],
+            capabilities=status["capabilities"],
+            elapsed_s=status["elapsed_s"],
+            eta_s=status["eta_s"],
+            control_schema_version=status["control_schema_version"],
+        ))
+        sequence += 1
+
+    try:
+        if telemetry_port is not None:
+            if not 1 <= telemetry_port <= 65_535:
+                raise ValueError("telemetry port must be between 1 and 65535")
+            try:
+                telemetry = UdpTelemetryPublisher("127.0.0.1", telemetry_port)
+            except OSError as exc:
+                print(f"warning: optional telemetry unavailable: {exc}", file=sys.stderr)
+        endpoint.start()
+        prepared = prepare()
+        control.planned_duration_s = prepared["duration_s"]
+        if control.state == ExperimentState.PREPARING:
+            control.mark_ready()
+        print(json.dumps({
+            "session_id": session_id,
+            "protocol": protocol,
+            "state": control.state.value,
+            "control_socket": str(endpoint.path),
+            "capabilities": control.status()["capabilities"],
+        }, sort_keys=True), flush=True)
+        if telemetry is not None:
+            publish_status()
+        while not control.wait(0.5):
+            publish_status()
+        control.join()
+        publish_status()
+        result = control.result
+        session_root = None
+        if result is not None:
+            session_root = getattr(result, "session_root", None)
+            if session_root is None:
+                session = getattr(result, "session", None)
+                session_root = getattr(getattr(session, "context", None), "session_root", None)
+            if session_root is not None:
+                write_operator_control_metadata(Path(session_root), control.provenance())
+        status = control.status()
+        print(json.dumps({
+            "session_id": session_id,
+            "protocol": protocol,
+            "state": status["state"],
+            "session_root": str(session_root) if session_root else None,
+            "error": status["error"],
+        }, sort_keys=True))
+        if status["state"] == "COMPLETE":
+            return 0
+        return 130 if status["state"] == "ABORTED" else 1
+    except KeyboardInterrupt:
+        control.handle_request({
+            "schema_version": 1,
+            "request_id": f"local-ctrl-c-{time.monotonic_ns()}",
+            "command": "abort",
+        })
+        control.wait()
+        control.join()
+        return 130
+    except (ConfigError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        control.fail_preparation(str(exc))
+        print(f"operator-controlled run failed: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        endpoint.close()
+        if telemetry is not None:
+            telemetry.close()
 
 
 def _telemetry_demo(messages: int) -> dict[str, object]:
@@ -503,6 +615,57 @@ def main(argv: list[str] | None = None) -> int:
             session_id = args.session_id or (
                 f"{args.mouse_id}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
             )
+            if args.operator_control:
+                prepared_run = {}
+
+                def prepare_natural_images() -> dict[str, float]:
+                    display_config = (
+                        config.display
+                        if args.camera_preview
+                        else replace(config.display, preview_connector=None)
+                    )
+                    display_probe(display_config)
+                    prepared_run["plan"] = prepare_natural_image_demo(
+                        config,
+                        seed=args.seed,
+                        image_count=args.image_count,
+                        use_licks=args.licks,
+                        use_cameras=args.cameras,
+                        camera_preview=args.camera_preview,
+                        session_id=session_id,
+                    )
+                    return {
+                        "duration_s": prepared_run["plan"].plan.total_frames
+                        / config.display.refresh_hz
+                    }
+
+                def run_natural_images(control: ExperimentControl):
+                    return run_natural_image_demo(
+                        config,
+                        mouse_id=args.mouse_id,
+                        session_id=session_id,
+                        seed=args.seed,
+                        image_count=args.image_count,
+                        use_licks=args.licks,
+                        use_cameras=args.cameras,
+                        camera_preview=args.camera_preview,
+                        native_binary=args.native_binary,
+                        audio=audio,
+                        audio_settings=audio_settings,
+                        prepared=prepared_run["plan"],
+                        control=control,
+                    )
+
+                return _run_operator_session(
+                    session_id=session_id,
+                    protocol="natural-images",
+                    prepare=prepare_natural_images,
+                    run=run_natural_images,
+                    socket_path=args.control_socket,
+                    telemetry_port=args.telemetry_port,
+                )
+            if args.control_socket is not None or args.telemetry_port is not None:
+                raise ConfigError("--control-socket and --telemetry-port require --operator-control")
             print(
                 "\n".join(
                     (
