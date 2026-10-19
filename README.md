@@ -95,6 +95,14 @@ rpi-vstim natural-images run \
   --licks --cameras --camera-preview
 ```
 
+Direct CLI runs still begin acquisition immediately. For launch through a local
+supervisor, add `--operator-control`; the engine validates the plan/assets and
+camera identities, then waits in READY before creating a session or starting
+cameras. START begins the normal run. STOP finishes cleanly at a frame boundary;
+ABORT finalizes the session as aborted. The engine owns all hardware and keeps
+running if the monitor disconnects. See the
+[operator-control adapter guide](docs/operator_control_protocol_adapter.md).
+
 ### Audio-only pilot
 
 Run the safe fake six-trial plan first:
