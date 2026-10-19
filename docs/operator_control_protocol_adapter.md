@@ -25,8 +25,10 @@ engine removes its socket on normal shutdown. `--telemetry-port` is optional and
 publishes best-effort status snapshots to loopback UDP at 2 Hz; it carries no
 commands. Telemetry startup failure does not stop the experiment.
 The launched process prints its resolved socket path. A supervisor supplies its
-own persistent `--control-socket` and `--session-id` values when it launches the
-engine.
+own unique `--control-socket`, `--control-state-file`, and `--session-id` values
+when it launches the engine. The state-file path must not already exist. For
+backwards compatibility, `--control-state-file` is optional; a supervisor that
+needs terminal recovery after process exit must provide it.
 
 Hardware preparation validates configuration and storage, plans and validates
 the selected images, probes the configured display using read-only `modetest`
@@ -50,7 +52,8 @@ rpi-vstim natural-images run \
   --session-id monitor-simulation \
   --output-root /tmp/rpi-vstim-monitor-simulation \
   --operator-control --simulate \
-  --control-socket /tmp/rpi-vstim-monitor-simulation.sock
+  --control-socket /tmp/rpi-vstim-monitor-simulation.sock \
+  --control-state-file /tmp/rpi-vstim-monitor-simulation-state.json
 ```
 
 `--simulate` requires `--output-root` and rejects `--licks`, `--cameras`,
@@ -66,24 +69,52 @@ timestamp is produced. Simulation timing is for supervisor integration only.
 ## Socket messages
 
 The transport is one UTF-8 JSON object per connection, terminated by a newline.
-The monitor's proposed request shape omits a schema field; the engine treats
-that envelope as version 1. Clients may send `schema_version: 1` explicitly,
-and any other explicit version is rejected. Responses always include
-`schema_version: 1`. For example:
+The canonical v1 contract requires every request, including `status`, to contain
+`schema_version: 1` and a nonempty `request_id`. Every response contains
+`schema_version: 1` and echoes that exact `request_id`. The engine still accepts
+some older messages without the v1 envelope for compatibility, but supervisors
+and new clients should use the strict form:
 
 ```json
-{"command":"status"}
-{"request_id":"start-001","command":"start"}
-{"request_id":"stop-001","command":"stop"}
-{"request_id":"abort-001","command":"abort"}
+{"schema_version":1,"request_id":"status-001","command":"status"}
+{"schema_version":1,"request_id":"start-001","command":"start"}
+{"schema_version":1,"request_id":"stop-001","command":"stop"}
+{"schema_version":1,"request_id":"abort-001","command":"abort"}
 ```
 
-Mutating commands require a request ID. Acknowledgements include the same ID,
-`ok`, current state, and a structured error on failure. The last 128 mutating
+Acknowledgements include the exact request ID, `ok`, current state, and a
+structured error on failure. A successful `start`, `stop`, or `abort` response
+means the command was accepted; it does not mean cleanup has finished. In
+particular STOP and a RUNNING ABORT normally acknowledge `FINISHING`, then the
+terminal state is published after protocol cleanup. The last 128 mutating
 request IDs are cached: a retry with the same ID and body receives the original
 acknowledgement without repeating the action; reusing an ID with a different
 body is rejected. Requests are limited to 16 KiB. Multiple clients may query
 status; all requests are processed serially by the engine.
+
+## Durable state after process exit
+
+When `--control-state-file` is supplied, the engine writes a small versioned
+JSON lifecycle artifact. It is separate from the scientific session record and
+does not replace session events or final status. The file is mode `0600`; its
+parent directory is created with owner-only permissions if needed. The first
+snapshot is created without overwriting an existing path, so a supervisor must
+choose a new path for each launch. Updates use a fully written and synced
+temporary file followed by atomic replacement.
+
+The artifact identifies its `session_id`, `protocol`, engine PID, and unique
+`control_instance_id`, and records the lifecycle state, terminal flag, update
+times, terminal reason, request ID where STOP/ABORT caused the outcome, concise
+error summary, and session output path when available. The supervisor should
+remember the instance ID observed in startup output or live status and reject a
+file whose schema, session, protocol, or instance ID does not match that launch.
+
+While the control socket is alive, live engine status is authoritative. After
+the socket disappears, the matching engine-written state file is authoritative
+for lifecycle recovery. If it is absent, malformed, nonterminal, or mismatched,
+the supervisor should treat the process as exited without a recoverable terminal
+state; it must not infer COMPLETE or ABORTED from an exit code or parse
+VStim-specific scientific files.
 
 Lifecycle is engine-owned:
 
@@ -99,6 +130,9 @@ capabilities, hardware status, integrity summary, and protocol state. STOP asks
 the natural-image producer to end at a frame boundary and uses normal cleanup;
 the session is marked COMPLETE with the partial display count recorded. ABORT
 uses the same cleanup path and marks the session ABORTED. Neither uses SIGKILL.
+The engine atomically persists each lifecycle transition, including the terminal
+state, before notifying its launcher that the run is finished and before closing
+the control socket.
 
 ## Capabilities and semantic actions
 
