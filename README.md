@@ -32,12 +32,13 @@ capabilities.
 | USB audio pilot protocol | Persistent USB playback with preloaded stimuli and session timing/events |
 | USB audio with the full VStim stack | **Validated** in a ~2-minute Pi 5 coexistence run; [session record](docs/hardware/pi5_av_coexistence_2026-10-16.md) |
 
-Drifting gratings and retinotopy are implemented and software-tested in the
-unified protocol/session runner; Pi physical validation is pending. Still
-pending are final animal-facing water calibration, audio SPL calibration at the
-mouse position, physical acoustic-onset calibration, photodiode visual-onset
-calibration, and downstream acquisition-device IRIG validation. See [the Pi 5
-deployment notes](docs/pi5_rig.md) and [hardware records](docs/hardware/).
+Still pending are final animal-facing water calibration, audio SPL calibration
+at the mouse position, physical acoustic-onset calibration, photodiode
+visual-onset calibration, and downstream acquisition-device IRIG validation.
+Drifting-grating and retinotopy planners and compatibility wrappers exist, but
+they have not been migrated to or validated through the current Pi KMS display
+runner. See [the Pi 5 deployment notes](docs/pi5_rig.md) and
+[hardware records](docs/hardware/).
 
 ## Current Pi 5 rig
 
@@ -71,8 +72,6 @@ source .venv/bin/activate
 python -m pip install --no-build-isolation -e .
 # Only needed for USB audio:
 python -m pip install --no-build-isolation -e '.[audio]'
-# Needed for visual-mapping previews and rendered-frame caches:
-python -m pip install --no-build-isolation -e '.[visual]'
 ```
 
 Check the machine and validate the current rig profile before a session:
@@ -91,7 +90,7 @@ before starting hardware:
 
 ```bash
 rpi-vstim natural-images run \
-  --mouse-id V1_2 \
+  --mouse-id example_mouse \
   --config config/rigs/pi5_natural_image_demo.example.toml \
   --licks --cameras --camera-preview
 ```
@@ -145,30 +144,18 @@ rpi-vstim natural-images run \
 See the [coexistence validation record](docs/hardware/pi5_av_coexistence_2026-10-16.md)
 for the actual session results and limits.
 
-### Visual-mapping simulation
+### Simulation
 
-The small fake-display profile supports previews, cache checks, and a session
-run without Pi display, camera, GPIO, audio, or production storage:
+This creates a simulated session without Pi display, camera, GPIO, audio, or
+production storage:
 
 ```bash
-rpi-vstim drifting-gratings preview \
-  --config config/rigs/visual_mapping_simulation.toml \
-  --protocol-config config/protocols/drifting_gratings.smoke.toml \
-  --output /tmp/drifting-gratings.png
-
-rpi-vstim drifting-gratings build-cache \
-  --config config/rigs/visual_mapping_simulation.toml \
-  --protocol-config config/protocols/drifting_gratings.smoke.toml
-
-rpi-vstim drifting-gratings run --simulate \
-  --config config/rigs/visual_mapping_simulation.toml \
-  --protocol-config config/protocols/drifting_gratings.smoke.toml \
+rpi-vstim run drifting-gratings --simulate \
   --output-root /tmp/rpi-vstim-sim
 ```
 
-Retinotopy uses the same `preview`, `build-cache`, and `run` progression. A run
-requires a prebuilt cache matching the selected rig and protocol configuration.
-Fake-display completion is software testing, not Pi physical validation.
+The drifting-grating plan is software groundwork only; simulation success is
+not hardware validation.
 
 ## Configuration and data
 
@@ -190,10 +177,10 @@ metadata; it does not decode every frame. `rpi-vstim inspect-session PATH
 --deep-camera-qc` requests the slower frame-count/decode checks.
 
 The canonical natural-image corpus path is
-`assets/natural_images/stringer_natimg2800_center_crop/`. It is present in this
-checkout. The repository does not establish dataset licensing terms; verify
-those terms before any redistribution outside the lab. User-supplied corpora
-can be selected through configuration.
+`assets/natural_images/stringer_natimg2800_center_crop/`. Its source, verified
+image transformations, CC BY-NC 4.0 license, and citation requirements are
+documented in the [asset README](assets/natural_images/stringer_natimg2800_center_crop/README.md).
+User-supplied corpora can be selected through configuration.
 
 ## Timing, cameras, and GPIO
 
@@ -232,6 +219,66 @@ in [the migration audit](docs/visual_mapping_migration_audit.md). The root
 `run_drifting_gratings.py` and `run_retinotopy.py` remain compatibility
 wrappers; use `rpi-vstim drifting-gratings` and `rpi-vstim retinotopy` for the
 supported interface.
+
+### Visual-mapping simulation
+
+The small fake-display profile supports previews, cache checks, and a session
+run without Pi display, camera, GPIO, audio, or production storage:
+
+```bash
+rpi-vstim drifting-gratings preview \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml \
+  --output /tmp/drifting-gratings.png
+
+rpi-vstim drifting-gratings build-cache \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml
+
+rpi-vstim drifting-gratings run --simulate \
+  --config config/rigs/visual_mapping_simulation.toml \
+  --protocol-config config/protocols/drifting_gratings.smoke.toml \
+  --output-root /tmp/rpi-vstim-sim
+```
+
+Retinotopy uses the same `preview`, `build-cache`, and `run` progression. A run
+requires a prebuilt cache matching the selected rig and protocol configuration.
+Fake-display completion is software testing, not Pi physical validation.
+
+## Building additional protocols or task repositories
+
+Protocols can be added to this repository, or a specialized task such as
+Go/NoGo can live in a separate repository based on the same engine concepts.
+Either way, reuse the tested KMS, camera, event, storage, and audio services
+instead of creating parallel timing-critical implementations.
+
+```text
+                         rpi_rig_monitor
+                                |
+                  common operator-control contract
+                     (under development; not on main)
+                         /                 \
+                        /                   \
+          rpi_vstim_suite              specialized task repo
+          visual protocols                  Go/NoGo
+```
+
+An eventual monitor integration should use a shared operator-control contract;
+it does not require every task to be merged into this repository. See
+[contribution guidance](CONTRIBUTING.md). The operator-control API is not part
+of this `main` branch.
+
+## Licensing
+
+Except where otherwise noted, original `rpi_vstim_suite` source code is
+licensed under [BSD-3-Clause](LICENSE). The included Stringer natural-image
+stimuli are derived from the Janelia Figshare dataset
+[10.25378/janelia.6845348](https://doi.org/10.25378/janelia.6845348) and are
+licensed separately under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+The NonCommercial restriction applies to those image assets. See the [asset
+README](assets/natural_images/stringer_natimg2800_center_crop/README.md) and
+[third-party notices](THIRD_PARTY_NOTICES.md) for attribution, transformations,
+and citation details.
 
 ## Internal lab setup
 

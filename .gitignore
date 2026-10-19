@@ -10,4 +10,32 @@ build/
 docs/hardware/*_local.*
 *.patch
 
+# Local runtime data, media, caches, and environments.
+sessions/
+*.mp4
+*.h264
+.cache/
+cache/
+venv/
+env/
+
+# Local credentials and machine-only configuration.
+.env
+.env.*
+!.env.example
+.secrets/
+.smbcredentials
+*.pem
+*.key
+config/local.*
+config/rigs/*_local.toml
+config/rigs/*_local.yaml
+config/rigs/*_local.json
+
+# Temporary transfer/build archives.
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
 .DS_Store
