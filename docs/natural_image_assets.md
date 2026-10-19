@@ -48,3 +48,15 @@ PYTHONPATH=src .venv/bin/python scripts/validate_natural_image_assets.py \
   --asset-root assets/natural_images/stringer_natimg2800_center_crop \
   --width 1024 --height 600
 ```
+
+For an offline copy of the previous repository's corpus, add
+`--legacy-root /path/to/copied/stringer_natimg2800_center_crop_png` to compare
+all PNG filenames and SHA-256 hashes without copying anything. To verify a
+copied session's deterministic selection against the local corpus, also pass
+`--session-dir /path/to/session`. That check cross-references `plan.json`,
+`selected_image_table.json`, `asset_manifest.json`, and `resolved_config.json`,
+then checks available `IMAGE_ONSET` records in `events.jsonl` against the
+filename, hash, session, and trial index. A completed session must contain one
+matching image onset per selected trial and a matching `final_status.json`;
+the session directory must be copied from the rig first.
+The validator never connects to Box151 or modifies images or session data.

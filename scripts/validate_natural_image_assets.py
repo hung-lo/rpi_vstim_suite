@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from PIL import Image
 
 from rpi_vstim.core.assets import AssetPreparer, AssetResolver
+from rpi_vstim.core.asset_audit import compare_legacy_corpus, verify_corpus, verify_session_selection
 from rpi_vstim.core.config import Config, load_config
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
@@ -365,6 +366,14 @@ def main() -> int:
     parser.add_argument("--asset-root", type=Path)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument(
+        "--legacy-root", type=Path,
+        help="optional copied legacy corpus directory for filename/SHA-256 comparison",
+    )
+    parser.add_argument(
+        "--session-dir", type=Path,
+        help="optional copied VStim session directory to verify its selected image identities",
+    )
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--pixel-format", choices=("RGB565", "XRGB8888"), default="RGB565")
@@ -403,10 +412,18 @@ def main() -> int:
             ),
         }
     else:
+        corpus_report = verify_corpus(root)
         report = validate_assets(root, width=width, height=height, pixel_format=args.pixel_format)
+        report["corpus_identity"] = corpus_report
         report["asset_root"] = str(root.resolve())
         report["archive"] = archive_report
+        if args.legacy_root:
+            report["legacy_comparison"] = compare_legacy_corpus(root, args.legacy_root)
+        if args.session_dir:
+            report["session_selection"] = verify_session_selection(args.session_dir, root)
     print(json.dumps(report, indent=2, sort_keys=True, default=str))
+    if report.get("legacy_comparison", {}).get("matches") is False:
+        return 1
     return 0
 
 
