@@ -13,10 +13,10 @@ command is:
 rpi-vstim natural-images run --mouse-id <id> --config config/rigs/pi5_natural_image_demo.example.toml --licks --cameras --camera-preview
 ```
 
-The corpus is present in this checkout at the path above; the repository does
-not establish its licensing terms. Verify those terms before redistribution
-outside the lab. The production storage guard checks this rig's NVMe and
-aborts on mismatch.
+The corpus is present in this checkout at the path above. Its source,
+verified transformations, CC BY-NC 4.0 license, and citation requirements are
+documented in the [asset README](../assets/natural_images/stringer_natimg2800_center_crop/README.md).
+The production storage guard checks this rig's NVMe and aborts on mismatch.
 Reward, vacuum, and airpuff stay disabled in this demo.
 
 BCM GPIO23 and GPIO24 are unassigned on this rig. There is no GPIO23 operator

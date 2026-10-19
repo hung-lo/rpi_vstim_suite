@@ -90,7 +90,7 @@ before starting hardware:
 
 ```bash
 rpi-vstim natural-images run \
-  --mouse-id V1_2 \
+  --mouse-id example_mouse \
   --config config/rigs/pi5_natural_image_demo.example.toml \
   --licks --cameras --camera-preview
 ```
@@ -185,10 +185,10 @@ metadata; it does not decode every frame. `rpi-vstim inspect-session PATH
 --deep-camera-qc` requests the slower frame-count/decode checks.
 
 The canonical natural-image corpus path is
-`assets/natural_images/stringer_natimg2800_center_crop/`. It is present in this
-checkout. The repository does not establish dataset licensing terms; verify
-those terms before any redistribution outside the lab. User-supplied corpora
-can be selected through configuration.
+`assets/natural_images/stringer_natimg2800_center_crop/`. Its source, verified
+image transformations, CC BY-NC 4.0 license, and citation requirements are
+documented in the [asset README](assets/natural_images/stringer_natimg2800_center_crop/README.md).
+User-supplied corpora can be selected through configuration.
 
 ## Timing, cameras, and GPIO
 
@@ -220,6 +220,41 @@ is reusable session/hardware services beneath protocol-specific planning and
 trial logic. NeuroKairos is external: VStim does not start or stop its sender,
 and never acquires GPIO9. IRIG can support offline timing alignment when it is
 physically recorded by the relevant camera or acquisition system.
+
+## Building additional protocols or task repositories
+
+Protocols can be added to this repository, or a specialized task such as
+Go/NoGo can live in a separate repository based on the same engine concepts.
+Either way, reuse the tested KMS, camera, event, storage, and audio services
+instead of creating parallel timing-critical implementations.
+
+```text
+                         rpi_rig_monitor
+                                |
+                  common operator-control contract
+                     (under development; not on main)
+                         /                 \
+                        /                   \
+          rpi_vstim_suite              specialized task repo
+          visual protocols                  Go/NoGo
+```
+
+An eventual monitor integration should use a shared operator-control contract;
+it does not require every task to be merged into this repository. See
+[contribution guidance](CONTRIBUTING.md). The operator-control API is not part
+of this `main` branch.
+
+## Licensing
+
+Except where otherwise noted, original `rpi_vstim_suite` source code is
+licensed under [BSD-3-Clause](LICENSE). The included Stringer natural-image
+stimuli are derived from the Janelia Figshare dataset
+[10.25378/janelia.6845348](https://doi.org/10.25378/janelia.6845348) and are
+licensed separately under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+The NonCommercial restriction applies to those image assets. See the [asset
+README](assets/natural_images/stringer_natimg2800_center_crop/README.md) and
+[third-party notices](THIRD_PARTY_NOTICES.md) for attribution, transformations,
+and citation details.
 
 ## Internal lab setup
 
