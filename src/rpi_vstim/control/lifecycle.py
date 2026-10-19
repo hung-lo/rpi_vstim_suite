@@ -38,7 +38,10 @@ class ExperimentLifecycle:
     def state(self) -> ExperimentState:
         return self._state
 
-    def transition(self, state: ExperimentState) -> None:
+    def validate_transition(self, state: ExperimentState) -> None:
         if state not in _TRANSITIONS[self._state]:
             raise LifecycleError(f"invalid lifecycle transition: {self._state} -> {state}")
+
+    def transition(self, state: ExperimentState) -> None:
+        self.validate_transition(state)
         self._state = state

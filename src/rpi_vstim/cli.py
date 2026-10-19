@@ -209,6 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="use a fake display and simulated session; requires --output-root",
     )
     natural_image_run.add_argument("--control-socket", type=Path, help="owner-only Unix control socket path")
+    natural_image_run.add_argument(
+        "--control-state-file", type=Path,
+        help="unique path for durable owner-only operator lifecycle JSON",
+    )
     natural_image_run.add_argument("--telemetry-port", type=int, help="optional local UDP status destination port")
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
 
@@ -261,10 +265,11 @@ def _run_operator_session(
     prepare,
     run,
     socket_path: Path | None,
+    state_file_path: Path | None,
     telemetry_port: int | None,
 ) -> int:
-    control = ExperimentControl(session_id=session_id, protocol=protocol, run=run)
-    endpoint = UnixControlServer(socket_path or default_control_socket_path(session_id), control.handle_request)
+    control: ExperimentControl | None = None
+    endpoint: UnixControlServer | None = None
     telemetry = None
     sequence = 0
 
@@ -288,6 +293,15 @@ def _run_operator_session(
         sequence += 1
 
     try:
+        control = ExperimentControl(
+            session_id=session_id,
+            protocol=protocol,
+            run=run,
+            control_state_file=state_file_path,
+        )
+        endpoint = UnixControlServer(
+            socket_path or default_control_socket_path(session_id), control.handle_request
+        )
         if telemetry_port is not None:
             if not 1 <= telemetry_port <= 65_535:
                 raise ValueError("telemetry port must be between 1 and 65535")
@@ -305,6 +319,8 @@ def _run_operator_session(
             "protocol": protocol,
             "state": control.state.value,
             "control_socket": str(endpoint.path),
+            "control_state_file": str(state_file_path) if state_file_path else None,
+            "control_instance_id": control.control_instance_id,
             "capabilities": control.status()["capabilities"],
         }, sort_keys=True), flush=True)
         if telemetry is not None:
@@ -334,20 +350,26 @@ def _run_operator_session(
             return 0
         return 130 if status["state"] == "ABORTED" else 1
     except KeyboardInterrupt:
-        control.handle_request({
-            "schema_version": 1,
-            "request_id": f"local-ctrl-c-{time.monotonic_ns()}",
-            "command": "abort",
-        })
-        control.wait()
-        control.join()
+        if control is not None:
+            control.handle_request({
+                "schema_version": 1,
+                "request_id": f"local-ctrl-c-{time.monotonic_ns()}",
+                "command": "abort",
+            })
+            control.wait()
+            control.join()
         return 130
-    except (ConfigError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        control.fail_preparation(str(exc))
+    except Exception as exc:  # noqa: BLE001 - preserve a durable ERROR for preparation failures.
+        if control is not None:
+            try:
+                control.fail_preparation(str(exc))
+            except Exception as state_error:  # noqa: BLE001 - keep the original failure primary.
+                print(f"operator state persistence failed: {state_error}", file=sys.stderr)
         print(f"operator-controlled run failed: {exc}", file=sys.stderr)
         return 2
     finally:
-        endpoint.close()
+        if endpoint is not None:
+            endpoint.close()
         if telemetry is not None:
             telemetry.close()
 
@@ -676,10 +698,18 @@ def main(argv: list[str] | None = None) -> int:
                     prepare=prepare_natural_images,
                     run=run_natural_images,
                     socket_path=args.control_socket,
+                    state_file_path=args.control_state_file,
                     telemetry_port=args.telemetry_port,
                 )
-            if args.control_socket is not None or args.telemetry_port is not None:
-                raise ConfigError("--control-socket and --telemetry-port require --operator-control")
+            if (
+                args.control_socket is not None
+                or args.control_state_file is not None
+                or args.telemetry_port is not None
+            ):
+                raise ConfigError(
+                    "--control-socket, --control-state-file, and --telemetry-port "
+                    "require --operator-control"
+                )
             print(
                 "\n".join(
                     (

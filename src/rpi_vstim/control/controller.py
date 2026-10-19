@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .capabilities import normalize_capabilities
 from .lifecycle import ExperimentLifecycle, ExperimentState
+from .state_file import ControlStateFile
 
 CONTROL_SCHEMA_VERSION = 1
 _REQUEST_CACHE_SIZE = 128
@@ -33,6 +37,7 @@ class ExperimentControl:
         capabilities: Mapping[str, bool] | None = None,
         planned_duration_s: float | None = None,
         semantic_actions: Mapping[str, Callable[[str, str], Any]] | None = None,
+        control_state_file: Path | None = None,
     ) -> None:
         if not session_id or not protocol:
             raise ValueError("session_id and protocol are required")
@@ -46,6 +51,11 @@ class ExperimentControl:
         self._semantic_actions = dict(semantic_actions or {})
         self._lifecycle = ExperimentLifecycle()
         self._lock = threading.RLock()
+        self.control_instance_id = uuid.uuid4().hex
+        self.process_id = os.getpid()
+        self._state_file = ControlStateFile(control_state_file) if control_state_file is not None else None
+        self._state_reason: str | None = None
+        self._session_output_path: str | None = None
         self._finished = threading.Event()
         self._stop = threading.Event()
         self._abort = threading.Event()
@@ -68,7 +78,11 @@ class ExperimentControl:
         self.prepared_utc = _utc_now()
         self.ready_monotonic_ns: int | None = None
         self.ready_utc: str | None = None
+        self._state_updated_monotonic_ns = self.prepared_monotonic_ns
+        self._state_updated_utc = self.prepared_utc
+        self._terminal_utc: str | None = None
         self._record("CONTROL_PREPARING", source="engine")
+        self._persist_state(ExperimentState.PREPARING)
 
     @property
     def state(self) -> ExperimentState:
@@ -93,15 +107,20 @@ class ExperimentControl:
 
     def mark_ready(self) -> None:
         with self._lock:
-            self._lifecycle.transition(ExperimentState.READY)
             self.ready_monotonic_ns = time.monotonic_ns()
             self.ready_utc = _utc_now()
+            try:
+                self._transition(ExperimentState.READY)
+            except Exception:
+                self.ready_monotonic_ns = None
+                self.ready_utc = None
+                raise
             self._record("CONTROL_READY", source="engine")
 
     def mark_finishing(self) -> None:
         with self._lock:
             if self._lifecycle.state == ExperimentState.RUNNING:
-                self._lifecycle.transition(ExperimentState.FINISHING)
+                self._transition(ExperimentState.FINISHING)
 
     def update_snapshot(
         self,
@@ -122,10 +141,97 @@ class ExperimentControl:
         with self._lock:
             if self._lifecycle.state in {ExperimentState.PREPARING, ExperimentState.READY}:
                 self._error = error
-                self._lifecycle.transition(ExperimentState.ERROR)
-                self._terminal_monotonic_ns = time.monotonic_ns()
+                self._transition(ExperimentState.ERROR, reason="preparation_error")
                 self._record("CONTROL_ERROR", source="engine", error=error)
                 self._finished.set()
+
+    def _state_document(
+        self,
+        state: ExperimentState,
+        *,
+        updated_monotonic_ns: int,
+        updated_utc: str,
+        terminal_monotonic_ns: int | None = None,
+        terminal_utc: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        terminal = state in {ExperimentState.COMPLETE, ExperimentState.ERROR, ExperimentState.ABORTED}
+        triggering = self._abort_metadata or self._stop_metadata
+        command = "abort" if self._abort_metadata is not None else "stop" if self._stop_metadata else None
+        error_summary = self._error.splitlines()[0][:512] if self._error else None
+        return {
+            "artifact_type": "rpi_vstim.operator_control_state",
+            "schema_version": 1,
+            "session_id": self.session_id,
+            "protocol": self.protocol,
+            "state": state.value,
+            "lifecycle": state.value,
+            "terminal": terminal,
+            "control_instance_id": self.control_instance_id,
+            "process_id": self.process_id,
+            "prepared_at_utc": self.prepared_utc,
+            "prepared_monotonic_ns": self.prepared_monotonic_ns,
+            "ready_at_utc": self.ready_utc,
+            "ready_monotonic_ns": self.ready_monotonic_ns,
+            "start": self._start_metadata,
+            "stop": self._stop_metadata,
+            "abort": self._abort_metadata,
+            "terminal_command": command if terminal else None,
+            "terminal_request_id": triggering.get("request_id") if terminal and triggering else None,
+            "updated_at_utc": updated_utc,
+            "updated_monotonic_ns": updated_monotonic_ns,
+            "terminal_at_utc": terminal_utc if terminal else None,
+            "terminal_monotonic_ns": terminal_monotonic_ns if terminal else None,
+            "reason": reason if terminal else None,
+            "error_summary": error_summary if state == ExperimentState.ERROR else None,
+            "session_output_path": self._session_output_path,
+        }
+
+    def _persist_state(
+        self,
+        state: ExperimentState,
+        *,
+        updated_monotonic_ns: int | None = None,
+        updated_utc: str | None = None,
+        terminal_monotonic_ns: int | None = None,
+        terminal_utc: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        if self._state_file is None:
+            return
+        updated_monotonic_ns = updated_monotonic_ns or time.monotonic_ns()
+        updated_utc = updated_utc or _utc_now()
+        if state in {ExperimentState.COMPLETE, ExperimentState.ERROR, ExperimentState.ABORTED}:
+            terminal_monotonic_ns = terminal_monotonic_ns or updated_monotonic_ns
+            terminal_utc = terminal_utc or updated_utc
+        self._state_file.write(self._state_document(
+            state,
+            updated_monotonic_ns=updated_monotonic_ns,
+            updated_utc=updated_utc,
+            terminal_monotonic_ns=terminal_monotonic_ns,
+            terminal_utc=terminal_utc,
+            reason=reason if reason is not None else self._state_reason,
+        ))
+
+    def _transition(self, state: ExperimentState, *, reason: str | None = None) -> None:
+        self._lifecycle.validate_transition(state)
+        now_ns, now_utc = time.monotonic_ns(), _utc_now()
+        terminal = state in {ExperimentState.COMPLETE, ExperimentState.ERROR, ExperimentState.ABORTED}
+        self._persist_state(
+            state,
+            updated_monotonic_ns=now_ns,
+            updated_utc=now_utc,
+            terminal_monotonic_ns=now_ns if terminal else None,
+            terminal_utc=now_utc if terminal else None,
+            reason=reason if terminal else None,
+        )
+        self._lifecycle.transition(state)
+        self._state_updated_monotonic_ns = now_ns
+        self._state_updated_utc = now_utc
+        if terminal:
+            self._terminal_monotonic_ns = now_ns
+            self._terminal_utc = now_utc
+            self._state_reason = reason
 
     def _record(self, event: str, **fields: Any) -> None:
         item = {
@@ -185,6 +291,7 @@ class ExperimentControl:
                 capabilities[name] = capabilities.get(name, False) and state in {"READY", "RUNNING"}
             return {
                 "control_schema_version": CONTROL_SCHEMA_VERSION,
+                "control_instance_id": self.control_instance_id,
                 "session_id": self.session_id,
                 "protocol": self.protocol,
                 "state": state,
@@ -273,7 +380,12 @@ class ExperimentControl:
                                     "request_utc": now_utc, "request_utc_ns": now_utc_ns,
                                     "accepted_monotonic_ns": now_ns, "accepted_utc": now_utc,
                                     "accepted_utc_ns": now_utc_ns}
-            self._lifecycle.transition(ExperimentState.RUNNING)
+            try:
+                self._transition(ExperimentState.RUNNING)
+            except Exception:
+                self._started_monotonic_ns = None
+                self._start_metadata = None
+                raise
             self._record("OPERATOR_COMMAND", command="start", request_id=request_id,
                          request_monotonic_ns=now_ns, request_utc=now_utc,
                          request_utc_ns=now_utc_ns, result="accepted")
@@ -282,19 +394,24 @@ class ExperimentControl:
                 self._worker.start()
             except Exception as exc:  # noqa: BLE001 - worker startup must report its failure.
                 self._error = str(exc)
-                self._lifecycle.transition(ExperimentState.ERROR)
-                self._terminal_monotonic_ns = time.monotonic_ns()
-                self._finished.set()
+                try:
+                    self._transition(ExperimentState.ERROR, reason="worker_start_error")
+                finally:
+                    self._finished.set()
                 return self._error_response(request_id, "worker_start_failed", str(exc))
             return self._success_response(request_id)
         if command == "stop":
             if state != ExperimentState.RUNNING or not self.capabilities.get("stop", False):
                 return self._error_response(request_id, "invalid_state", "stop is allowed only from RUNNING")
-            self._lifecycle.transition(ExperimentState.FINISHING)
             self._stop_metadata = {"request_id": request_id, "request_monotonic_ns": now_ns,
                                    "request_utc": now_utc, "request_utc_ns": now_utc_ns,
                                    "accepted_monotonic_ns": now_ns, "accepted_utc": now_utc,
                                    "accepted_utc_ns": now_utc_ns}
+            try:
+                self._transition(ExperimentState.FINISHING)
+            except Exception:
+                self._stop_metadata = None
+                raise
             self._stop.set()
             self._record("OPERATOR_COMMAND", command="stop", request_id=request_id,
                          request_monotonic_ns=now_ns, request_utc=now_utc,
@@ -307,12 +424,16 @@ class ExperimentControl:
                                     "request_utc": now_utc, "request_utc_ns": now_utc_ns,
                                     "accepted_monotonic_ns": now_ns, "accepted_utc": now_utc,
                                     "accepted_utc_ns": now_utc_ns}
-            if state in {ExperimentState.PREPARING, ExperimentState.READY}:
-                self._lifecycle.transition(ExperimentState.ABORTED)
-                self._terminal_monotonic_ns = time.monotonic_ns()
-                self._finished.set()
-            else:
-                self._lifecycle.transition(ExperimentState.FINISHING)
+            try:
+                if state in {ExperimentState.PREPARING, ExperimentState.READY}:
+                    self._transition(ExperimentState.ABORTED, reason="operator_abort_before_start")
+                    self._finished.set()
+                else:
+                    self._transition(ExperimentState.FINISHING)
+            except Exception:
+                self._abort_metadata = None
+                raise
+            if state == ExperimentState.RUNNING:
                 self._abort.set()
             self._record("OPERATOR_COMMAND", command="abort", request_id=request_id,
                          request_monotonic_ns=now_ns, request_utc=now_utc,
@@ -347,45 +468,62 @@ class ExperimentControl:
         try:
             result = self._run(self)
             self._result = result
+            output_path = getattr(result, "session_root", None)
+            if output_path is None:
+                session = getattr(result, "session", None)
+                output_path = getattr(getattr(session, "context", None), "session_root", None)
             result_status = getattr(result, "status", None)
             if result_status is None:
                 final_state = getattr(getattr(result, "final_state", None), "value", None)
                 result_status = final_state or ("COMPLETE" if getattr(result, "ok", True) else "FAILED")
             with self._lock:
+                if output_path is not None:
+                    self._session_output_path = str(output_path)
                 if result_status in {"ABORTED", "INTERRUPTED"}:
                     if self._lifecycle.state != ExperimentState.ABORTED:
-                        self._lifecycle.transition(ExperimentState.ABORTED)
+                        self._transition(
+                            ExperimentState.ABORTED,
+                            reason="operator_abort" if self._abort_metadata else "protocol_aborted",
+                        )
                 elif result_status != "COMPLETE":
                     self._error = getattr(result, "error", None) or f"protocol ended with {result_status}"
                     if self._lifecycle.state != ExperimentState.ERROR:
-                        self._lifecycle.transition(ExperimentState.ERROR)
+                        self._transition(ExperimentState.ERROR, reason="protocol_error")
                 elif self._abort.is_set():
-                    self._lifecycle.transition(ExperimentState.ABORTED)
+                    self._transition(ExperimentState.ABORTED, reason="operator_abort")
                 else:
                     if self._lifecycle.state == ExperimentState.RUNNING:
-                        self._lifecycle.transition(ExperimentState.FINISHING)
+                        self._transition(ExperimentState.FINISHING)
                     if self._lifecycle.state == ExperimentState.FINISHING:
-                        self._lifecycle.transition(ExperimentState.COMPLETE)
-                if self._lifecycle.state in {
-                    ExperimentState.COMPLETE,
-                    ExperimentState.ERROR,
-                    ExperimentState.ABORTED,
-                }:
-                    self._terminal_monotonic_ns = time.monotonic_ns()
+                        self._transition(
+                            ExperimentState.COMPLETE,
+                            reason="operator_stop" if self._stop_metadata else "natural_completion",
+                        )
                 self._finished.set()
         except BaseException as exc:  # noqa: BLE001 - also capture KeyboardInterrupt for cleanup state.
             with self._lock:
                 self._error = str(exc)
                 state = self._lifecycle.state
                 if state not in {ExperimentState.ERROR, ExperimentState.ABORTED, ExperimentState.COMPLETE}:
-                    self._lifecycle.transition(
+                    terminal_state = (
                         ExperimentState.ABORTED
                         if isinstance(exc, KeyboardInterrupt) or self._abort.is_set()
                         else ExperimentState.ERROR
                     )
-                self._terminal_monotonic_ns = time.monotonic_ns()
-                self._record("CONTROL_ERROR", source="engine", error=str(exc))
-                self._finished.set()
+                    reason = (
+                        "keyboard_interrupt" if isinstance(exc, KeyboardInterrupt)
+                        else "operator_abort" if self._abort.is_set()
+                        else "protocol_error"
+                    )
+                    try:
+                        self._transition(terminal_state, reason=reason)
+                    except OSError as state_error:
+                        self._error = (
+                            f"{self._error}; control state persistence failed: {state_error}"
+                        )
+                    finally:
+                        self._record("CONTROL_ERROR", source="engine", error=str(exc))
+                        self._finished.set()
 
     def _success_response(self, request_id: str | None) -> dict[str, Any]:
         status = self.status()
