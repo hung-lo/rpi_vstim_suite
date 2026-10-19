@@ -121,8 +121,10 @@ def test_abort_from_ready_does_not_start_protocol(tmp_path):
         session_id="ready-abort", protocol="natural-images", run=lambda _control: ran.append(True)
     )
     control.mark_ready()
-    response = control.handle_request(_request_payload("abort-ready", "abort"))
+    request = _request_payload("abort-ready", "abort")
+    response = control.handle_request(request)
     assert response["ok"] and response["state"] == "ABORTED"
+    assert control.handle_request(request) == response
     assert control.wait(0)
     assert ran == []
 

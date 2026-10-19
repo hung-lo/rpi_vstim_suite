@@ -204,6 +204,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     natural_image_run.add_argument("--native-binary", type=Path)
     natural_image_run.add_argument("--operator-control", action="store_true", help="wait in READY for local supervisor commands")
+    natural_image_run.add_argument(
+        "--simulate", action="store_true",
+        help="use a fake display and simulated session; requires --output-root",
+    )
     natural_image_run.add_argument("--control-socket", type=Path, help="owner-only Unix control socket path")
     natural_image_run.add_argument("--telemetry-port", type=int, help="optional local UDP status destination port")
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
@@ -597,6 +601,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "natural-images" and args.natural_image_command == "run":
         try:
             config = load_config(args.config)
+            if args.simulate:
+                if args.output_root is None:
+                    raise ConfigError("--simulate requires --output-root (use a temporary directory)")
+                if args.licks or args.cameras or args.camera_preview or args.audio_coexistence:
+                    raise ConfigError(
+                        "--simulate cannot be combined with physical licks, cameras, preview, or audio"
+                    )
             audio = None
             audio_settings = None
             if args.audio_coexistence:
@@ -624,7 +635,8 @@ def main(argv: list[str] | None = None) -> int:
                         if args.camera_preview
                         else replace(config.display, preview_connector=None)
                     )
-                    display_probe(display_config)
+                    if not args.simulate:
+                        display_probe(display_config)
                     prepared_run["plan"] = prepare_natural_image_demo(
                         config,
                         seed=args.seed,
@@ -633,6 +645,7 @@ def main(argv: list[str] | None = None) -> int:
                         use_cameras=args.cameras,
                         camera_preview=args.camera_preview,
                         session_id=session_id,
+                        simulate=args.simulate,
                     )
                     return {
                         "duration_s": prepared_run["plan"].plan.total_frames
@@ -654,6 +667,7 @@ def main(argv: list[str] | None = None) -> int:
                         audio_settings=audio_settings,
                         prepared=prepared_run["plan"],
                         control=control,
+                        simulate=args.simulate,
                     )
 
                 return _run_operator_session(
@@ -672,7 +686,11 @@ def main(argv: list[str] | None = None) -> int:
                         f"Session: {session_id}",
                         "Protocol: natural-images",
                         "",
-                        f"Stimulus: {config.display.stimulus_connector} / leased KMS",
+                        (
+                            "Stimulus: simulated fake display"
+                            if args.simulate
+                            else f"Stimulus: {config.display.stimulus_connector} / leased KMS"
+                        ),
                         f"  corpus: {config.paths.asset_root}",
                         "Licks: LEFT BCM26, RIGHT BCM27" if args.licks else "Licks: DISABLED",
                         "Cameras: two CSI recordings at 640x480 @ 30 fps"
@@ -705,6 +723,7 @@ def main(argv: list[str] | None = None) -> int:
                 native_binary=args.native_binary,
                 audio=audio,
                 audio_settings=audio_settings,
+                simulate=args.simulate,
             )
         except (AudioError, ConfigError, OSError, TypeError, ValueError, RuntimeError) as exc:
             print(f"natural-image demo failed: {exc}", file=sys.stderr)

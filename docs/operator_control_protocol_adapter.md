@@ -28,14 +28,40 @@ The launched process prints its resolved socket path. A supervisor supplies its
 own persistent `--control-socket` and `--session-id` values when it launches the
 engine.
 
-Preparation validates configuration, storage availability, plans the selected
-images, hashes and validates the assets, probes the configured display using
-read-only `modetest` discovery, and resolves camera identities when cameras are
-enabled. It may create the configured output-root directory, but it does not
-create a session, start camera recording, acquire KMS, or start audio. READY
-therefore has no acquisition clock running. START creates the session and
-starts the requested acquisition services. Preparation and READY times are
-preserved in session control provenance after START.
+Hardware preparation validates configuration and storage, plans and validates
+the selected images, probes the configured display using read-only `modetest`
+discovery, and resolves camera identities when cameras are enabled. It may
+create the output-root directory, but it does not create a session, start
+cameras, acquire KMS, or start audio. READY therefore has no acquisition clock
+running. START creates the session and starts the requested acquisition
+services. Preparation and READY times are preserved in session control
+provenance after START.
+
+### Hardware-free Natural Images simulation
+
+Use the existing fake display with an explicit output root to test the real
+operator socket without probing KMS or starting cameras, GPIO, or audio:
+
+```bash
+rpi-vstim natural-images run \
+  --mouse-id simulation \
+  --config config/rigs/natural_images.operator_simulation.toml \
+  --image-count 5 \
+  --session-id monitor-simulation \
+  --output-root /tmp/rpi-vstim-monitor-simulation \
+  --operator-control --simulate \
+  --control-socket /tmp/rpi-vstim-monitor-simulation.sock
+```
+
+`--simulate` requires `--output-root` and rejects `--licks`, `--cameras`,
+`--camera-preview`, and `--audio-coexistence`. PREPARING validates the selected
+assets and plan; READY creates no session and starts no frame clock. START
+creates a simulated session and advances the frame plan at the configured
+nominal refresh rate using `FakeDisplayBackend`. STOP and ABORT follow the same
+engine lifecycle and finalize their sessions normally. Session metadata marks
+`simulated: true` and `display_backend: simulated`; events use
+`SIMULATED_STIMULUS_PLAN_EVENT`, and no KMS trace or physical presentation
+timestamp is produced. Simulation timing is for supervisor integration only.
 
 ## Socket messages
 

@@ -165,6 +165,12 @@ rpi-vstim run drifting-gratings --simulate \
 The drifting-grating plan is software groundwork only; simulation success is
 not hardware validation.
 
+To exercise the real Natural Images operator-control socket without hardware,
+use `--operator-control --simulate` with
+[`natural_images.operator_simulation.toml`](config/rigs/natural_images.operator_simulation.toml)
+and an explicit temporary `--output-root`. The workflow is documented in the
+[operator-control guide](docs/operator_control_protocol_adapter.md).
+
 ## Configuration and data
 
 Use TOML profiles. `pi5_default.toml` is a hardware-neutral Pi 5 starting

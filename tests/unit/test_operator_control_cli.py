@@ -127,6 +127,7 @@ def test_natural_image_cli_operator_control_is_opt_in_and_reconnectable(tmp_path
 
     direct_args = cli.build_parser().parse_args(["natural-images", "run", "--mouse-id", "test"])
     assert direct_args.operator_control is False
+    assert direct_args.simulate is False
     assert direct_args.control_socket is None
 
     session_id = f"cli-operator-{os.getpid()}"

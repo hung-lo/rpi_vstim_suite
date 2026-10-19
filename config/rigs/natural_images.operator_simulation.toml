@@ -1,0 +1,50 @@
+# Hardware-free Natural Images supervisor integration profile.
+# Pass --simulate and an explicit temporary --output-root when running it.
+
+[paths]
+output_root = "/tmp/rpi-vstim-natural-image-operator-simulation"
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
+[display]
+backend = "fake"
+width_px = 160
+height_px = 90
+refresh_hz = 60.0
+pixel_format = "RGB565"
+
+[photodiode]
+enabled = false
+size_px = 4
+
+[hardware]
+backend = "simulated"
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+
+[operator_controls]
+bait_button_gpio = -1
+
+[session]
+experimental = false
+simulation = true
+
+[protocol]
+name = "natural-images"
+version = "operator-simulation"
+compatibility_profile = "natural_legacy_plain"
+image_count = 5
+repeat_count = 1
+selection_seed = 777
+image_duration_s = 0.5
+iti_frames = [30, 30]
+initial_gray_frames = 30
+final_gray_frames = 30
