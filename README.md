@@ -225,8 +225,8 @@ instead of creating parallel timing-critical implementations.
                                 |
                   common operator-control contract
                      (under development; not on main)
-                         /                 \\
-                        /                   \\
+                         /                 \
+                        /                   \
           rpi_vstim_suite              specialized task repo
           visual protocols                  Go/NoGo
 ```
