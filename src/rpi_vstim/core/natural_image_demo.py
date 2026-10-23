@@ -728,6 +728,7 @@ def run_natural_image_demo(
     prepared: PreparedNaturalImageDemo | None = None,
     control: ExperimentControl | None = None,
     simulate: bool = False,
+    operator_session_metadata: dict[str, Any] | None = None,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
 ) -> NaturalImageDemoResult:
     if simulate:
@@ -765,7 +766,8 @@ def run_natural_image_demo(
     )
     if audio_settings is not None and not audio_schedule:
         raise ValueError("natural-image plan is too short for the configured audio schedule")
-    session = new_session(config, protocol_name="natural-images", session_id=session_id, seed=seed)
+    session = new_session(config, protocol_name="natural-images", session_id=session_id, seed=seed,
+                          operator_session_metadata=operator_session_metadata)
     session.write_initial_outputs()
     control_metadata = control.provenance() if control is not None else None
     start_metadata = (control_metadata or {}).get("start")

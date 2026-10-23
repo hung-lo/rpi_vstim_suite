@@ -66,6 +66,18 @@ engine lifecycle and finalize their sessions normally. Session metadata marks
 `SIMULATED_STIMULUS_PLAN_EVENT`, and no KMS trace or physical presentation
 timestamp is produced. Simulation timing is for supervisor integration only.
 
+### Supervisor parameter provenance sidecar
+
+An installed monitor registry may add the trusted
+`--operator-session-metadata <path>` argument. The supervisor creates a unique
+mode-0600 JSON sidecar per launch; browser input cannot select its path or
+contents. Natural Images validates schema version 1, session/subject/protocol
+identity, profile identity/version, and the resolved `image_count` before
+PREPARE. It copies the accepted snapshot to
+`provenance.json` and `session_manifest.json`; the effective value is also
+present in `resolved_config.json` and the seeded plan. The sidecar is optional
+for older deployments and does not alter the Unix control-v1 message schema.
+
 ## Socket messages
 
 The transport is one UTF-8 JSON object per connection, terminated by a newline.

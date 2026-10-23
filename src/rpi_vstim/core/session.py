@@ -58,10 +58,12 @@ class SessionOutput:
         context: SessionContext,
         reward_resolution: Any | None = None,
         operator_bait_provenance: dict[str, Any] | None = None,
+        operator_session_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.context = context
         self._reward_resolution = reward_resolution
         self._operator_bait_provenance = operator_bait_provenance or {}
+        self._operator_session_metadata = operator_session_metadata
         self._reward_arbiter: Any | None = None
         self._manifest: dict[str, Any] = {}
         self._events: EventLogger | None = None
@@ -90,6 +92,8 @@ class SessionOutput:
         if self._reward_resolution is not None:
             provenance.update(self._reward_resolution.provenance_dict())
         provenance.update(self._operator_bait_provenance)
+        if self._operator_session_metadata is not None:
+            provenance["monitor_session_configuration"] = self._operator_session_metadata
         atomic_write_json(self.context.session_root / "provenance.json", provenance)
         self._manifest = {
             "schema_version": 2,
@@ -107,6 +111,8 @@ class SessionOutput:
             "incomplete": True,
             "storage_start": self.context.storage_start.as_dict(),
         }
+        if self._operator_session_metadata is not None:
+            self._manifest["monitor_session_configuration"] = self._operator_session_metadata
         self._write_manifest()
         self._events = EventLogger(self.context.session_root / "events.csv")
         self._events.open(["event", "lifecycle", "sequence_id", "timestamp_utc_ns", "detail"])
@@ -363,6 +369,7 @@ def new_session(
     protocol_name: str | None = None,
     session_id: str = "phase00-simulation",
     seed: int = 0,
+    operator_session_metadata: dict[str, Any] | None = None,
 ) -> SessionOutput:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("session_id contains unsupported characters")
@@ -418,7 +425,8 @@ def new_session(
             "operator_bait_calibration_created_at": bait_resolution.calibration_created_at,
             "operator_bait_delivery_mode": bait_resolution.delivery_mode,
         })
-    return SessionOutput(context, reward_resolution, operator_bait_provenance)
+    return SessionOutput(context, reward_resolution, operator_bait_provenance,
+                         operator_session_metadata)
 
 
 def _jsonable(value: Any) -> Any:

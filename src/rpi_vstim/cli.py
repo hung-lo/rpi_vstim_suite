@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import signal
 import socket
+import stat
 import sys
 import time
 from dataclasses import replace
@@ -44,6 +47,62 @@ from .hardware.operator_control import (
     OperatorControlService,
     send_manual_bait,
 )
+
+
+def _load_operator_session_metadata(
+    path: Path | None,
+    *,
+    session_id: str,
+    mouse_id: str,
+    image_count: int | None,
+) -> dict[str, object] | None:
+    """Read and validate the supervisor's immutable launch provenance sidecar."""
+    if path is None:
+        return None
+    try:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or path.is_symlink()
+                or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_size > 65536):
+            raise ConfigError("operator session metadata permissions or size are invalid")
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except ConfigError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise ConfigError("operator session metadata is unreadable or malformed") from exc
+    expected = {"schema_version", "session_id", "protocol_id", "engine_protocol_id",
+                "preset_id", "subject_id", "profile", "parameters", "parameter_overrides"}
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ConfigError("operator session metadata has an invalid schema")
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        raise ConfigError("operator session metadata has an unsupported schema version")
+    if (value["session_id"] != session_id
+            or value["protocol_id"] != "natural_images"
+            or value["engine_protocol_id"] != "natural-images"
+            or not isinstance(value["preset_id"], str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", value["preset_id"])
+            or value["subject_id"] != mouse_id):
+        raise ConfigError("operator session metadata does not match this Natural Images launch")
+    parameters = value["parameters"]
+    overrides = value["parameter_overrides"]
+    if (not isinstance(parameters, dict) or set(parameters) != {"image_count"}
+            or type(parameters["image_count"]) is not int
+            or parameters["image_count"] < 1 or parameters["image_count"] > 2800
+            or parameters["image_count"] != image_count
+            or not isinstance(overrides, dict) or set(overrides) - set(parameters)
+            or any(type(item) is not int or item < 1 or item > 2800
+                   for item in overrides.values())):
+        raise ConfigError("operator session metadata parameters do not match the resolved plan")
+    profile = value["profile"]
+    if profile is not None:
+        if (not isinstance(profile, dict) or set(profile) != {"profile_id", "name", "version"}
+                or not isinstance(profile["profile_id"], str)
+                or not re.fullmatch(r"profile-[0-9a-f]{32}", profile["profile_id"])
+                or not isinstance(profile["name"], str) or not profile["name"]
+                or len(profile["name"]) > 64 or type(profile["version"]) is not int
+                or profile["version"] < 1):
+            raise ConfigError("operator session metadata profile identity is invalid")
+    return value
 from .hardware.water_service import (
     WaterHoldStateMachine,
     WaterServiceController,
@@ -213,6 +272,10 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument(
         "--control-state-file", type=Path,
         help="unique path for durable owner-only operator lifecycle JSON",
+    )
+    natural_image_run.add_argument(
+        "--operator-session-metadata", type=Path,
+        help="supervisor-created parameter/profile provenance JSON",
     )
     natural_image_run.add_argument("--telemetry-port", type=int, help="optional local UDP status destination port")
     natural_image_run.add_argument("--json", action="store_true", dest="as_json")
@@ -635,6 +698,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "natural-images" and args.natural_image_command == "run":
         try:
             config = load_config(args.config)
+            if args.image_count is not None:
+                parameters = dict(config.protocol.parameters)
+                parameters["image_count"] = args.image_count
+                config = replace(config, protocol=replace(config.protocol, parameters=parameters))
             if args.simulate:
                 if args.output_root is None:
                     raise ConfigError("--simulate requires --output-root (use a temporary directory)")
@@ -661,6 +728,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"{args.mouse_id}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
             )
             if args.operator_control:
+                operator_session_metadata = _load_operator_session_metadata(
+                    args.operator_session_metadata, session_id=session_id, mouse_id=args.mouse_id,
+                    image_count=args.image_count if args.image_count is not None else
+                    config.protocol.parameters.get("image_count"),
+                )
                 prepared_run = {}
 
                 def prepare_natural_images() -> dict[str, object]:
@@ -714,6 +786,7 @@ def main(argv: list[str] | None = None) -> int:
                         prepared=prepared_run["plan"],
                         control=control,
                         simulate=args.simulate,
+                        operator_session_metadata=operator_session_metadata,
                     )
 
                 return _run_operator_session(
@@ -728,10 +801,11 @@ def main(argv: list[str] | None = None) -> int:
             if (
                 args.control_socket is not None
                 or args.control_state_file is not None
+                or args.operator_session_metadata is not None
                 or args.telemetry_port is not None
             ):
                 raise ConfigError(
-                    "--control-socket, --control-state-file, and --telemetry-port "
+                    "--control-socket, --control-state-file, --operator-session-metadata, and --telemetry-port "
                     "require --operator-control"
                 )
             print(
