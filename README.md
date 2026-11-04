@@ -103,6 +103,49 @@ ABORT finalizes the session as aborted. The engine owns all hardware and keeps
 running if the monitor disconnects. See the
 [operator-control adapter guide](docs/operator_control_protocol_adapter.md).
 
+### Portable single-screen Pi 5
+
+For a Pi 5 with one HDMI monitor and no cameras or behavior hardware, use the
+display-only profile below. It runs real KMS presentation, saves to the local
+microSD-backed home directory, and does not require `--cameras`, `--licks`, or
+audio options. It is an uncalibrated display test, not an animal-facing visual
+angle or retinotopy setup. See the [portable Pi 5 guide](docs/pi5_portable_single_screen.md)
+for installation, display ownership, timing, and physical validation steps.
+
+First check what the Pi can see:
+
+```bash
+rpi-vstim hardware display-list --json
+```
+
+With one connected HDMI monitor, VStim selects it automatically:
+
+```bash
+rpi-vstim natural-images run \
+  --mouse-id screen-test \
+  --config config/rigs/pi5_single_screen_display_only.example.toml \
+  --output-root ~/rpi_vstim_test_data \
+  --image-count 5
+```
+
+With multiple monitors, a manual terminal run offers a numbered menu. For a
+repeatable or noninteractive run, select the connector explicitly:
+
+```bash
+rpi-vstim natural-images run \
+  --mouse-id screen-test \
+  --config config/rigs/pi5_single_screen_display_only.example.toml \
+  --stimulus-connector HDMI-A-2 \
+  --output-root ~/rpi_vstim_test_data \
+  --image-count 5
+```
+
+The profile requests leased KMS. If the desktop owns the only display, VStim
+will report the ownership conflict and will not stop the desktop. Direct KMS
+is available only by explicitly adding `--display-ownership direct` after the
+desktop has released the display. Do not treat fake-display tests as proof
+that a particular monitor works with physical KMS.
+
 ### Audio-only pilot
 
 Run the safe fake six-trial plan first:
