@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from rpi_vstim.core.config import DisplayConfig
 
@@ -93,6 +93,22 @@ def select_display(
 ) -> DisplaySelection:
     """Resolve an explicit role and its configured stimulus mode."""
     connector = select_connector(inventory, config, role=role)
+    if role == "stimulus" and config.mode_selection_policy == "preferred":
+        candidates = [mode for mode in connector.modes if mode.refresh_hz > 0]
+        if not candidates:
+            raise DisplaySelectionError(f"connected display has no usable modes: {connector.name}")
+        mode = min(
+            candidates,
+            key=lambda value: (
+                not value.preferred,
+                -(value.width_px * value.height_px),
+                -value.refresh_hz,
+                value.width_px,
+                value.height_px,
+                value.name,
+            ),
+        )
+        return DisplaySelection(role, connector, mode)
     candidates = [
         mode
         for mode in connector.modes
@@ -123,12 +139,61 @@ def select_connector(
     connector_name = config.stimulus_connector if role == "stimulus" else config.preview_connector
     if connector_name is None:
         raise DisplaySelectionError(f"{role} display is disabled")
+    if role == "stimulus" and not connector_name:
+        if config.selection_policy != "auto_single":
+            raise DisplaySelectionError("stimulus display connector is not configured")
+        candidates = tuple(
+            item for item in connected_connectors(inventory)
+            if item.name.upper().startswith("HDMI")
+        )
+        if not candidates:
+            raise DisplaySelectionError(
+                "no connected HDMI display found; connect an HDMI monitor or configure a connector"
+            )
+        if len(candidates) != 1:
+            names = ", ".join(item.name for item in candidates)
+            raise DisplaySelectionError(
+                f"multiple connected HDMI displays found ({names}); set stimulus_connector explicitly"
+            )
+        return candidates[0]
     connector = inventory.connector(connector_name)
     if connector.status != "connected":
         raise DisplaySelectionError(
             f"configured {role} connector is not connected: {connector.name} ({connector.status})"
         )
     return connector
+
+
+def resolve_display_config(
+    inventory: DisplayInventory, config: DisplayConfig
+) -> tuple[DisplayConfig, dict[str, object]]:
+    """Freeze an auto or configured choice into explicit dimensions and refresh."""
+    selection = select_display(inventory, config, role="stimulus")
+    resolved = replace(
+        config,
+        selection_policy="explicit",
+        mode_selection_policy="configured",
+        stimulus_connector=selection.connector.name,
+        width_px=selection.mode.width_px,
+        height_px=selection.mode.height_px,
+        refresh_hz=selection.mode.refresh_hz,
+        require_exact_refresh=True,
+        # modetest prints two decimal places; keep the native mode match within rounding error.
+        refresh_tolerance_hz=min(config.refresh_tolerance_hz, 0.005),
+    )
+    return resolved, {
+        "connector": selection.connector.name,
+        "width_px": selection.mode.width_px,
+        "height_px": selection.mode.height_px,
+        "selected_drm_mode": f"{selection.mode.name}@{selection.mode.refresh_hz:g}",
+        "nominal_refresh_hz": selection.mode.refresh_hz,
+        "selection_policy": config.selection_policy,
+        "connector_selection": (
+            "configured" if config.stimulus_connector else "single_connected_hdmi"
+        ),
+        "mode_selection_policy": config.mode_selection_policy,
+        "ownership_mode": config.ownership,
+    }
 
 
 def connected_connectors(inventory: DisplayInventory) -> tuple[ConnectorInfo, ...]:

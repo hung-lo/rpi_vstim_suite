@@ -1,0 +1,68 @@
+# Real KMS display test for a single-screen Pi 5. This profile is not
+# animal-calibrated; measure display geometry before using visual-angle values.
+
+[paths]
+output_root = "/home/pi/rpi_vstim_test_data"
+asset_root = "../../assets/natural_images/stringer_natimg2800_center_crop"
+
+[display]
+backend = "kms"
+ownership = "lease"
+selection_policy = "auto_single"
+mode_selection_policy = "preferred"
+stimulus_connector = ""
+require_exact_refresh = true
+refresh_tolerance_hz = 0.005
+pixel_format = "RGB565"
+calibration_id = ""
+# Zero means unmeasured. Measure all three before using visual-angle geometry.
+physical_width_cm = 0.0
+physical_height_cm = 0.0
+eye_distance_cm = 0.0
+
+[photodiode]
+enabled = true
+corner = "bottom_right"
+size_px = 50
+on_value = 255
+off_value = 0
+
+[hardware]
+backend = "simulated"
+reward_pin_bcm = -1
+reward_right_pin_bcm = -1
+reward_center_pin_bcm = -1
+reward_4_pin_bcm = -1
+airpuff_pin_bcm = -1
+suction_pin_bcm = -1
+lick_pin_bcm = -1
+lick_right_pin_bcm = -1
+lick_center_pin_bcm = -1
+sound_trigger_1_pin_bcm = -1
+sound_trigger_2_pin_bcm = -1
+
+[operator_controls]
+manual_bait_enabled = false
+bait_button_enabled = false
+bait_button_gpio = -1
+
+[cameras]
+enabled_by_default = false
+record_to_session = false
+verify_output_growth = false
+
+[session]
+experimental = false
+simulation = false
+
+[protocol]
+name = "natural-images"
+version = "portable-display-only"
+compatibility_profile = "portable_display_only"
+image_count = 5
+repeat_count = 1
+selection_seed = 777
+image_duration_ms = 500.0
+initial_gray_duration_ms = 3000.0
+final_gray_duration_ms = 3000.0
+iti_duration_ms = [700, 1000]

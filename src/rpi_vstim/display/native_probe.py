@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import struct
 import subprocess
@@ -33,6 +34,52 @@ class NativeKmsError(RuntimeError):
 
 class NativeKmsOwnershipError(NativeKmsError):
     """Raised when another compositor/session owns DRM modesetting authority."""
+
+
+def validate_acquired_mode(payload: dict[str, Any], config: DisplayConfig) -> None:
+    if not config.stimulus_connector:
+        return
+    if payload.get("connector") != config.stimulus_connector:
+        raise NativeKmsError("native KMS acquired an unexpected connector")
+    selected = payload.get("selected_mode")
+    match = re.fullmatch(r"(\d+)x(\d+)@([0-9]+(?:\.[0-9]+)?)", str(selected or ""))
+    if match is None:
+        raise NativeKmsError("native KMS result did not report its acquired display mode")
+    width, height, refresh = int(match.group(1)), int(match.group(2)), float(match.group(3))
+    if (width, height) != (config.width_px, config.height_px):
+        raise NativeKmsError(
+            f"native KMS acquired {width}x{height}; expected "
+            f"{config.width_px}x{config.height_px}"
+        )
+    if config.require_exact_refresh and abs(refresh - config.refresh_hz) > config.refresh_tolerance_hz:
+        raise NativeKmsError(
+            f"native KMS acquired {refresh:g}Hz; planned mode is "
+            f"{config.refresh_hz:g}Hz (tolerance {config.refresh_tolerance_hz:g}Hz)"
+        )
+
+
+def _ownership_failure(message: str, *, lease: bool) -> NativeKmsOwnershipError:
+    if lease:
+        detail = (
+            " No direct-ownership fallback was attempted. Check that the compositor offers "
+            "a DRM lease, or explicitly select direct ownership only when the desktop has "
+            "already released the display."
+        )
+    else:
+        detail = (
+            " The display is busy. VStim will not stop the desktop; release DRM ownership "
+            "manually or choose another display."
+        )
+    return NativeKmsOwnershipError(message + detail)
+
+
+def _is_ownership_failure(detail: str, *, lease: bool) -> bool:
+    lowered = detail.lower()
+    return (
+        "modesetting authority" in lowered
+        or "drm master" in lowered
+        or (lease and "lease" in lowered)
+    )
 
 
 def default_binary() -> Path:
@@ -130,9 +177,8 @@ def run_native_probe(
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         message = f"native KMS probe failed ({result.returncode}): {detail}"
-        lowered = detail.lower()
-        if "modesetting authority" in lowered or "drm master" in lowered:
-            raise NativeKmsOwnershipError(message)
+        if _is_ownership_failure(detail, lease=lease):
+            raise _ownership_failure(message, lease=lease)
         raise NativeKmsError(message)
     try:
         payload = json.loads(result.stdout)
@@ -140,6 +186,7 @@ def run_native_probe(
         raise NativeKmsError("native KMS probe returned invalid JSON") from exc
     if not isinstance(payload, dict):
         raise NativeKmsError("native KMS probe returned a non-object result")
+    validate_acquired_mode(payload, config)
     return payload
 
 
@@ -303,13 +350,14 @@ def run_native_sequence(
     if writer_error:
         detail = stderr.decode(errors="replace").strip()
         message = f"native KMS sequence input failed: {writer_error[0]}"
+        if _is_ownership_failure(detail, lease=lease):
+            raise _ownership_failure(f"{message}: {detail}", lease=lease)
         raise NativeKmsError(f"{message}: {detail}" if detail else message)
     if process.returncode != 0:
         detail = (stderr or stdout).decode(errors="replace").strip()
         message = f"native KMS sequence failed ({process.returncode}): {detail}"
-        lowered = detail.lower()
-        if "modesetting authority" in lowered or "drm master" in lowered:
-            raise NativeKmsOwnershipError(message)
+        if _is_ownership_failure(detail, lease=lease):
+            raise _ownership_failure(message, lease=lease)
         raise NativeKmsError(message)
     try:
         payload = json.loads(stdout.decode())
@@ -319,6 +367,7 @@ def run_native_sequence(
         raise NativeKmsError("native KMS sequence returned a non-object result")
     if int(payload.get("completed_frame_count", -1)) != frame_count:
         raise NativeKmsError("native KMS sequence completed a different frame count")
+    validate_acquired_mode(payload, config)
     payload["producer_frame_count"] = frame_count
     return payload
 

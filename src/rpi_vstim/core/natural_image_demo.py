@@ -32,6 +32,8 @@ from rpi_vstim.core.preflight import PreflightReport
 from rpi_vstim.core.session import atomic_write_json, new_session
 from rpi_vstim.core.storage import prepare_session_output_root
 from rpi_vstim.core.unified_events import SessionClock, UnifiedEventStream
+from rpi_vstim.display.diagnostics import DisplayProbeError, discover_modetest
+from rpi_vstim.display.discovery import DisplaySelectionError, resolve_display_config
 from rpi_vstim.display.fake import FakeDisplayBackend
 from rpi_vstim.display.kms import KmsDisplayBackend
 from rpi_vstim.display.photodiode import PhotodiodePatch
@@ -261,8 +263,10 @@ class NaturalImageDemoResult:
 
 @dataclass(frozen=True)
 class PreparedNaturalImageDemo:
+    config: Config
     plan: Any
     asset_manifest: Any
+    display_provenance: dict[str, Any]
 
 
 def prepare_natural_image_demo(
@@ -276,6 +280,7 @@ def prepare_natural_image_demo(
     session_id: str = "preflight",
     simulate: bool = False,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
+    discover_displays: Callable[[], Any] | None = None,
 ) -> PreparedNaturalImageDemo:
     """Validate a natural-image run without creating a session or starting hardware."""
     if not session_id or any(
@@ -292,6 +297,39 @@ def prepare_natural_image_demo(
         validate_demo_config(
             config, use_licks=use_licks, use_cameras=use_cameras, preview=camera_preview
         )
+    display_provenance: dict[str, Any] = {}
+    portable_profile = (
+        config.protocol.parameters.get("compatibility_profile") == "portable_display_only"
+    )
+    if not simulate and config.display.backend == "kms" and (
+        portable_profile
+        or config.display.selection_policy == "auto_single"
+        or config.display.mode_selection_policy == "preferred"
+    ):
+        try:
+            resolved_display, display_provenance = resolve_display_config(
+                (discover_displays or discover_modetest)(), config.display
+            )
+            config = replace(config, display=resolved_display)
+        except DisplayProbeError:
+            raise
+        except DisplaySelectionError as exc:
+            raise NaturalImageDemoError(str(exc)) from exc
+    elif not simulate and config.display.backend == "kms":
+        display_provenance = {
+            "connector": config.display.stimulus_connector,
+            "width_px": config.display.width_px,
+            "height_px": config.display.height_px,
+            "selected_drm_mode": (
+                f"{config.display.width_px}x{config.display.height_px}"
+                f"@{config.display.refresh_hz:g}"
+            ),
+            "nominal_refresh_hz": config.display.refresh_hz,
+            "selection_policy": config.display.selection_policy,
+            "connector_selection": "configured",
+            "mode_selection_policy": config.display.mode_selection_policy,
+            "ownership_mode": config.display.ownership,
+        }
     prepare_session_output_root(config.paths.output_root)
     session_root = config.paths.output_root / session_id
     if session_root.exists() or session_root.is_symlink():
@@ -315,7 +353,7 @@ def prepare_natural_image_demo(
             preview_environment=preview_environment,
             enumerate_cameras=enumerate_cameras,
         )
-    return PreparedNaturalImageDemo(plan, manifest)
+    return PreparedNaturalImageDemo(config, plan, manifest, display_provenance)
 
 
 def _simulation_config(config: Config) -> Config:
@@ -336,12 +374,8 @@ def _simulation_config(config: Config) -> Config:
 
 def validate_demo_config(config: Config, *, use_licks: bool, use_cameras: bool, preview: bool) -> None:
     config.validate()
-    if config.display.backend != "kms" or config.display.ownership != "lease":
-        raise ConfigError("natural-image demo requires the leased KMS display backend")
-    if config.display.stimulus_connector != "HDMI-A-2":
-        raise ConfigError("natural-image demo requires stimulus connector HDMI-A-2")
-    if preview and config.display.preview_connector != "HDMI-A-1":
-        raise ConfigError("camera preview requires preview connector HDMI-A-1")
+    if config.display.backend != "kms" or config.display.ownership not in {"lease", "direct"}:
+        raise ConfigError("real natural-image display requires leased or explicit direct KMS ownership")
     if use_licks:
         if config.hardware.backend != "lgpio":
             raise ConfigError("real lick demo requires the lgpio hardware backend")
@@ -372,6 +406,32 @@ def build_demo_plan(
         selected_count = int(parameters.get("image_count", DEFAULT_DEMO_IMAGE_COUNT))
     if selected_count <= 0:
         raise ValueError("demo image_count must be positive")
+    compatibility_profile = str(
+        parameters.get("compatibility_profile", "natural_legacy_plain")
+    )
+    adaptive: dict[str, Any] = {}
+    if compatibility_profile == "portable_display_only":
+        legacy_fields = {"iti_frames", "initial_gray_frames", "final_gray_frames"}.intersection(
+            parameters
+        )
+        if legacy_fields:
+            raise ValueError(
+                "portable_display_only uses duration values; remove legacy frame setting(s): "
+                + ", ".join(sorted(legacy_fields))
+            )
+        image_ms = _duration_ms(parameters, "image", default_ms=500.0)
+        adaptive = {
+            "image_duration_ms": image_ms,
+            "initial_gray_duration_ms": _duration_ms(parameters, "initial_gray"),
+            "final_gray_duration_ms": _duration_ms(parameters, "final_gray"),
+            "iti_duration_ms": _duration_values_ms(parameters, "iti"),
+        }
+    elif {
+        "image_duration_ms", "initial_gray_duration_ms", "initial_gray_duration_s",
+        "final_gray_duration_ms", "final_gray_duration_s", "iti_duration_ms",
+        "iti_duration_s",
+    }.intersection(parameters):
+        raise ValueError("millisecond/gray/ITI duration settings require portable_display_only")
     return build_plan(
         NaturalImageSettings(
             images=images,
@@ -382,15 +442,42 @@ def build_demo_plan(
             selection_seed=int(parameters.get("selection_seed", 777)),
             refresh_hz=config.display.refresh_hz,
             image_duration_s=float(parameters.get("image_duration_s", 0.5)),
+            **adaptive,
             iti_frames=tuple(parameters.get("iti_frames", (42, 60))),
             initial_gray_frames=int(parameters.get("initial_gray_frames", 180)),
             final_gray_frames=int(parameters.get("final_gray_frames", 180)),
-            compatibility_profile=str(
-                parameters.get("compatibility_profile", "natural_legacy_plain")
-            ),
+            compatibility_profile=compatibility_profile,
             camera_ids=camera_ids,
         )
     )
+
+
+def _duration_ms(parameters: dict[str, Any], period: str, *, default_ms: float | None = None) -> float:
+    milliseconds = f"{period}_duration_ms"
+    seconds = f"{period}_duration_s"
+    if milliseconds in parameters and seconds in parameters:
+        raise ValueError(f"configure only one of {milliseconds} or {seconds}")
+    if milliseconds in parameters:
+        return float(parameters[milliseconds])
+    if seconds in parameters:
+        return float(parameters[seconds]) * 1000
+    if default_ms is not None:
+        return default_ms
+    raise ValueError(f"portable_display_only requires {milliseconds} or {seconds}")
+
+
+def _duration_values_ms(parameters: dict[str, Any], period: str) -> tuple[float, ...]:
+    key_ms, key_s = f"{period}_duration_ms", f"{period}_duration_s"
+    if key_ms in parameters and key_s in parameters:
+        raise ValueError(f"configure only one of {key_ms} or {key_s}")
+    key = key_ms if key_ms in parameters else key_s if key_s in parameters else None
+    if key is None:
+        raise ValueError(f"portable_display_only requires {key_ms} or {key_s}")
+    values = parameters[key]
+    if not isinstance(values, (list, tuple)):
+        values = (values,)
+    scale = 1 if key == key_ms else 1000
+    return tuple(float(value) * scale for value in values)
 
 
 def _resolve_camera_specs(
@@ -650,6 +737,9 @@ def _write_demo_metadata(
     lick_monitor_diagnostics: dict[str, Any] | None,
     camera_preview: dict[str, object],
     audio_summary: dict[str, Any],
+    display_provenance: dict[str, Any],
+    timing_provenance: dict[str, Any],
+    use_licks: bool,
     operator_control: dict[str, Any] | None = None,
     simulated: bool = False,
 ) -> None:
@@ -662,7 +752,7 @@ def _write_demo_metadata(
             "mouse_id": mouse_id,
             "reward": "DISABLED",
             "vacuum": "DISABLED",
-            "gpio_used": [] if simulated else [26, 27],
+            "gpio_used": [26, 27] if use_licks else [],
             "gpio_untouched": [7, 8, 9, 15, 19, 20, 21, 23, 24, 25],
             "raw_lick_count": raw_counts,
             "classified_lick_count": classified_counts,
@@ -671,12 +761,21 @@ def _write_demo_metadata(
             "camera_commands": list(camera_commands),
             "camera_preview": camera_preview,
             "event_log": event_diagnostics,
+            "display": display_provenance,
+            "timing_provenance": timing_provenance,
         }
         if simulated:
             value["natural_image_demo"].update(
                 simulated=True,
                 display_backend="simulated",
                 physical_kms_trace=False,
+            )
+        else:
+            value["natural_image_demo"].update(
+                simulated=False,
+                display_backend="kms",
+                physical_kms=True,
+                session_classification="real_physical_kms_display_test",
             )
         if audio_summary:
             value["audio_coexistence"] = audio_summary
@@ -687,11 +786,14 @@ def _write_demo_metadata(
             if error:
                 value["error"] = error
         atomic_write_json(path, value)
+    atomic_write_json(session_root / "timing_provenance.json", timing_provenance)
     manifest_path = session_root / "session_manifest.json"
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["unified_event_log"] = event_diagnostics
         manifest["natural_image_demo_status"] = status
+        manifest["display"] = display_provenance
+        manifest["timing_provenance"] = timing_provenance
         if simulated:
             manifest.update(simulated=True, display_backend="simulated", physical_kms_trace=False)
         if audio_summary:
@@ -699,6 +801,99 @@ def _write_demo_metadata(
         if operator_control is not None:
             manifest["operator_control"] = operator_control
         atomic_write_json(manifest_path, manifest)
+
+
+def _timing_provenance(
+    plan: Any,
+    config: Config,
+    display: dict[str, Any],
+    payload: dict[str, Any] | None,
+    *,
+    simulated: bool,
+) -> dict[str, Any]:
+    refresh_hz = config.display.refresh_hz
+    durations = plan.metadata.get("duration_provenance")
+    if durations is None:
+        parameters = config.protocol.parameters
+        image_event = next(event for event in plan.events if event.kind == "image")
+        image_requested = float(parameters.get("image_duration_s", 0.5)) * 1000
+
+        def from_frames(frames: int) -> dict[str, Any]:
+            duration_ms = frames * 1000 / refresh_hz
+            return {
+                "requested_ms": duration_ms,
+                "resolved_frames": frames,
+                "nominal_duration_ms": duration_ms,
+                "quantization_error_ms": 0.0,
+                "request_source": "legacy_frame_count",
+            }
+
+        image_nominal = image_event.frame_count * 1000 / refresh_hz
+        durations = {
+            "rounding_policy": "strict integer frame counts",
+            "image": {
+                "requested_ms": image_requested,
+                "resolved_frames": image_event.frame_count,
+                "nominal_duration_ms": image_nominal,
+                "quantization_error_ms": image_nominal - image_requested,
+            },
+            "initial_gray": from_frames(next(
+                event.frame_count for event in plan.events if event.event_id == "initial-gray"
+            )),
+            "final_gray": from_frames(next(
+                event.frame_count for event in plan.events if event.event_id == "final-gray"
+            )),
+            "iti": {
+                event.event_id: from_frames(event.frame_count)
+                for event in plan.events if event.kind == "iti"
+            },
+            "final_planned_total_frame_count": plan.total_frames,
+            "nominal_total_duration_ms": plan.total_frames * 1000 / refresh_hz,
+        }
+    return {
+        "schema_version": 1,
+        "display": display or {
+            "connector": config.display.stimulus_connector,
+            "width_px": config.display.width_px,
+            "height_px": config.display.height_px,
+            "selected_drm_mode": (
+                f"{config.display.width_px}x{config.display.height_px}"
+                f"@{config.display.refresh_hz:g}"
+            ),
+            "nominal_refresh_hz": refresh_hz,
+            "selection_policy": config.display.selection_policy,
+            "ownership_mode": config.display.ownership,
+        },
+        "duration_timing_mode": plan.metadata.get(
+            "duration_timing_mode", "legacy_exact_frames"
+        ),
+        "durations": durations,
+        "final_planned_total_frame_count": plan.total_frames,
+        "nominal_total_duration_ms": plan.total_frames * 1000 / refresh_hz,
+        "native_presentation": {
+            "physical_kms": not simulated,
+            "selected_mode": (payload or {}).get("selected_mode"),
+            "nominal_refresh_hz": (payload or {}).get("nominal_refresh_hz"),
+            "kernel_timestamp_clock": (payload or {}).get("kernel_timestamp_clock"),
+            "flip_event_count": len((payload or {}).get("flip_events", [])),
+            "kernel_timestamp_count": sum(
+                bool(item.get("kernel_event_ns"))
+                for item in (payload or {}).get("flip_events", [])
+                if isinstance(item, dict)
+            ),
+            "missed_vblank_count": (payload or {}).get("missed_vblank_count"),
+            "estimated_dropped_frame_count": (payload or {}).get(
+                "estimated_dropped_frame_count"
+            ),
+            "flip_trace_truncated": (payload or {}).get("flip_trace_truncated"),
+            "physical_stimulus_onset_independently_validated": False,
+        },
+        "timing_interpretation": (
+            "Nominal frame durations are not independent validation of physical "
+            "stimulus-onset timing; use the recorded KMS page-flip trace and "
+            "photodiode measurement for physical validation."
+        ),
+    }
 
 
 def write_operator_control_metadata(session_root: Path, metadata: dict[str, Any]) -> None:
@@ -744,17 +939,21 @@ def run_natural_image_demo(
             )
         config = _simulation_config(config)
     if prepared is None:
-        if simulate:
-            config.validate()
-        else:
-            validate_demo_config(
-                config, use_licks=use_licks, use_cameras=use_cameras, preview=camera_preview
-            )
-        plan = build_demo_plan(config, seed=seed, image_count=image_count)
-        manifest = None
-    else:
-        plan = prepared.plan
-        manifest = prepared.asset_manifest
+        prepared = prepare_natural_image_demo(
+            config,
+            seed=seed,
+            image_count=image_count,
+            use_licks=use_licks,
+            use_cameras=use_cameras,
+            camera_preview=camera_preview,
+            session_id=session_id,
+            simulate=simulate,
+            enumerate_cameras=enumerate_cameras,
+        )
+    config = prepared.config
+    plan = prepared.plan
+    manifest = prepared.asset_manifest
+    display_provenance = dict(prepared.display_provenance)
     if (audio is None) != (audio_settings is None):
         raise ValueError("audio output and audio settings must be supplied together")
     audio_clips = load_pilot_clips(PILOT_AUDIO_ASSET_ROOT) if audio is not None else {}
@@ -886,7 +1085,15 @@ def run_natural_image_demo(
                 display_backend="simulated",
             )
         else:
-            events.emit("SESSION_START", mouse_id=mouse_id, protocol="natural-images")
+            events.emit(
+                "SESSION_START",
+                mouse_id=mouse_id,
+                protocol="natural-images",
+                simulated=False,
+                display_backend="kms",
+                physical_kms=True,
+                session_classification="real_physical_kms_display_test",
+            )
         events.emit("CLOCK_SYNC", source_monotonic_ns=clock.reference_monotonic_ns, **clock.sync_fields())
         if audio is not None and audio_settings is not None:
             audio_dir = session.context.session_root / "audio"
@@ -973,7 +1180,13 @@ def run_natural_image_demo(
             {
                 "mode": "natural_image_demo",
                 "display_connector": config.display.stimulus_connector,
-                **({"simulated": True, "display_backend": "simulated"} if simulate else {}),
+                **(
+                    {"simulated": True, "display_backend": "simulated"}
+                    if simulate else {
+                        "physical_kms": True,
+                        "session_classification": "real_physical_kms_display_test",
+                    }
+                ),
                 "camera_preview_connector": config.display.preview_connector,
                 "camera_preview": camera_preview_metadata,
                 "camera_width_px": DEMO_CAMERA_WIDTH,
@@ -1070,7 +1283,10 @@ def run_natural_image_demo(
         if simulate:
             display = FakeDisplayBackend()
         else:
-            display = KmsDisplayBackend(native_binary=native_binary, use_lease=True)
+            display = KmsDisplayBackend(
+                native_binary=native_binary,
+                use_lease=config.display.ownership == "lease",
+            )
             display.photodiode = PhotodiodePatch(
                 config.photodiode.corner,
                 config.photodiode.size_px,
@@ -1180,7 +1396,7 @@ def run_natural_image_demo(
             "SIMULATED_DISPLAY_REQUEST" if simulate else "DISPLAY_ACQUIRE_REQUEST",
             display_backend="simulated" if simulate else "kms",
             connector=config.display.stimulus_connector,
-            ownership="none" if simulate else "lease",
+            ownership="none" if simulate else config.display.ownership,
             width=config.display.width_px,
             height=config.display.height_px,
             refresh_hz=config.display.refresh_hz,
@@ -1448,6 +1664,11 @@ def run_natural_image_demo(
             lick_monitor_diagnostics=lick_monitor_diagnostics,
             camera_preview=camera_preview_metadata,
             audio_summary=audio_summary,
+            display_provenance=display_provenance,
+            timing_provenance=_timing_provenance(
+                plan, config, display_provenance, display_payload, simulated=simulate
+            ),
+            use_licks=use_licks,
             operator_control=control.provenance() if control is not None else None,
             simulated=simulate,
         )

@@ -184,6 +184,7 @@ def test_kms_present_rgb_pair_uses_production_renderer_and_bounded_file(monkeypa
             preview_connector="HDMI-A-1",
             width_px=2,
             height_px=2,
+            refresh_hz=59.82,
         )
     )
     rgb = bytes((10, 20, 30)) * 4
@@ -233,6 +234,7 @@ def test_kms_present_sequence_has_one_continuous_ownership_interval(monkeypatch)
             stimulus_connector="HDMI-A-2",
             width_px=2,
             height_px=2,
+            refresh_hz=59.82,
         )
     )
     frames = tuple(
@@ -255,3 +257,77 @@ def test_kms_present_sequence_has_one_continuous_ownership_interval(monkeypatch)
         "lease_release_count": 1,
     }
     display.close()
+
+
+def test_kms_direct_ownership_is_explicit_and_does_not_request_a_lease(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {
+                "connector": "HDMI-A-1", "mode": "2x2",
+                "width_px": 2, "height_px": 2, "refresh_hz": 60.0,
+            },
+            "preview": None,
+        },
+    )
+    calls = []
+
+    def fake_sequence(config, frames, **kwargs):
+        calls.append((config, list(frames), kwargs))
+        return {
+            "connector": "HDMI-A-1",
+            "selected_mode": "2x2@60",
+            "requested_frame_count": 1,
+            "completed_frame_count": 1,
+        }
+
+    monkeypatch.setattr("rpi_vstim.display.kms.run_native_sequence", fake_sequence)
+    display = KmsDisplayBackend()
+    display.open(DisplayConfig(
+        ownership="direct",
+        stimulus_connector="HDMI-A-1",
+        width_px=2,
+        height_px=2,
+        refresh_hz=60.0,
+    ))
+    frame = DisplaySequenceFrame(
+        DisplaySequenceMetadata(0, "gray", "gray", "gray", "off", 8, 0),
+        b"0" * 8,
+    )
+    result = display.present_sequence((frame,))
+    assert result["completed_frame_count"] == 1
+    assert calls[0][2]["lease"] is False
+    display.close()
+
+
+def test_kms_backend_closes_after_a_native_presentation_error(monkeypatch):
+    monkeypatch.setattr(
+        "rpi_vstim.display.kms.probe_config",
+        lambda config: {
+            "stimulus": {
+                "connector": "HDMI-A-1", "mode": "2x2",
+                "width_px": 2, "height_px": 2, "refresh_hz": 60.0,
+            },
+            "preview": None,
+        },
+    )
+
+    def fail_sequence(*_args, **_kwargs):
+        raise RuntimeError("native presentation failed after KMS cleanup")
+
+    monkeypatch.setattr("rpi_vstim.display.kms.run_native_sequence", fail_sequence)
+    display = KmsDisplayBackend()
+    display.open(DisplayConfig(
+        ownership="direct",
+        stimulus_connector="HDMI-A-1",
+        width_px=2,
+        height_px=2,
+        refresh_hz=60.0,
+    ))
+    frame = DisplaySequenceFrame(
+        DisplaySequenceMetadata(0, "gray", "gray", "gray", "off", 8, 0), b"0" * 8
+    )
+    with pytest.raises(RuntimeError, match="native presentation failed"):
+        display.present_sequence((frame,))
+    assert display.config is None
+    assert display.renderer is None

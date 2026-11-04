@@ -14,8 +14,8 @@ from .discovery import (
     DisplaySelection,
     DisplaySelectionError,
     parse_modetest_connectors,
-    select_display,
     select_connector,
+    select_display,
 )
 
 
@@ -61,6 +61,30 @@ def probe_config(
     }
 
 
+def display_inventory(*, command: Sequence[str] = ("modetest", "-M", "vc4", "-c")) -> dict[str, object]:
+    """Return the read-only connector and supported-mode inventory."""
+    inventory = discover_modetest(command=command)
+    return {
+        "connectors": [
+            {
+                "connector": connector.name,
+                "status": connector.status,
+                "modes": [
+                    {
+                        "mode": mode.name,
+                        "width_px": mode.width_px,
+                        "height_px": mode.height_px,
+                        "refresh_hz": mode.refresh_hz,
+                        "preferred": mode.preferred,
+                    }
+                    for mode in connector.modes
+                ],
+            }
+            for connector in sorted(inventory.connectors, key=lambda value: value.name)
+        ]
+    }
+
+
 def display_probe(config: DisplayConfig | None = None, *, as_json: bool = False) -> str:
     """Return a read-only probe result; useful for the CLI and smoke scripts."""
     result = probe_config(config or DisplayConfig())
@@ -72,6 +96,8 @@ def _selection_dict(selection: DisplaySelection) -> dict[str, object]:
         "connector": selection.connector.name,
         "status": selection.connector.status,
         "mode": selection.mode.name,
+        "width_px": selection.mode.width_px,
+        "height_px": selection.mode.height_px,
         "refresh_hz": selection.mode.refresh_hz,
         "preferred": selection.mode.preferred,
     }
@@ -94,6 +120,6 @@ def _text_result(result: dict[str, object]) -> str:
             lines.append(f"{role}: {value['connector']} ({value['status']})")
         else:
             lines.append(
-                f"{role}: {value['connector']} {value['mode']}@{value['refresh_hz']:.2f}Hz"
+                f"{role}: {value['connector']} {value['mode']}@{value['refresh_hz']:g}Hz"
             )
     return "\n".join(lines)

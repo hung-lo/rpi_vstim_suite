@@ -148,6 +148,15 @@ def test_natural_demo_is_hardware_free_without_licks_or_cameras(tmp_path, monkey
         for record in records
     )
     assert not (result.session_root / "events.jsonl").read_text().count("reward_")
+    timing = json.loads((result.session_root / "timing_provenance.json").read_text())
+    assert timing["display"]["connector"] == "HDMI-A-2"
+    assert timing["display"]["width_px"] == 4
+    assert timing["display"]["height_px"] == 2
+    assert timing["display"]["ownership_mode"] == "lease"
+    assert timing["durations"]["image"]["resolved_frames"] == 1
+    assert timing["final_planned_total_frame_count"] == 4
+    assert timing["native_presentation"]["kernel_timestamp_count"] == 4
+    assert timing["native_presentation"]["physical_stimulus_onset_independently_validated"] is False
 
 
 def test_clock_mapping_is_persisted_in_event_log(tmp_path):

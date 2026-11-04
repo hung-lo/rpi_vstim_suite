@@ -57,6 +57,8 @@ class PathsConfig:
 class DisplayConfig:
     backend: str = "fake"
     ownership: str = ""
+    selection_policy: str = "explicit"
+    mode_selection_policy: str = "configured"
     stimulus_connector: str = ""
     preview_connector: str | None = None
     width_px: int = 1280
@@ -237,7 +239,14 @@ class Config:
             raise ConfigError(f"unsupported pixel format: {self.display.pixel_format}")
         if self.display.backend == "kms" and self.display.ownership not in {"direct", "lease"}:
             raise ConfigError("display ownership is required for the KMS backend")
-        if self.display.backend == "kms" and not self.display.stimulus_connector:
+        if self.display.selection_policy not in {"explicit", "auto_single"}:
+            raise ConfigError(f"unsupported display selection_policy: {self.display.selection_policy}")
+        if self.display.mode_selection_policy not in {"configured", "preferred"}:
+            raise ConfigError(
+                f"unsupported display mode_selection_policy: {self.display.mode_selection_policy}"
+            )
+        if (self.display.backend == "kms" and not self.display.stimulus_connector
+                and self.display.selection_policy != "auto_single"):
             raise ConfigError("display stimulus_connector is required for the KMS backend")
         if self.display.width_px <= 0 or self.display.height_px <= 0 or self.display.refresh_hz <= 0:
             raise ConfigError("display dimensions and refresh_hz must be positive")
@@ -245,8 +254,15 @@ class Config:
             raise ConfigError("display preview_connector must differ from stimulus_connector")
         if self.display.refresh_tolerance_hz < 0:
             raise ConfigError("display refresh_tolerance_hz must not be negative")
-        if min(self.display.physical_width_cm, self.display.physical_height_cm, self.display.eye_distance_cm) <= 0:
-            raise ConfigError("display geometry must be positive")
+        geometry = (
+            self.display.physical_width_cm,
+            self.display.physical_height_cm,
+            self.display.eye_distance_cm,
+        )
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in geometry):
+            raise ConfigError("display geometry must be finite numbers")
+        if not all(value == 0 for value in geometry) and not all(value > 0 for value in geometry):
+            raise ConfigError("display geometry must be all positive or all zero when unmeasured")
         if self.photodiode.size_px <= 0 or not 0 <= self.photodiode.on_value <= 255 or not 0 <= self.photodiode.off_value <= 255:
             raise ConfigError("invalid photodiode settings")
         if self.operator_controls.bait_button_gpio not in {-1, OPERATOR_BAIT_GPIO_BCM}:

@@ -1,3 +1,4 @@
+import io
 import json
 import struct
 import subprocess
@@ -12,6 +13,7 @@ from rpi_vstim.display.native_probe import (
     display_result_from_probe,
     run_native_probe,
     run_native_sequence,
+    validate_acquired_mode,
 )
 from rpi_vstim.display.transport import DisplaySequenceFrame, DisplaySequenceMetadata
 
@@ -218,6 +220,89 @@ def test_native_probe_classifies_compositor_ownership(monkeypatch, tmp_path):
     )
     with pytest.raises(NativeKmsOwnershipError, match="modesetting authority"):
         run_native_probe(DisplayConfig(), frames=1, binary=tmp_path / "kms_probe")
+
+
+def test_failed_lease_has_no_destructive_direct_ownership_fallback(monkeypatch, tmp_path):
+    calls = []
+
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "DRM lease acquisition failed: no lease offer"
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return Failed()
+
+    monkeypatch.setattr("rpi_vstim.display.native_probe.subprocess.run", fake_run)
+    with pytest.raises(NativeKmsOwnershipError, match="No direct-ownership fallback"):
+        run_native_probe(
+            DisplayConfig(
+                ownership="lease",
+                stimulus_connector="HDMI-A-1",
+                width_px=1024,
+                height_px=600,
+                refresh_hz=59.82,
+            ),
+            frames=1,
+            binary=tmp_path / "kms_probe",
+            lease=True,
+        )
+    assert len(calls) == 1
+    assert "--lease" in calls[0]
+    assert "--device" not in calls[0]
+
+
+def test_native_mode_change_is_rejected():
+    config = DisplayConfig(
+        stimulus_connector="HDMI-A-1",
+        width_px=1024,
+        height_px=600,
+        refresh_hz=59.82,
+        refresh_tolerance_hz=0.005,
+    )
+    with pytest.raises(NativeKmsError, match="expected 1024x600"):
+        validate_acquired_mode(
+            {"connector": "HDMI-A-1", "selected_mode": "1280x720@59.82"}, config
+        )
+    with pytest.raises(NativeKmsError, match="planned mode"):
+        validate_acquired_mode(
+            {"connector": "HDMI-A-1", "selected_mode": "1024x600@60"},
+            config,
+        )
+
+
+def test_direct_sequence_busy_error_does_not_suggest_ownership_fallback(monkeypatch, tmp_path):
+    class Failed:
+        stdin = io.BytesIO()
+        stdout = io.BytesIO()
+        stderr = io.BytesIO(b"another session currently owns DRM master authority")
+        returncode = 1
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, **_kwargs):
+            return self.returncode
+
+    monkeypatch.setattr(
+        "rpi_vstim.display.native_probe.subprocess.Popen", lambda *args, **kwargs: Failed()
+    )
+    frame = DisplaySequenceFrame(
+        DisplaySequenceMetadata(0, "gray", "gray", "gray", "off", 2, 0), b"\x00\x00"
+    )
+    with pytest.raises(NativeKmsOwnershipError, match="will not stop the desktop"):
+        run_native_sequence(
+            DisplayConfig(
+                stimulus_connector="HDMI-A-1",
+                width_px=1,
+                height_px=1,
+                refresh_hz=60.0,
+            ),
+            (frame,),
+            binary=tmp_path / "kms_probe",
+            lease=False,
+        )
 
 
 @pytest.mark.parametrize(

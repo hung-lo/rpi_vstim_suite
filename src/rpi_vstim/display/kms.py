@@ -12,7 +12,12 @@ from rpi_vstim.core.config import DisplayConfig
 from .diagnostics import probe_config
 from .frame_program import FrameProgram
 from .models import DisplayInfo, DisplayResult
-from .native_probe import display_result_from_probe, run_native_probe, run_native_sequence
+from .native_probe import (
+    display_result_from_probe,
+    run_native_probe,
+    run_native_sequence,
+    validate_acquired_mode,
+)
 from .photodiode import PhotodiodePatch
 from .renderer import ProductionFrameRenderer
 from .transport import DisplaySequenceFrame
@@ -42,6 +47,16 @@ class KmsDisplayBackend:
             raise ValueError(f"unsupported display ownership: {config.ownership}")
         result = probe_config(config)
         selected = result["stimulus"]
+        if (
+            int(selected.get("width_px", config.width_px)) != config.width_px
+            or int(selected.get("height_px", config.height_px)) != config.height_px
+            or (
+                config.require_exact_refresh
+                and abs(float(selected["refresh_hz"]) - config.refresh_hz)
+                > config.refresh_tolerance_hz
+            )
+        ):
+            raise RuntimeError("display mode changed after the scientific plan was resolved")
         self.config = config
         self.use_lease = (
             config.ownership == "lease"
@@ -126,6 +141,7 @@ class KmsDisplayBackend:
                 patch_off=self.photodiode.off_value,
                 lease=self.use_lease,
             )
+            validate_acquired_mode(payload, self.config)
             self.last_probe_payload = payload
             return payload
         except Exception:
@@ -155,6 +171,7 @@ class KmsDisplayBackend:
                 lease=self.use_lease,
                 frame_file=frame_file,
             )
+            validate_acquired_mode(payload, self.config)
             self.last_probe_payload = payload
         except Exception:
             self.close()

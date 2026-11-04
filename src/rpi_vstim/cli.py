@@ -34,7 +34,7 @@ from .core.natural_image_demo import (
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
-from .display.diagnostics import DisplayProbeError, display_probe
+from .display.diagnostics import DisplayProbeError, display_inventory, display_probe
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
 from .display.photodiode import PhotodiodePatch
@@ -112,9 +112,9 @@ from .hardware.water_service import (
 from .protocols import available_protocols, get_protocol
 from .protocols.audio_pilot import AudioPilotSettings, run_audio_pilot
 from .telemetry.benchmark import run_benchmark
+from .telemetry.lick_state import LickTelemetryState
 from .telemetry.payloads import TelemetryMessage
 from .telemetry.publisher import UdpTelemetryPublisher
-from .telemetry.lick_state import LickTelemetryState
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -164,6 +164,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     display_probe_command.add_argument("--config", type=Path, help="TOML configuration file")
     display_probe_command.add_argument("--json", action="store_true", dest="as_json")
+    display_list_command = hardware_commands.add_parser(
+        "display-list", help="list DRM connectors and supported modes without modesetting"
+    )
+    display_list_command.add_argument("--json", action="store_true", dest="as_json")
     kms_probe_command = hardware_commands.add_parser(
         "kms-probe", help="native DRM resource probe without modesetting"
     )
@@ -249,6 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument("--session-id")
     natural_image_run.add_argument("--seed", type=int, default=0)
     natural_image_run.add_argument("--image-count", type=int)
+    natural_image_run.add_argument(
+        "--display-ownership",
+        choices=("lease", "direct"),
+        help="explicit KMS ownership mode; direct requires exclusive DRM access",
+    )
     natural_image_run.add_argument("--licks", action="store_true")
     natural_image_run.add_argument("--cameras", action="store_true")
     natural_image_run.add_argument("--camera-preview", action="store_true")
@@ -397,6 +406,8 @@ def _run_operator_session(
             "control_state_file": str(state_file_path) if state_file_path else None,
             "control_instance_id": control.control_instance_id,
             "capabilities": control.status()["capabilities"],
+            "resolved_display": prepared.get("resolved_display"),
+            "output_location": prepared.get("output_location"),
         }, sort_keys=True), flush=True)
         if telemetry is not None:
             publish_status()
@@ -698,6 +709,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "natural-images" and args.natural_image_command == "run":
         try:
             config = load_config(args.config)
+            if args.display_ownership is not None:
+                config = replace(
+                    config,
+                    display=replace(config.display, ownership=args.display_ownership),
+                )
             if args.image_count is not None:
                 parameters = dict(config.protocol.parameters)
                 parameters["image_count"] = args.image_count
@@ -736,13 +752,6 @@ def main(argv: list[str] | None = None) -> int:
                 prepared_run = {}
 
                 def prepare_natural_images() -> dict[str, object]:
-                    display_config = (
-                        config.display
-                        if args.camera_preview
-                        else replace(config.display, preview_connector=None)
-                    )
-                    if not args.simulate:
-                        display_probe(display_config)
                     prepared_run["plan"] = prepare_natural_image_demo(
                         config,
                         seed=args.seed,
@@ -753,13 +762,18 @@ def main(argv: list[str] | None = None) -> int:
                         session_id=session_id,
                         simulate=args.simulate,
                     )
+                    resolved_config = prepared_run["plan"].config
                     initial_lick_state = LickTelemetryState(
                         requested=args.licks,
                         active_level=config.hardware.lick_active_level,
                     ).snapshot()
                     return {
                         "duration_s": prepared_run["plan"].plan.total_frames
-                        / config.display.refresh_hz,
+                        / resolved_config.display.refresh_hz,
+                        "resolved_display": prepared_run["plan"].display_provenance,
+                        "output_location": str(
+                            resolved_config.paths.output_root / session_id
+                        ),
                         "protocol_state": {
                             "stimulus_state": {
                                 "phase": "READY", "stimulus_kind": "gray", "image_id": None,
@@ -808,37 +822,53 @@ def main(argv: list[str] | None = None) -> int:
                     "--control-socket, --control-state-file, --operator-session-metadata, and --telemetry-port "
                     "require --operator-control"
                 )
-            print(
-                "\n".join(
-                    (
+            prepared = prepare_natural_image_demo(
+                config,
+                seed=args.seed,
+                image_count=args.image_count,
+                use_licks=args.licks,
+                use_cameras=args.cameras,
+                camera_preview=args.camera_preview,
+                session_id=session_id,
+                simulate=args.simulate,
+            )
+            config = prepared.config
+            if not args.as_json:
+                image_event = next(event for event in prepared.plan.events if event.kind == "image")
+                timing = prepared.plan.metadata.get("duration_provenance", {}).get("image", {})
+                requested_ms = timing.get(
+                    "requested_ms", float(config.protocol.parameters.get("image_duration_s", 0.5)) * 1000
+                )
+                nominal_ms = image_event.frame_count * 1000 / config.display.refresh_hz
+                mode = prepared.display_provenance.get(
+                    "selected_drm_mode",
+                    f"{config.display.width_px}x{config.display.height_px}@{config.display.refresh_hz:g}",
+                )
+                display_line = (
+                    "Stimulus: simulated fake display"
+                    if args.simulate
+                    else f"Stimulus: {prepared.display_provenance.get('connector', config.display.stimulus_connector)} {mode} / {config.display.ownership} KMS"
+                )
+                print(
+                    "\n".join((
                         f"Session: {session_id}",
                         "Protocol: natural-images",
-                        "",
-                        (
-                            "Stimulus: simulated fake display"
-                            if args.simulate
-                            else f"Stimulus: {config.display.stimulus_connector} / leased KMS"
-                        ),
-                        f"  corpus: {config.paths.asset_root}",
-                        "Licks: LEFT BCM26, RIGHT BCM27" if args.licks else "Licks: DISABLED",
-                        "Cameras: two CSI recordings at 640x480 @ 30 fps"
-                        if args.cameras
-                        else "Cameras: DISABLED",
-                        (
-                            f"USB audio: persistent 48 kHz stream ({audio_settings.device_name_match})"
-                            if audio_settings else "USB audio: DISABLED"
-                        ),
-                        "Preview: requested on HDMI-A-1 side-by-side" if args.camera_preview else "Preview: DISABLED",
+                        display_line,
+                        f"Requested image duration: {requested_ms:g} ms",
+                        f"Resolved image duration: {image_event.frame_count} frames / {nominal_ms:g} ms nominal",
+                        f"Output: {config.paths.output_root / session_id}",
+                        f"Corpus: {config.paths.asset_root}",
+                        "Cameras: DISABLED" if not args.cameras else "Cameras: ENABLED",
+                        "Licks/GPIO: DISABLED" if not args.licks else "Licks/GPIO: ENABLED",
+                        "USB audio: DISABLED" if audio_settings is None else "USB audio: ENABLED",
+                        "Preview: DISABLED" if not args.camera_preview else "Preview: ENABLED",
                         "Reward: DISABLED",
-                        "Vacuum: DISABLED",
-                        "GPIO23: untouched",
-                        "GPIO9 IRIG: untouched",
-                        "",
+                        "Suction: DISABLED",
+                        "Operator baiting: DISABLED",
                         "Ctrl-C to stop safely.",
-                    )
-                ),
-                flush=True,
-            )
+                    )),
+                    flush=True,
+                )
             result = run_natural_image_demo(
                 config,
                 mouse_id=args.mouse_id,
@@ -851,6 +881,7 @@ def main(argv: list[str] | None = None) -> int:
                 native_binary=args.native_binary,
                 audio=audio,
                 audio_settings=audio_settings,
+                prepared=prepared,
                 simulate=args.simulate,
             )
         except (AudioError, ConfigError, OSError, TypeError, ValueError, RuntimeError) as exc:
@@ -866,6 +897,10 @@ def main(argv: list[str] | None = None) -> int:
             "event_diagnostics": result.event_diagnostics,
             "camera_preview": result.camera_preview,
             "audio_summary": result.audio_summary,
+            "display": prepared.display_provenance,
+            "timing_provenance": json.loads(
+                (result.session_root / "timing_provenance.json").read_text()
+            ) if (result.session_root / "timing_provenance.json").is_file() else None,
         }
         if args.camera_preview and not result.camera_preview.get("enabled"):
             print(f"WARNING: camera preview unavailable: {result.camera_preview.get('reason')}", file=sys.stderr)
@@ -874,6 +909,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.as_json
             else f"{result.status}: {result.session_root}"
         )
+        if not result.ok:
+            print(
+                f"natural-image session failed: {result.error or result.status} "
+                f"(session: {result.session_root})",
+                file=sys.stderr,
+            )
         return 0 if result.ok else 1
     if args.command == "operator" and args.operator_command == "bait":
         try:
@@ -946,6 +987,14 @@ def main(argv: list[str] | None = None) -> int:
         except (ConfigError, DisplayProbeError, OSError, ValueError) as exc:
             print(f"display probe failed: {exc}", file=sys.stderr)
             return 2
+        return 0
+    if args.command == "hardware" and args.hardware_command == "display-list":
+        try:
+            inventory = display_inventory()
+        except (DisplayProbeError, OSError, ValueError) as exc:
+            print(f"display discovery failed: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(inventory, indent=2, sort_keys=True) if args.as_json else inventory)
         return 0
     if args.command == "hardware" and args.hardware_command == "kms-render-smoke":
         display = KmsDisplayBackend(

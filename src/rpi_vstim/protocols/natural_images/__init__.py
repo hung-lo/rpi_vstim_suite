@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import random
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-import random
-from typing import Iterable
 
-from rpi_vstim.core.duration import seconds_to_frames
 from rpi_vstim.core.assets import IMAGE_SUFFIXES
+from rpi_vstim.core.duration import milliseconds_to_frames, seconds_to_frames
 from rpi_vstim.core.plan import (
     PlannedEvent,
     SessionPlan,
@@ -18,10 +18,12 @@ from rpi_vstim.core.plan import (
 FINAL_ITI_BY_PROFILE = {
     "natural_legacy_plain": True,
     "natural_legacy_camera": False,
+    "portable_display_only": True,
 }
 ASSET_TRANSFORM_BY_PROFILE = {
     "natural_legacy_plain": "crop",
     "natural_legacy_camera": "crop",
+    "portable_display_only": "crop",
 }
 
 
@@ -35,9 +37,13 @@ class NaturalImageSettings:
     selection_seed: int = 777
     refresh_hz: float = 60.0
     image_duration_s: float = 0.5
+    image_duration_ms: float | None = None
     iti_frames: tuple[int, ...] = (42, 60)
+    iti_duration_ms: tuple[float, ...] | None = None
     initial_gray_frames: int = 180
+    initial_gray_duration_ms: float | None = None
     final_gray_frames: int = 180
+    final_gray_duration_ms: float | None = None
     compatibility_profile: str = "natural_legacy_plain"
     camera_ids: tuple[str, ...] = ()
 
@@ -126,13 +132,59 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
             settings.repeat_count,
             seed=settings.seed,
         )
-    image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
-    itis = _seeded_iti_frames(settings.iti_frames, len(selected), seed=settings.seed + 1)
+    adaptive = settings.compatibility_profile == "portable_display_only"
+    if adaptive:
+        if settings.initial_gray_duration_ms is None or settings.final_gray_duration_ms is None:
+            raise ValueError("portable_display_only requires gray durations in milliseconds")
+        if not settings.iti_duration_ms:
+            raise ValueError("portable_display_only requires ITI durations in milliseconds")
+        requested_image_ms = (
+            settings.image_duration_ms
+            if settings.image_duration_ms is not None
+            else settings.image_duration_s * 1000
+        )
+        image_frames = milliseconds_to_frames(requested_image_ms, settings.refresh_hz)
+        initial_gray_frames = milliseconds_to_frames(
+            settings.initial_gray_duration_ms, settings.refresh_hz
+        )
+        final_gray_frames = milliseconds_to_frames(
+            settings.final_gray_duration_ms, settings.refresh_hz
+        )
+        requested_itis = _seeded_iti_values(
+            settings.iti_duration_ms, len(selected), seed=settings.seed + 1
+        )
+        itis = tuple(milliseconds_to_frames(value, settings.refresh_hz) for value in requested_itis)
+        duration_provenance = {
+            "rounding_policy": "nearest frame; exact halves round up; nonzero requests use at least one frame",
+            "image": _duration_record(requested_image_ms, image_frames, settings.refresh_hz),
+            "initial_gray": _duration_record(
+                settings.initial_gray_duration_ms, initial_gray_frames, settings.refresh_hz
+            ),
+            "final_gray": _duration_record(
+                settings.final_gray_duration_ms, final_gray_frames, settings.refresh_hz
+            ),
+            "iti": {},
+        }
+    else:
+        image_frames = seconds_to_frames(settings.image_duration_s, settings.refresh_hz)
+        initial_gray_frames = settings.initial_gray_frames
+        final_gray_frames = settings.final_gray_frames
+        requested_itis = _seeded_iti_frames(settings.iti_frames, len(selected), seed=settings.seed + 1)
+        itis = requested_itis
+        duration_provenance = {
+            "rounding_policy": "strict integer frame counts",
+            "image": _duration_record(
+                settings.image_duration_s * 1000, image_frames, settings.refresh_hz
+            ),
+            "initial_gray": _frame_duration_record(initial_gray_frames, settings.refresh_hz),
+            "final_gray": _frame_duration_record(final_gray_frames, settings.refresh_hz),
+            "iti": {},
+        }
     events: list[PlannedEvent] = [
         PlannedEvent(
             "initial-gray",
             "gray",
-            settings.initial_gray_frames,
+            initial_gray_frames,
             phase="PRE",
             photodiode="off",
         )
@@ -159,22 +211,72 @@ def build_plan(settings: NaturalImageSettings) -> SessionPlan:
                     photodiode="off",
                 )
             )
+            if adaptive:
+                duration_provenance["iti"][f"iti-{index + 1}"] = _duration_record(
+                    requested_itis[index], itis[index], settings.refresh_hz
+                )
+            else:
+                duration_provenance["iti"][f"iti-{index + 1}"] = _frame_duration_record(
+                    itis[index], settings.refresh_hz
+                )
     events.append(
-        PlannedEvent("final-gray", "gray", settings.final_gray_frames, phase="POST", photodiode="off")
+        PlannedEvent("final-gray", "gray", final_gray_frames, phase="POST", photodiode="off")
     )
-    return SessionPlan(
+    duration_provenance["final_planned_total_frame_count"] = sum(
+        event.frame_count for event in events
+    )
+    duration_provenance["nominal_total_duration_ms"] = (
+        duration_provenance["final_planned_total_frame_count"] * 1000 / settings.refresh_hz
+    )
+    metadata = {
+        "selected_images": list(selected),
+        "compatibility_profile": settings.compatibility_profile,
+        "asset_transform": ASSET_TRANSFORM_BY_PROFILE[settings.compatibility_profile],
+        "background_gray": 127,
+        "photodiode_patch_policy": "legacy_top_right_120px",
+        "camera_ids": list(settings.camera_ids),
+    }
+    if adaptive:
+        metadata.update(
+            duration_timing_mode="refresh_adaptive",
+            duration_provenance=duration_provenance,
+        )
+    plan = SessionPlan(
         "natural-images",
         settings.seed,
         with_frame_offsets(events),
-        metadata={
-            "selected_images": list(selected),
-            "compatibility_profile": settings.compatibility_profile,
-            "asset_transform": ASSET_TRANSFORM_BY_PROFILE[settings.compatibility_profile],
-            "background_gray": 127,
-            "photodiode_patch_policy": "legacy_top_right_120px",
-            "camera_ids": list(settings.camera_ids),
-        },
+        metadata=metadata,
     )
+    return plan
+
+
+def _duration_record(requested_ms: float, frames: int, refresh_hz: float) -> dict[str, float | int]:
+    nominal_ms = frames * 1000 / refresh_hz
+    return {
+        "requested_ms": requested_ms,
+        "resolved_frames": frames,
+        "nominal_duration_ms": nominal_ms,
+        "quantization_error_ms": nominal_ms - requested_ms,
+    }
+
+
+def _frame_duration_record(frames: int, refresh_hz: float) -> dict[str, float | int]:
+    nominal_ms = frames * 1000 / refresh_hz
+    return _duration_record(nominal_ms, frames, refresh_hz)
+
+
+def _seeded_iti_values(values: tuple[float, ...], count: int, *, seed: int) -> tuple[float, ...]:
+    if len(values) == 2:
+        low, high = values
+        if low > high:
+            raise ValueError("iti_duration_ms bounds must be ordered")
+        rng = random.Random(seed)
+        if all(type(value) is int for value in values):
+            return tuple(rng.randint(low, high) for _ in range(count))
+        return tuple(rng.uniform(low, high) for _ in range(count))
+    if not values:
+        raise ValueError("iti_duration_ms must not be empty")
+    return tuple(random.Random(seed).choices(values, k=count))
 
 
 def _seeded_iti_frames(values: tuple[int, ...], count: int, *, seed: int) -> tuple[int, ...]:
