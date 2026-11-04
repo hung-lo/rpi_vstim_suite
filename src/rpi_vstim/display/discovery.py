@@ -142,10 +142,7 @@ def select_connector(
     if role == "stimulus" and not connector_name:
         if config.selection_policy != "auto_single":
             raise DisplaySelectionError("stimulus display connector is not configured")
-        candidates = tuple(
-            item for item in connected_connectors(inventory)
-            if item.name.upper().startswith("HDMI")
-        )
+        candidates = connected_hdmi_connectors(inventory)
         if not candidates:
             raise DisplaySelectionError(
                 "no connected HDMI display found; connect an HDMI monitor or configure a connector"
@@ -153,7 +150,8 @@ def select_connector(
         if len(candidates) != 1:
             names = ", ".join(item.name for item in candidates)
             raise DisplaySelectionError(
-                f"multiple connected HDMI displays found ({names}); set stimulus_connector explicitly"
+                f"Multiple displays detected: {names}. Specify --stimulus-connector HDMI-A-X "
+                "or configure stimulus_connector in your TOML file."
             )
         return candidates[0]
     connector = inventory.connector(connector_name)
@@ -165,10 +163,14 @@ def select_connector(
 
 
 def resolve_display_config(
-    inventory: DisplayInventory, config: DisplayConfig
+    inventory: DisplayInventory,
+    config: DisplayConfig,
+    *,
+    selection_source: str | None = None,
 ) -> tuple[DisplayConfig, dict[str, object]]:
     """Freeze an auto or configured choice into explicit dimensions and refresh."""
     selection = select_display(inventory, config, role="stimulus")
+    source = selection_source or ("config" if config.stimulus_connector else "auto")
     resolved = replace(
         config,
         selection_policy="explicit",
@@ -188,9 +190,13 @@ def resolve_display_config(
         "selected_drm_mode": f"{selection.mode.name}@{selection.mode.refresh_hz:g}",
         "nominal_refresh_hz": selection.mode.refresh_hz,
         "selection_policy": config.selection_policy,
-        "connector_selection": (
-            "configured" if config.stimulus_connector else "single_connected_hdmi"
-        ),
+        "selection_source": source,
+        "connector_selection": {
+            "config": "configured",
+            "cli": "cli",
+            "interactive": "interactive",
+            "auto": "single_connected_hdmi",
+        }[source],
         "mode_selection_policy": config.mode_selection_policy,
         "ownership_mode": config.ownership,
     }
@@ -198,6 +204,14 @@ def resolve_display_config(
 
 def connected_connectors(inventory: DisplayInventory) -> tuple[ConnectorInfo, ...]:
     return tuple(connector for connector in inventory.connectors if connector.status == "connected")
+
+
+def connected_hdmi_connectors(inventory: DisplayInventory) -> tuple[ConnectorInfo, ...]:
+    return tuple(
+        connector
+        for connector in connected_connectors(inventory)
+        if connector.name.upper().startswith("HDMI")
+    )
 
 
 def inventory_from_connectors(connectors: Iterable[ConnectorInfo]) -> DisplayInventory:

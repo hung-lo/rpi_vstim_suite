@@ -45,6 +45,8 @@ changing display ownership or presenting a frame:
 
 ~~~bash
 rpi-vstim hardware display-list --json
+rpi-vstim hardware display-list \
+  --config config/rigs/pi5_single_screen_display_only.example.toml
 ~~~
 
 To preview the profile's actual single-screen selection:
@@ -55,7 +57,12 @@ rpi-vstim hardware display-probe \
 ~~~
 
 Automatic selection accepts exactly one connected HDMI connector. With more
-than one, set stimulus_connector in the profile to the intended connector.
+than one, an interactive manual terminal run presents a numbered menu using
+the discovered modes. Enter `q` or press Return to cancel before a session is
+created. Non-TTY runs, JSON runs, and supervisor runs never prompt. Give those
+runs `--stimulus-connector HDMI-A-X` or configure `stimulus_connector` in the
+TOML file. A configured or command-line connector must be connected; VStim
+does not fall back to another screen.
 The preferred kernel mode is selected when present. If the kernel marks no
 mode preferred, the deterministic fallback chooses the greatest pixel area,
 then the highest supported refresh, then the mode dimensions/name. The
@@ -175,6 +182,25 @@ to validate physical onset and offset timing.
   and trace truncation in each session.
 - Verify the Pi has no cameras, lick hardware, reward, suction, or USB audio
   connected if the intent is a display-only test.
+
+For a two-monitor Pi, select the screen explicitly for repeatable or
+noninteractive runs. The CLI override applies only to this run and does not
+edit the TOML profile:
+
+~~~bash
+rpi-vstim natural-images run \
+  --mouse-id screen-test \
+  --config config/rigs/pi5_single_screen_display_only.example.toml \
+  --stimulus-connector HDMI-A-2 \
+  --output-root ~/rpi_vstim_test_data \
+  --image-count 5
+~~~
+
+Without `--stimulus-connector`, a manual terminal run offers the discovered
+screens; JSON, supervisor, and noninteractive runs fail with connector names
+and instructions instead of waiting for input. Use `hardware display-list`
+for a read-only inventory, optionally adding `--config <profile>` to show its
+current configured selection.
 
 Automated tests and fake-display runs validate software behavior; they do not
 prove that physical KMS works on a particular Pi, compositor, or monitor.

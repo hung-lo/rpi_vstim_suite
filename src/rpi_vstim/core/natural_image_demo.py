@@ -281,6 +281,8 @@ def prepare_natural_image_demo(
     simulate: bool = False,
     enumerate_cameras: Callable[[], tuple[Any, ...]] = enumerate_rpicam_cameras,
     discover_displays: Callable[[], Any] | None = None,
+    stimulus_connector: str | None = None,
+    selection_source: str | None = None,
 ) -> PreparedNaturalImageDemo:
     """Validate a natural-image run without creating a session or starting hardware."""
     if not session_id or any(
@@ -289,6 +291,8 @@ def prepare_natural_image_demo(
     ):
         raise ValueError("session_id contains unsupported characters")
     if simulate:
+        if stimulus_connector is not None:
+            raise ConfigError("--stimulus-connector cannot be used with --simulate")
         if use_licks or use_cameras or camera_preview:
             raise ConfigError("simulated natural-image runs cannot request physical GPIO or cameras")
         config = _simulation_config(config)
@@ -297,6 +301,16 @@ def prepare_natural_image_demo(
         validate_demo_config(
             config, use_licks=use_licks, use_cameras=use_cameras, preview=camera_preview
         )
+    if stimulus_connector is not None:
+        if not stimulus_connector.strip():
+            raise NaturalImageDemoError("--stimulus-connector must name a connected HDMI connector")
+        config = replace(
+            config,
+            display=replace(config.display, stimulus_connector=stimulus_connector.strip()),
+        )
+        selection_source = selection_source or "cli"
+    elif selection_source is None:
+        selection_source = "config" if config.display.stimulus_connector else "auto"
     display_provenance: dict[str, Any] = {}
     portable_profile = (
         config.protocol.parameters.get("compatibility_profile") == "portable_display_only"
@@ -305,10 +319,12 @@ def prepare_natural_image_demo(
         portable_profile
         or config.display.selection_policy == "auto_single"
         or config.display.mode_selection_policy == "preferred"
+        or stimulus_connector is not None
     ):
         try:
+            inventory = (discover_displays or discover_modetest)()
             resolved_display, display_provenance = resolve_display_config(
-                (discover_displays or discover_modetest)(), config.display
+                inventory, config.display, selection_source=selection_source
             )
             config = replace(config, display=resolved_display)
         except DisplayProbeError:
@@ -326,6 +342,7 @@ def prepare_natural_image_demo(
             ),
             "nominal_refresh_hz": config.display.refresh_hz,
             "selection_policy": config.display.selection_policy,
+            "selection_source": selection_source,
             "connector_selection": "configured",
             "mode_selection_policy": config.display.mode_selection_policy,
             "ownership_mode": config.display.ownership,

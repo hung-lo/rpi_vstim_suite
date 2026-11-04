@@ -61,9 +61,23 @@ def probe_config(
     }
 
 
-def display_inventory(*, command: Sequence[str] = ("modetest", "-M", "vc4", "-c")) -> dict[str, object]:
+def display_inventory(
+    config: DisplayConfig | None = None,
+    *,
+    command: Sequence[str] = ("modetest", "-M", "vc4", "-c"),
+) -> dict[str, object]:
     """Return the read-only connector and supported-mode inventory."""
     inventory = discover_modetest(command=command)
+    configured_selection = None
+    if config is not None and (config.stimulus_connector or config.selection_policy == "auto_single"):
+        source = "config" if config.stimulus_connector else "auto"
+        try:
+            configured_selection = {
+                **_selection_dict(select_display(inventory, config, role="stimulus")),
+                "selection_source": source,
+            }
+        except DisplaySelectionError as exc:
+            configured_selection = {"selection_source": source, "error": str(exc)}
     return {
         "connectors": [
             {
@@ -81,7 +95,8 @@ def display_inventory(*, command: Sequence[str] = ("modetest", "-M", "vc4", "-c"
                 ],
             }
             for connector in sorted(inventory.connectors, key=lambda value: value.name)
-        ]
+        ],
+        "configured_selection": configured_selection,
     }
 
 
@@ -121,5 +136,31 @@ def _text_result(result: dict[str, object]) -> str:
         else:
             lines.append(
                 f"{role}: {value['connector']} {value['mode']}@{value['refresh_hz']:g}Hz"
+            )
+    return "\n".join(lines)
+
+
+def format_display_inventory(result: dict[str, object]) -> str:
+    """Format display inventory for a terminal without acquiring KMS ownership."""
+    lines = ["DRM display connectors:"]
+    for connector in result["connectors"]:
+        lines.append(f"{connector['connector']} ({connector['status']})")
+        if not connector["modes"]:
+            lines.append("  no modes reported")
+        for mode in connector["modes"]:
+            preferred = " (preferred)" if mode["preferred"] else ""
+            lines.append(
+                f"  {mode['width_px']}x{mode['height_px']} @ {mode['refresh_hz']:.2f} Hz"
+                f"{preferred}"
+            )
+    selected = result.get("configured_selection")
+    if selected is not None:
+        if "error" in selected:
+            lines.append(f"Configured stimulus selection unavailable: {selected['error']}")
+        else:
+            lines.append(
+                "Configured stimulus: "
+                f"{selected['connector']} {selected['width_px']}x{selected['height_px']} "
+                f"@ {selected['refresh_hz']:.2f} Hz ({selected['selection_source']})"
             )
     return "\n".join(lines)

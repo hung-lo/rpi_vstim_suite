@@ -23,7 +23,7 @@ from .control import (
     UnixControlServer,
     default_control_socket_path,
 )
-from .core.config import CameraDeviceConfig, ConfigError, load_config
+from .core.config import CameraDeviceConfig, ConfigError, DisplayConfig, load_config
 from .core.dry_run import build_dry_run_report
 from .core.natural_image_demo import (
     AudioCoexistenceSettings,
@@ -34,7 +34,19 @@ from .core.natural_image_demo import (
 from .core.runtime import run_simulated_session
 from .core.session import inspect_session
 from .core.virtual_rig import run_virtual_session
-from .display.diagnostics import DisplayProbeError, display_inventory, display_probe
+from .display.diagnostics import (
+    DisplayProbeError,
+    display_inventory,
+    display_probe,
+    discover_modetest,
+    format_display_inventory,
+)
+from .display.discovery import (
+    DisplayInventory,
+    DisplaySelectionError,
+    connected_hdmi_connectors,
+    select_display,
+)
 from .display.kms import KmsDisplayBackend
 from .display.native_probe import NativeKmsError, run_native_probe
 from .display.photodiode import PhotodiodePatch
@@ -117,6 +129,83 @@ from .telemetry.payloads import TelemetryMessage
 from .telemetry.publisher import UdpTelemetryPublisher
 
 
+class InteractiveDisplaySelectionCancelled(Exception):
+    """Raised when a user exits the optional display menu before session setup."""
+
+
+def _interactive_display_enabled(args, config) -> bool:
+    return bool(
+        config.display.backend == "kms"
+        and config.protocol.parameters.get("compatibility_profile") == "portable_display_only"
+        and config.display.selection_policy == "auto_single"
+        and not config.display.stimulus_connector
+        and args.stimulus_connector is None
+        and not args.as_json
+        and not args.operator_control
+        and args.operator_session_metadata is None
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+        and not (
+            os.environ.get("CI")
+            or os.environ.get("INVOCATION_ID")
+            or os.environ.get("NOTIFY_SOCKET")
+        )
+    )
+
+
+def _prompt_stimulus_connector(
+    inventory: DisplayInventory,
+    config: DisplayConfig,
+    *,
+    input_func=None,
+) -> str:
+    candidates = connected_hdmi_connectors(inventory)
+    modes = {}
+    print("Multiple HDMI displays detected:")
+    for index, connector in enumerate(candidates, start=1):
+        try:
+            selection = select_display(
+                inventory,
+                replace(config, stimulus_connector=connector.name),
+                role="stimulus",
+            )
+        except DisplaySelectionError:
+            modes[index] = None
+            print(f"  [{index}] {connector.name}  no usable supported mode")
+        else:
+            modes[index] = selection.mode
+            preferred = " (preferred)" if selection.mode.preferred else ""
+            print(
+                f"  [{index}] {connector.name}  "
+                f"{selection.mode.width_px}x{selection.mode.height_px} "
+                f"@ {selection.mode.refresh_hz:.2f} Hz{preferred}"
+            )
+    read_input = input if input_func is None else input_func
+    for attempt in range(3):
+        try:
+            choice = read_input(f"Select stimulus display [1-{len(candidates)}] (or q to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise InteractiveDisplaySelectionCancelled from exc
+        if not choice or choice.lower() in {"q", "quit", "cancel"}:
+            raise InteractiveDisplaySelectionCancelled
+        try:
+            index = int(choice)
+        except ValueError:
+            index = 0
+        if 1 <= index <= len(candidates):
+            if modes[index] is None:
+                raise DisplaySelectionError(
+                    f"{candidates[index - 1].name} has no supported mode usable by this profile"
+                )
+            return candidates[index - 1].name
+        if attempt < 2:
+            print(f"Invalid selection. Enter a number from 1 to {len(candidates)}, or q to cancel.")
+    names = ", ".join(connector.name for connector in candidates)
+    raise DisplaySelectionError(
+        f"No valid display selected after 3 attempts. Specify --stimulus-connector from: {names}."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rpi-vstim")
     parser.add_argument("--version", action="version", version=__version__)
@@ -167,6 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
     display_list_command = hardware_commands.add_parser(
         "display-list", help="list DRM connectors and supported modes without modesetting"
     )
+    display_list_command.add_argument("--config", type=Path, help="show the configured selection")
     display_list_command.add_argument("--json", action="store_true", dest="as_json")
     kms_probe_command = hardware_commands.add_parser(
         "kms-probe", help="native DRM resource probe without modesetting"
@@ -253,6 +343,10 @@ def build_parser() -> argparse.ArgumentParser:
     natural_image_run.add_argument("--session-id")
     natural_image_run.add_argument("--seed", type=int, default=0)
     natural_image_run.add_argument("--image-count", type=int)
+    natural_image_run.add_argument(
+        "--stimulus-connector",
+        help="select a connected HDMI connector for this run, overriding the TOML value",
+    )
     natural_image_run.add_argument(
         "--display-ownership",
         choices=("lease", "direct"),
@@ -714,6 +808,8 @@ def main(argv: list[str] | None = None) -> int:
                     config,
                     display=replace(config.display, ownership=args.display_ownership),
                 )
+            if args.simulate and args.stimulus_connector is not None:
+                raise ConfigError("--stimulus-connector cannot be used with --simulate")
             if args.image_count is not None:
                 parameters = dict(config.protocol.parameters)
                 parameters["image_count"] = args.image_count
@@ -739,7 +835,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 audio = SoundDeviceAudio(audio_settings.device_name_match)
             if args.output_root is not None:
-                config = replace(config, paths=replace(config.paths, output_root=args.output_root))
+                config = replace(
+                    config,
+                    paths=replace(config.paths, output_root=args.output_root.expanduser()),
+                )
             session_id = args.session_id or (
                 f"{args.mouse_id}_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
             )
@@ -761,6 +860,8 @@ def main(argv: list[str] | None = None) -> int:
                         camera_preview=args.camera_preview,
                         session_id=session_id,
                         simulate=args.simulate,
+                        stimulus_connector=args.stimulus_connector,
+                        selection_source="cli" if args.stimulus_connector is not None else None,
                     )
                     resolved_config = prepared_run["plan"].config
                     initial_lick_state = LickTelemetryState(
@@ -822,6 +923,16 @@ def main(argv: list[str] | None = None) -> int:
                     "--control-socket, --control-state-file, --operator-session-metadata, and --telemetry-port "
                     "require --operator-control"
                 )
+            interactive_inventory = None
+            stimulus_connector = args.stimulus_connector
+            selection_source = "cli" if stimulus_connector is not None else None
+            if _interactive_display_enabled(args, config):
+                interactive_inventory = discover_modetest()
+                if len(connected_hdmi_connectors(interactive_inventory)) > 1:
+                    stimulus_connector = _prompt_stimulus_connector(
+                        interactive_inventory, config.display
+                    )
+                    selection_source = "interactive"
             prepared = prepare_natural_image_demo(
                 config,
                 seed=args.seed,
@@ -831,6 +942,13 @@ def main(argv: list[str] | None = None) -> int:
                 camera_preview=args.camera_preview,
                 session_id=session_id,
                 simulate=args.simulate,
+                stimulus_connector=stimulus_connector,
+                selection_source=selection_source,
+                discover_displays=(
+                    (lambda: interactive_inventory)
+                    if interactive_inventory is not None
+                    else None
+                ),
             )
             config = prepared.config
             if not args.as_json:
@@ -884,6 +1002,9 @@ def main(argv: list[str] | None = None) -> int:
                 prepared=prepared,
                 simulate=args.simulate,
             )
+        except InteractiveDisplaySelectionCancelled:
+            print("Display selection cancelled; no session was created.")
+            return 0
         except (AudioError, ConfigError, OSError, TypeError, ValueError, RuntimeError) as exc:
             print(f"natural-image demo failed: {exc}", file=sys.stderr)
             return 2
@@ -990,11 +1111,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "hardware" and args.hardware_command == "display-list":
         try:
-            inventory = display_inventory()
+            config = load_config(args.config) if args.config is not None else None
+            inventory = display_inventory(config)
         except (DisplayProbeError, OSError, ValueError) as exc:
             print(f"display discovery failed: {exc}", file=sys.stderr)
             return 2
-        print(json.dumps(inventory, indent=2, sort_keys=True) if args.as_json else inventory)
+        print(
+            json.dumps(inventory, indent=2, sort_keys=True)
+            if args.as_json
+            else format_display_inventory(inventory)
+        )
         return 0
     if args.command == "hardware" and args.hardware_command == "kms-render-smoke":
         display = KmsDisplayBackend(
